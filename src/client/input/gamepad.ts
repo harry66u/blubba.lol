@@ -34,6 +34,7 @@ export const DEFAULT_PAD_BINDINGS: Record<PadAction, number> = {
   util1: PAD.Y,
   util2: PAD.UP,
   taunt: PAD.DOWN,
+  chat: PAD.RIGHT,
   scoreboard: PAD.VIEW,
   menu: PAD.MENU,
 };

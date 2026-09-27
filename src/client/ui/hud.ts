@@ -97,6 +97,9 @@ export class Hud {
   private readonly note: HTMLElement;
   private readonly damage: HTMLElement;
   readonly ping: HTMLElement;
+  private readonly chatWheel: HTMLElement;
+  private readonly chatSlots: HTMLElement[] = [];
+  private readonly chatFeed: HTMLElement;
   private readonly worldPopups: WorldPopup[] = [];
   private calloutTimer = 0;
   private last: Partial<Record<string, string | number>> = {};
@@ -197,8 +200,44 @@ export class Hud {
     this.note = el('div', { class: 'center-note' });
     this.damage = el('div', { class: 'damage-dir' });
     this.ping = el('div', { class: 'ping' });
+    this.chatWheel = el('div', { class: 'chat-wheel hidden' }, el('div', { class: 'hub', text: 'QUICK CHAT' }));
+    this.chatFeed = el('div', { class: 'chat-feed' });
 
-    this.root.append(this.flashEl, this.nametags, this.popups, this.damage, this.crosshair, this.hitmarker, inflation, movement, ammo, utils, this.pinBadge, timer, this.killfeed, this.calloutBox, this.respawnBox, this.note, this.hintEl, this.escapeBox, this.ping);
+    this.root.append(this.flashEl, this.nametags, this.popups, this.damage, this.crosshair, this.hitmarker, inflation, movement, ammo, utils, this.pinBadge, timer, this.killfeed, this.calloutBox, this.respawnBox, this.note, this.hintEl, this.escapeBox, this.ping, this.chatFeed, this.chatWheel);
+  }
+
+  /** Builds the wheel's labels (slot 0 at the top, clockwise). */
+  setChatLabels(labels: readonly string[]): void {
+    for (const e of this.chatSlots) e.remove();
+    this.chatSlots.length = 0;
+    labels.forEach((text, i) => {
+      const a = (i / labels.length) * Math.PI * 2;
+      const e = el('div', { class: 'slot' }, el('span', { class: 'n', text: String(i + 1) }), text);
+      e.style.left = `${50 + Math.sin(a) * 40}%`;
+      e.style.top = `${50 - Math.cos(a) * 40}%`;
+      this.chatWheel.append(e);
+      this.chatSlots.push(e);
+    });
+  }
+
+  showChatWheel(open: boolean, slot: number): void {
+    this.chatWheel.classList.toggle('hidden', !open);
+    this.chatSlots.forEach((e, i) => e.classList.toggle('on', i === slot));
+  }
+
+  /** A quick-chat line in the feed (bottom left). */
+  chatLine(name: string, color: string, text: string): void {
+    const line = el('div', { class: 'line' }, el('b', { text: name, style: { color } }), `: ${text}`);
+    this.chatFeed.append(line);
+    while (this.chatFeed.children.length > 5) this.chatFeed.firstElementChild?.remove();
+    window.setTimeout(() => line.remove(), 7000);
+  }
+
+  /** Speech bubble over someone's head. */
+  bubble(pos: THREE.Vector3, text: string): void {
+    const e = el('div', { class: 'popup speech', text });
+    this.popups.append(e);
+    this.worldPopups.push({ el: e, pos: pos.clone(), life: 2.6, max: 2.6, vy: 0.15, scale: 0.8 });
   }
 
   show(v: boolean): void {

@@ -8,6 +8,8 @@ export interface WeaponModel {
   setCharge(charge: number, time: number, active: boolean): void;
   setColor(hex: number): void;
   dispose(): void;
+  /** Materials a weapon finish repaints; 'player' means it normally wears the player's color. */
+  paint: { mat: THREE.MeshStandardMaterial; base: number | 'player' }[];
 }
 
 const metal = () => new THREE.MeshStandardMaterial({ color: 0xcfd6e6, roughness: 0.25, metalness: 0.7 });
@@ -55,6 +57,7 @@ function airCannon(color: number): WeaponModel {
       body.color.set(hex);
     },
     dispose() {},
+    paint: [{ mat: body, base: 'player' }],
   };
 }
 
@@ -86,6 +89,10 @@ function leafBlower(color: number): WeaponModel {
       accent.color.set(hex);
     },
     dispose() {},
+    paint: [
+      { mat: accent, base: 'player' },
+      { mat: body, base: 0xff8a1f },
+    ],
   };
 }
 
@@ -117,6 +124,10 @@ function airHorn(color: number): WeaponModel {
       accent.color.set(hex);
     },
     dispose() {},
+    paint: [
+      { mat: accent, base: 'player' },
+      { mat: can, base: 0xff3b5c },
+    ],
   };
 }
 
@@ -145,6 +156,7 @@ function pumpRifle(color: number): WeaponModel {
       body.color.set(hex);
     },
     dispose() {},
+    paint: [{ mat: body, base: 'player' }],
   };
 }
 

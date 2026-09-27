@@ -141,3 +141,41 @@ Phases follow spec §14. Each phase is committed separately and playable on its 
   `scripts/smoke-modes.mjs` and `scripts/smoke-host.mjs` check the modes, challenge links, and
   host controls in a real browser.
 
+## Phase 8: Accounts and economy ✅
+
+- **Guests keep progress.** Every browser gets a random guest id; XP, coins, unlocks and stats
+  are saved on the server under it. **Optional accounts** are just a name and a password (no
+  email, no personal info). Signing up adopts the guest's progress. Sign-up shows a one-time
+  recovery code, which is the only way to reset a password. Guests can't use a registered name.
+- **Progression:** XP from playing (a share of a full match, knockouts, goals, time pumping,
+  wins) levels you up. **Mods and utilities unlock by level** (Wide Nozzle at 2, Inflatable
+  Wall at 3, Quick Valve at 4, Vacuum Grenade at 5, Big Tank at 6, Charge Valve at 7, Long
+  Barrel at 8); all weapons are available from the start. The server enforces locks.
+- **Coins** come from playing (plus a first-win-of-the-day bonus and level-up bonuses). Idle
+  players earn nothing: you need 45 seconds in the match and to have actually played.
+- **Locker / store:** colors, patterns, faces, hats, weapon finishes, taunts, knockout effects
+  (seen by the whole lobby) and sound packs, all at fixed listed prices. Live 3D preview; taunts
+  and sound packs can be tried before buying. Buying needs an account. Nothing sold changes
+  gameplay, and there are no random rewards.
+- **Everyone sees your look:** cosmetics travel in the roster; bots dress up too. Every sound
+  pack has an on-screen version (TA-DAA!, QUACK!, BZZ-BZZ!, ...), so it all works muted.
+- **Stats and profile:** lifetime matches, wins, knockouts, times popped, falls, hits, chain
+  knockouts, goals, longest launch, best air combo, time played, and wins per mode.
+- **Results screen** shows XP and coins earned line by line, level progress, new unlocks, and
+  (ranked) the rating change.
+- **Ranked 1v1** (accounts only): matchmaking by rating with a window that widens while you
+  wait, fixed lineups (no bots, nobody else can join), one match per queue, and leaving counts
+  as a loss. Elo ratings with bigger swings for your first 10 games, six named tiers, and a
+  top-20 leaderboard on the profile screen.
+- **Quick chat** (no free text anywhere): hold Z (or D-pad right) for a wheel of 8 friendly
+  presets, pick with the mouse / right stick or 1-8. Shown as a speech bubble and in a small
+  feed. Rate limited on the server. Anyone can be muted from the scoreboard, and quick chat can
+  be turned off in Settings.
+- **Reports:** from the scoreboard (bad name, cheating, being mean, something else). Reports are
+  stored for moderators (`npx tsx scripts/reports.ts`). If three different players report the
+  same name, it's swapped for a random safe one on the spot (and an account is flagged).
+- Persistence is SQLite through Node's built-in driver (no native modules): `BUBBA_DB` sets the
+  file (default `data/bubba.db`; the Docker image uses a `/data` volume).
+- `scripts/smoke-accounts.mjs` runs the whole flow in a real browser: guest locker, sign-up,
+  buying, match rewards, quick chat, and a ranked match that ends in a forfeit.
+

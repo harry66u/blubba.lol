@@ -22,6 +22,11 @@ Open http://localhost:8080, pick a mode (Knockout, Team Knockout, Ball, Pump, 1v
 `http://host/r/ABCDE`). **1v1 challenge** copies a `http://host/c/ABCDE` link: whoever opens it
 plays you one-on-one.
 
+Progress (XP, levels, coins, unlocks, stats) is saved for guests automatically. An optional
+account (name + password, no email) keeps it across computers, unlocks **Ranked 1v1**, and lets
+you spend coins in the **Locker** (cosmetics only). Accounts and progress live in SQLite; set
+`BUBBA_DB` to choose the file (default `data/bubba.db`). Needs Node 22.5 or newer.
+
 ### Development
 
 ```bash
@@ -41,6 +46,8 @@ npx tsx scripts/balance-report.ts               # hits-to-knockout report for tu
 npx tsx scripts/mode-soak.ts                    # a bot match of every mode and map
 node scripts/smoke-modes.mjs                    # every mode + the challenge-link flow in a browser
 BUBBA_DEBUG=1 npm start & node scripts/smoke-host.mjs   # host controls and the team results screen
+BUBBA_DEBUG=1 npm start & node scripts/smoke-accounts.mjs  # sign-up, store, rewards, chat, ranked
+npx tsx scripts/reports.ts                      # latest player reports (for moderators)
 ```
 
 ## Tuning
@@ -62,10 +69,12 @@ src/
     game/bot.ts      Bot AI (fills public rooms, drives soak tests)
     game/modes.ts    Mode list, Ball physics and Pump filling
     game/chaos.ts    Random events and the final-30 collapse
+    economy.ts       Levels, unlocks, rewards, store catalog, ranked ratings, quick chat
     protocol.ts      Binary snapshots/inputs + JSON messages
     maps/            Map data
     names.ts         Username rules and profanity filter
-  server/            Node HTTP + WebSocket server, lobby, rooms (60 Hz fixed tick)
+  server/            Node HTTP + WebSocket server, lobby, rooms (60 Hz fixed tick),
+                     SQLite store, account/store API, rewards, ranked matchmaking
   client/            Three.js renderer, prediction/interpolation, input, audio, UI
 ```
 
@@ -75,7 +84,7 @@ src/
 - **Client prediction + reconciliation** for your own movement and weapon, so controls feel instant
   on school Wi-Fi; everyone else is interpolated about 70-120 ms in the past.
 - **No asset downloads.** All geometry is procedural and all sounds are synthesized with Web Audio,
-  so the whole game is one ~220 KB (gzipped) script. The server precompresses it with Brotli.
+  so the whole game is one ~230 KB (gzipped) script. The server precompresses it with Brotli.
 
 ## Deploying
 
@@ -85,7 +94,10 @@ for the game server. A `Dockerfile` is included:
 
 ```bash
 docker build -t bubba .
-docker run -p 8080:8080 bubba
+docker run -p 8080:8080 -v bubba-data:/data bubba
 ```
+
+The `/data` volume holds the SQLite database (accounts, progress, reports). Run a single server
+process per database file.
 
 Put it behind HTTPS in production (the client automatically uses `wss://` on HTTPS pages).

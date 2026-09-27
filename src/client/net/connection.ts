@@ -55,9 +55,9 @@ export class Connection {
     return this.openPromise;
   }
 
-  async join(name: string, guestId: string, join: JoinRequest, loadout?: Loadout): Promise<void> {
+  async join(name: string, guestId: string, join: JoinRequest, loadout?: Loadout, token?: string): Promise<void> {
     await this.warm();
-    this.send({ type: 'hello', v: PROTOCOL_VERSION, name, guestId, join, loadout });
+    this.send({ type: 'hello', v: PROTOCOL_VERSION, name, guestId, join, loadout, token });
     if (this.pingTimer === null) {
       this.pingTimer = window.setInterval(() => this.send({ type: 'ping', t: performance.now() }), 2000);
       this.send({ type: 'ping', t: performance.now() });

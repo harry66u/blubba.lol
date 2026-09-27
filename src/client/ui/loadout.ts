@@ -14,6 +14,7 @@ import {
   computeWeaponStats,
   sanitizeLoadout,
 } from '../../shared/loadout';
+import { unlockLevel } from '../../shared/economy';
 import { clear, el } from './dom';
 
 const KEY = 'bubba.loadout.v1';
@@ -122,7 +123,7 @@ export function buildLoadout(current: Loadout, onChange: (l: Loadout) => void, o
           'button',
           {
             class: `chip${on ? ' selected' : ''}`,
-            attrs: disabled ? { disabled: 'true', title: isLocked ? 'Unlock by playing' : conflict ? 'Conflicts with a mod you picked' : 'Two mods max' } : {},
+            attrs: disabled ? { disabled: 'true', title: isLocked ? `Unlocks at level ${unlockLevel(id)}` : conflict ? 'Conflicts with a mod you picked' : 'Two mods max' } : {},
             on: {
               click: () => {
                 l.mods = on ? l.mods.filter((m) => m !== id) : [...l.mods, id];
@@ -131,6 +132,7 @@ export function buildLoadout(current: Loadout, onChange: (l: Loadout) => void, o
             },
           },
           el('div', { class: 'title', text: `${isLocked ? '🔒 ' : ''}${MOD_INFO[id].name}` }),
+          isLocked ? el('div', { class: 'lock-note', text: `Unlocks at level ${unlockLevel(id)}` }) : null,
           el('div', { class: 'plus', text: `+ ${MOD_INFO[id].plus}` }),
           el('div', { class: 'minus', text: `− ${MOD_INFO[id].minus}` }),
         ),
@@ -145,7 +147,7 @@ export function buildLoadout(current: Loadout, onChange: (l: Loadout) => void, o
           'button',
           {
             class: `chip${slot >= 0 ? ' selected' : ''}`,
-            attrs: isLocked ? { disabled: 'true', title: 'Unlock by playing' } : {},
+            attrs: isLocked ? { disabled: 'true', title: `Unlocks at level ${unlockLevel(id)}` } : {},
             on: {
               click: () => {
                 if (slot >= 0) return;
@@ -156,6 +158,7 @@ export function buildLoadout(current: Loadout, onChange: (l: Loadout) => void, o
             },
           },
           el('div', { class: 'title', text: `${isLocked ? '🔒 ' : ''}${UTIL_ICON[id]} ${UTILITY_INFO[id].name}` }),
+          isLocked ? el('div', { class: 'lock-note', text: `Unlocks at level ${unlockLevel(id)}` }) : null,
           el('div', { class: 'blurb', text: UTILITY_INFO[id].blurb }),
           slot >= 0 ? el('div', { class: 'slot', text: slot === 0 ? 'Key 1 (C)' : 'Key 2 (V)' }) : null,
         ),
@@ -164,7 +167,7 @@ export function buildLoadout(current: Loadout, onChange: (l: Loadout) => void, o
     body.append(
       el('div', { class: 'label', text: 'Weapon' }),
       weapons,
-      el('div', { class: 'label', style: 'margin-top:14px', text: `Mods (up to ${MAX_MODS}; every mod is a trade-off)` }),
+      el('div', { class: 'label', style: 'margin-top:14px', text: `Mods (up to ${MAX_MODS}; every mod is a trade-off; more unlock as you level up by playing)` }),
       mods,
       el('div', { class: 'label', style: 'margin-top:14px', text: 'Utilities (pick 2)' }),
       utils,

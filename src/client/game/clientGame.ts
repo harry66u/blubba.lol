@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { BALANCE } from '../../shared/balance';
 import { PLAYER_COLORS, TEAM_COLORS } from '../../shared/colors';
 import { MODE_INFO, type ModeId, isTeamMode } from '../../shared/game/modes';
+import { type Cosmetics, type ProgressReport, QUICK_CHAT, cosmeticKey } from '../../shared/economy';
 import type { GameEvent } from '../../shared/game/events';
 import { type InputFrame, emptyInput, quantizeInput } from '../../shared/input';
 import { getMap } from '../../shared/maps';
@@ -56,7 +57,7 @@ import { Effects, LandingCircles, type Projectile3D } from '../render/effects';
 import { MapView } from '../render/mapView';
 import { BeachBall } from '../render/beachBall';
 import type { Renderer } from '../render/renderer';
-import { TubeMan, defaultPose, type TubeManPose } from '../render/tubeMan';
+import { type Look, TubeMan, defaultPose, type TubeManPose } from '../render/tubeMan';
 import { ViewModel } from '../render/viewModel';
 import type { Settings } from '../settings';
 import { esc, hexColor } from '../ui/dom';
@@ -86,7 +87,16 @@ interface RemoteView {
   bot: boolean;
   cur: PublicPlayer | null;
   lastTagText: string;
+  lookKey: string;
 }
+
+function lookOf(cos: Partial<Cosmetics> | undefined): Look {
+  return { pattern: cosmeticKey(cos, 'pattern'), face: cosmeticKey(cos, 'face'), hat: cosmeticKey(cos, 'hat'), finish: cosmeticKey(cos, 'finish') };
+}
+
+const TAUNT_TEXT: Record<string, string> = { burp: 'BUURRP!', wave: 'HI!', spin: 'WHEEE!', noodle: 'NOODLE!', flex: 'FLEX!' };
+/** Visual versions of every sound pack (the game is fully playable muted). */
+const PACK_TEXT: Record<string, string> = { boing: 'BOING!', kazoo: 'BZZ-BZZ!', duck: 'QUACK!', slide: 'WHOOEEE!', trumpet: 'TA-DAA!' };
 
 interface RemoteShot {
   id: number;
@@ -201,6 +211,13 @@ export class ClientGame {
   onRosterChange: (() => void) | null = null;
   onRoomChange: ((room: RoomInfo) => void) | null = null;
   onKicked: ((message: string) => void) | null = null;
+  /** Rewards after a match (XP, coins, unlocks, rating). */
+  onProgress: ((report: ProgressReport) => void) | null = null;
+  onRenamed: ((name: string, message: string) => void) | null = null;
+  lastProgress: ProgressReport | null = null;
+  /** Players whose quick chat you've hidden (this session). */
+  readonly muted = new Set<number>();
+  showChat = true;
 
   constructor(
     readonly r: Renderer,
@@ -361,7 +378,10 @@ export class ClientGame {
             this.remotes.delete(id);
           }
         }
-        if (next.has(this.youId)) this.viewModel.setColor(this.colorOf(this.youId));
+        if (next.has(this.youId)) {
+          this.viewModel.setColor(this.colorOf(this.youId));
+          this.viewModel.setFinish(cosmeticKey(next.get(this.youId)!.cos, 'finish'));
+        }
         this.onRosterChange?.();
         break;
       }
@@ -414,6 +434,16 @@ export class ClientGame {
         break;
       case 'error':
         if (msg.code === 'kicked') this.onKicked?.(msg.message);
+        break;
+      case 'chat':
+        this.showChatMessage(msg.from, msg.id);
+        break;
+      case 'progress':
+        this.lastProgress = msg.report;
+        this.onProgress?.(msg.report);
+        break;
+      case 'renamed':
+        this.onRenamed?.(msg.name, msg.message);
         break;
       default:
         break;
@@ -577,6 +607,24 @@ export class ClientGame {
       youTeam: this.teamOf(this.youId),
       percent: pump,
     };
+  }
+
+  /** Shows a quick-chat message as a speech bubble and in the chat feed. */
+  private showChatMessage(from: number, id: number): void {
+    const text = QUICK_CHAT[id];
+    if (!text || !this.showChat || this.muted.has(from)) return;
+    const entry = this.roster.get(from);
+    if (!entry) return;
+    this.hud.chatLine(entry.name, hexColor(this.colorOf(from)), text);
+    const rv = this.remotes.get(from);
+    if (rv?.cur && rv.cur.mode !== MODE_DEAD) this.hud.bubble(tmpV.set(rv.cur.px, rv.cur.py + rv.man.headHeight(rv.cur.inflation) + 1.1, rv.cur.pz), text);
+    this.audio.uiClick();
+  }
+
+  /** Sends a quick-chat preset. */
+  sendChat(slot: number): void {
+    if (!this.active || slot < 0 || slot >= QUICK_CHAT.length) return;
+    this.net.send({ type: 'chat', id: slot });
   }
 
   teamNames(): string[] {
@@ -862,6 +910,20 @@ export class ClientGame {
         this.hud.addKill(html, e.killer === you || e.victim === you);
         a.squeal(e.victim === you ? null : [e.x, Math.max(e.y, -10), e.z]);
         fx.deflatingBalloon(e.x, e.y, e.z, this.colorOf(e.victim), e.vx, e.vy, e.vz);
+        if (e.killer >= 0) {
+          // The knocker's cosmetic knockout effect and sound, somewhere everyone can see it.
+          const kc = this.roster.get(e.killer)?.cos;
+          const B = this.map.blast;
+          const fxX = Math.max(B.minX + 12, Math.min(B.maxX - 12, e.x));
+          const fxY = Math.max(-6, Math.min(30, e.y));
+          const fxZ = Math.max(B.minZ + 12, Math.min(B.maxZ - 12, e.z));
+          fx.koEffect(cosmeticKey(kc, 'koFx'), fxX, fxY, fxZ);
+          const pack = cosmeticKey(kc, 'sound');
+          if (pack !== 'classic') {
+            a.koSound(pack, e.killer === you || e.victim === you ? null : [fxX, fxY, fxZ]);
+            this.hud.popup(tmpV.set(fxX, fxY + 4, fxZ), PACK_TEXT[pack] ?? '', '#ffd60a', 1.3, 1.4);
+          }
+        }
         this.hud.popup(tmpV.set(e.x, Math.max(e.y, -8) + 2, e.z), 'WHEEEE!', '#ffffff', 1.2, 1.4);
         if (e.victim === you) {
           this.deathAt = this.time;
@@ -894,9 +956,17 @@ export class ClientGame {
         break;
       case 'taunt': {
         const p = this.posOf(e.id);
+        const cos = this.roster.get(e.id)?.cos;
+        const style = cosmeticKey(cos, 'taunt');
+        const pack = cosmeticKey(cos, 'sound');
+        this.remotes.get(e.id)?.man.taunt(style);
         if (p) {
-          a.burp(e.id === you ? null : [p.x, p.y, p.z]);
-          this.hud.popup(tmpV.set(p.x, p.y + 3, p.z), 'BUURRP!', '#b8f06a', 1.1, 1.2);
+          const at: [number, number, number] | null = e.id === you ? null : [p.x, p.y, p.z];
+          // Burp is the classic taunt sound; other packs replace it.
+          if (style === 'burp' || pack !== 'classic') a.tauntSound(pack, at);
+          else a.pop(at);
+          this.hud.popup(tmpV.set(p.x, p.y + 3, p.z), TAUNT_TEXT[style] ?? 'HEY!', style === 'burp' ? '#b8f06a' : '#ffffff', 1.1, 1.2);
+          if (PACK_TEXT[pack]) this.hud.popup(tmpV.set(p.x + 0.8, p.y + 3.8, p.z), PACK_TEXT[pack], '#ffd60a', 0.8, 1.1);
         }
         break;
       }
@@ -1418,11 +1488,11 @@ export class ClientGame {
   private createRemote(id: number): RemoteView {
     const entry = this.roster.get(id);
     const color = this.colorOf(id);
-    const patterns = ['solid', 'stripes', 'dots', 'zigzag', 'stars', 'checker'] as const;
-    const man = new TubeMan(color, { physical: this.r.profile.physical, seed: id * 13.7, pattern: patterns[id % patterns.length] });
+    const look = lookOf(entry?.cos);
+    const man = new TubeMan(color, { physical: this.r.profile.physical, seed: id * 13.7, look });
     this.r.scene.add(man.group);
     const tag = this.hud.createNametag(entry?.name ?? '...', entry?.bot ?? false, this.tagTeam(id));
-    return { id, man, pose: defaultPose(), tag, color, name: entry?.name ?? '...', bot: entry?.bot ?? false, cur: null, lastTagText: '' };
+    return { id, man, pose: defaultPose(), tag, color, name: entry?.name ?? '...', bot: entry?.bot ?? false, cur: null, lastTagText: '', lookKey: JSON.stringify(look) };
   }
 
   private removeRemote(rv: RemoteView): void {
@@ -1441,6 +1511,14 @@ export class ClientGame {
       rv.tag.el.remove();
       rv.tag = this.hud.createNametag(entry.name, entry.bot, this.tagTeam(rv.id));
       rv.lastTagText = '';
+    }
+    if (entry) {
+      const look = lookOf(entry.cos);
+      const key = JSON.stringify(look);
+      if (key !== rv.lookKey) {
+        rv.lookKey = key;
+        rv.man.setLook(look);
+      }
     }
     const alive = c.mode !== MODE_DEAD;
     rv.man.setVisible(alive);
@@ -1806,6 +1884,7 @@ export class ClientGame {
       data,
       (id) => this.colorOf(id),
       (id) => (id === this.youId ? this.viewModel.weapon : (this.remotes.get(id)?.man.weapon ?? null)),
+      (id) => lookOf(this.roster.get(id)?.cos),
     );
     this.hud.show(false);
     this.audio.setCharge(0);

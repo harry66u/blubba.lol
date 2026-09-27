@@ -14,6 +14,8 @@ export interface Settings {
   fov: number;
   volumes: VolumeSettings;
   colorblindTeams: boolean;
+  /** Show other players' quick-chat messages. */
+  showQuickChat: boolean;
   showFps: boolean;
   bindings: Record<string, string[]>;
   padBindings: Record<string, number[]>;
@@ -30,6 +32,7 @@ export const DEFAULT_SETTINGS: Settings = {
   fov: 80,
   volumes: { master: 0.8, effects: 0.9, announcer: 0.9, music: 0.4, muted: false },
   colorblindTeams: false,
+  showQuickChat: true,
   showFps: false,
   bindings: {},
   padBindings: {},

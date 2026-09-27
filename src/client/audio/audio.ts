@@ -734,6 +734,120 @@ export class Audio {
     osc.stop(t + 0.25);
   }
 
+  /** A short melody on a synth voice. `notes` are [semitones above base, start, length] in seconds. */
+  private melody(pos: [number, number, number] | null, gain: number, voice: 'kazoo' | 'trumpet' | 'duck', base: number, notes: [number, number, number][]): void {
+    const out = this.out(pos, gain);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t0 = ctx.currentTime;
+    for (const [semi, at, len] of notes) {
+      const t = t0 + at;
+      const f = base * 2 ** (semi / 12);
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      const filt = ctx.createBiquadFilter();
+      if (voice === 'kazoo') {
+        // Buzzy sawtooth through a nasal band-pass, with wobbly vibrato.
+        osc.type = 'sawtooth';
+        filt.type = 'bandpass';
+        filt.frequency.value = 1400;
+        filt.Q.value = 3;
+        const vib = ctx.createOscillator();
+        vib.frequency.value = 7;
+        const vg = ctx.createGain();
+        vg.gain.value = f * 0.03;
+        vib.connect(vg).connect(osc.frequency);
+        vib.start(t);
+        vib.stop(t + len + 0.05);
+      } else if (voice === 'trumpet') {
+        osc.type = 'sawtooth';
+        filt.type = 'lowpass';
+        filt.frequency.setValueAtTime(900, t);
+        filt.frequency.linearRampToValueAtTime(2600, t + 0.06);
+      } else {
+        // Rubber duck: a squeaky square wave that bends down.
+        osc.type = 'square';
+        filt.type = 'bandpass';
+        filt.frequency.value = 1800;
+        filt.Q.value = 2;
+        osc.frequency.setValueAtTime(f * 1.25, t);
+        osc.frequency.exponentialRampToValueAtTime(f * 0.8, t + len);
+      }
+      if (voice !== 'duck') osc.frequency.setValueAtTime(f, t);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.6, t + 0.02);
+      g.gain.setValueAtTime(0.6, t + Math.max(0.03, len - 0.05));
+      g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+      osc.connect(filt).connect(g).connect(out);
+      osc.start(t);
+      osc.stop(t + len + 0.05);
+    }
+  }
+
+  /** Slide whistle: up, or up-and-down. */
+  slideWhistle(pos: [number, number, number] | null, down = false): void {
+    const out = this.out(pos, 0.35);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(down ? 1800 : 500, t);
+    osc.frequency.exponentialRampToValueAtTime(down ? 400 : 1900, t + 0.55);
+    if (!down) osc.frequency.exponentialRampToValueAtTime(700, t + 0.8);
+    const g = ctx.createGain();
+    this.env(g, t, 0.02, 0.6, 0.85);
+    osc.connect(g).connect(out);
+    osc.start(t);
+    osc.stop(t + 0.9);
+  }
+
+  /** Knockout sound from the knocker's sound pack. Classic is the normal pop and squeal. */
+  koSound(pack: string, pos: [number, number, number] | null): void {
+    switch (pack) {
+      case 'boing':
+        this.boing(pos, true);
+        break;
+      case 'kazoo':
+        this.melody(pos, 0.3, 'kazoo', 392, [[0, 0, 0.14], [4, 0.15, 0.14], [7, 0.3, 0.35]]);
+        break;
+      case 'duck':
+        this.melody(pos, 0.3, 'duck', 700, [[0, 0, 0.12], [0, 0.16, 0.18]]);
+        break;
+      case 'slide':
+        this.slideWhistle(pos, true);
+        break;
+      case 'trumpet':
+        this.melody(pos, 0.3, 'trumpet', 262, [[0, 0, 0.12], [4, 0.13, 0.12], [7, 0.26, 0.12], [12, 0.39, 0.5]]);
+        break;
+      default:
+        break;
+    }
+  }
+
+  /** Taunt sound from the sound pack (classic = the big burp). */
+  tauntSound(pack: string, pos: [number, number, number] | null): void {
+    switch (pack) {
+      case 'boing':
+        this.boing(pos, true);
+        break;
+      case 'kazoo':
+        this.melody(pos, 0.3, 'kazoo', 330, [[0, 0, 0.12], [2, 0.13, 0.12], [4, 0.26, 0.12], [0, 0.39, 0.3]]);
+        break;
+      case 'duck':
+        this.melody(pos, 0.3, 'duck', 650, [[0, 0, 0.1], [2, 0.12, 0.1], [0, 0.24, 0.16]]);
+        break;
+      case 'slide':
+        this.slideWhistle(pos);
+        break;
+      case 'trumpet':
+        this.melody(pos, 0.3, 'trumpet', 233, [[0, 0, 0.1], [0, 0.12, 0.1], [0, 0.24, 0.1], [5, 0.36, 0.45]]);
+        break;
+      default:
+        this.burp(pos);
+    }
+  }
+
   /** Stadium horn plus a crowd roar (noise swell) for goals and giant tube men filling up. */
   goalHorn(): void {
     const out = this.out(null, 0.35);

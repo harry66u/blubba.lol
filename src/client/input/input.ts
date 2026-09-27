@@ -17,6 +17,7 @@ export type Action =
   | 'util1'
   | 'util2'
   | 'taunt'
+  | 'chat'
   | 'scoreboard';
 
 export const ACTION_LABELS: Record<Action, string> = {
@@ -34,6 +35,7 @@ export const ACTION_LABELS: Record<Action, string> = {
   util1: 'Utility 1',
   util2: 'Utility 2',
   taunt: 'Taunt',
+  chat: 'Quick chat (hold)',
   scoreboard: 'Scoreboard',
 };
 
@@ -53,8 +55,12 @@ export const DEFAULT_BINDINGS: Record<Action, string[]> = {
   util1: ['KeyC'],
   util2: ['KeyV'],
   taunt: ['KeyT'],
+  chat: ['KeyZ'],
   scoreboard: ['Tab'],
 };
+
+/** Quick-chat wheel: 8 slots around the screen center, slot 0 at the top, clockwise. */
+export const CHAT_SLOTS = 8;
 
 const PRESS_ACTIONS: Partial<Record<Action, PressKey>> = {
   jump: 'jump',
@@ -128,6 +134,13 @@ export class InputManager {
   onMenuButton: (() => void) | null = null;
   /** Any controller button (used to start playing without pointer lock). */
   onPadButton: ((button: number) => void) | null = null;
+  /** Quick-chat wheel state for the HUD (slot -1 = nothing picked yet). */
+  onChatWheel: ((open: boolean, slot: number) => void) | null = null;
+  /** A quick-chat preset was picked. */
+  onChat: ((slot: number) => void) | null = null;
+  private wheelOpen = false;
+  private wheelX = 0;
+  private wheelY = 0;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -210,6 +223,43 @@ export class InputManager {
     this.held.clear();
     this.fireLatch = false;
     this.onScoreboard?.(false);
+    this.closeWheel(false);
+  }
+
+  get chatWheelOpen(): boolean {
+    return this.wheelOpen;
+  }
+
+  private openWheel(): void {
+    if (!this.enabled || this.wheelOpen) return;
+    this.wheelOpen = true;
+    this.wheelX = this.wheelY = 0;
+    this.onChatWheel?.(true, -1);
+  }
+
+  /** Slot under the wheel cursor, or -1 if it's still near the middle. */
+  private wheelSlot(): number {
+    if (Math.hypot(this.wheelX, this.wheelY) < 30) return -1;
+    const a = Math.atan2(this.wheelX, -this.wheelY); // 0 = up, clockwise
+    return ((Math.round(a / ((Math.PI * 2) / CHAT_SLOTS)) % CHAT_SLOTS) + CHAT_SLOTS) % CHAT_SLOTS;
+  }
+
+  private moveWheel(dx: number, dy: number): void {
+    this.wheelX += dx;
+    this.wheelY += dy;
+    const l = Math.hypot(this.wheelX, this.wheelY);
+    if (l > 120) {
+      this.wheelX *= 120 / l;
+      this.wheelY *= 120 / l;
+    }
+    this.onChatWheel?.(true, this.wheelSlot());
+  }
+
+  private closeWheel(send: boolean, slot = this.wheelSlot()): void {
+    if (!this.wheelOpen) return;
+    this.wheelOpen = false;
+    this.onChatWheel?.(false, -1);
+    if (send && slot >= 0) this.onChat?.(slot);
   }
 
   private isTyping(e: Event): boolean {
@@ -230,6 +280,12 @@ export class InputManager {
       return;
     }
     if (this.isTyping(e)) return;
+    // While the chat wheel is open, 1-8 pick a message directly.
+    if (down && this.wheelOpen && /^Digit[1-8]$/.test(e.code)) {
+      this.closeWheel(true, Number(e.code.slice(5)) - 1);
+      e.preventDefault();
+      return;
+    }
     const actions = this.codeToActions.get(e.code);
     if (this.enabled && (actions || e.code === 'Space' || e.code === 'Tab')) e.preventDefault();
     if (!actions) return;
@@ -267,6 +323,7 @@ export class InputManager {
       if (pk) this.counters[pk] = (this.counters[pk] + 1) & 255;
       if (a === 'fire') this.fireLatch = true;
       if (a === 'scoreboard') this.onScoreboard?.(true);
+      if (a === 'chat') this.openWheel();
       this.onAnyPress?.(a);
     }
   }
@@ -275,6 +332,7 @@ export class InputManager {
     this.held.delete(code);
     for (const a of this.codeToActions.get(code) ?? []) {
       if (a === 'scoreboard') this.onScoreboard?.(false);
+      if (a === 'chat') this.closeWheel(true);
     }
   }
 
@@ -289,6 +347,11 @@ export class InputManager {
     }
     if (Math.abs(dx) > 800 || Math.abs(dy) > 800) return;
     this.lastDevice = 'kbm';
+    if (this.wheelOpen) {
+      // Aim freezes while picking a chat message.
+      this.moveWheel(dx, dy);
+      return;
+    }
     const s = this.settings;
     const base = s.device === 'trackpad' ? 0.0034 * s.sensTrackpad : 0.0021 * s.sensMouse;
     this.applyLook(dx * base, dy * base * (s.invertY ? -1 : 1));
@@ -364,10 +427,13 @@ export class InputManager {
         for (const [action, btn] of Object.entries(this.padBindings) as [PadAction, number][]) {
           if (btn !== i || action === 'menu' || action === 'fire') continue;
           if (action === 'scoreboard') this.onScoreboard?.(true);
+          else if (action === 'chat') this.openWheel();
           else this.pressAction(action);
         }
       } else if (!now && this.padPrev[i] && i === this.padBindings.scoreboard) {
         this.onScoreboard?.(false);
+      } else if (!now && this.padPrev[i] && i === this.padBindings.chat) {
+        this.closeWheel(true);
       }
       this.padPrev[i] = now;
     }
@@ -385,6 +451,15 @@ export class InputManager {
     // Stick aiming: radians per second at full tilt, slowed by aim assist when on target.
     const s = this.settings;
     const speed = 3.4 * s.sensController * this.assistFriction;
+    if (this.wheelOpen) {
+      // The right stick points at a chat slot instead of aiming.
+      if (lx !== 0 || ly !== 0) {
+        this.wheelX = lx * 120;
+        this.wheelY = ly * 120;
+        this.onChatWheel?.(true, this.wheelSlot());
+      }
+      return;
+    }
     if (lx !== 0 || ly !== 0) this.applyLook(lx * speed * dt, ly * speed * dt * 0.8 * (s.invertY ? -1 : 1));
   }
 

@@ -3,7 +3,9 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { extname, join, resolve } from 'node:path';
 import { brotliCompressSync, gzipSync, constants as zlibConstants } from 'node:zlib';
 import { WebSocketServer } from 'ws';
+import { Api } from './api';
 import { Lobby } from './lobby';
+import { Store } from './store';
 
 const PORT = Number(process.env.PORT ?? 8080);
 const DEV = process.env.BUBBA_DEV === '1';
@@ -67,15 +69,29 @@ if (!DEV && !files.has('/index.html')) {
   console.warn(`[bubba] no client build found in ${CLIENT_DIR}; run "npm run build" first`);
 }
 
-const lobby = new Lobby();
+const store = new Store();
+const api = new Api(store);
+const lobby = new Lobby(store);
+api.onProfileChange = (key) => lobby.profileChanged(key);
 lobby.start();
 
 function serveStatic(req: IncomingMessage, res: ServerResponse): void {
   const url = new URL(req.url ?? '/', 'http://x');
-  let path = decodeURIComponent(url.pathname);
+  let path: string;
+  try {
+    path = decodeURIComponent(url.pathname);
+  } catch {
+    res.writeHead(400, { 'content-type': 'text/plain' });
+    res.end('Bad request');
+    return;
+  }
   if (path === '/api/health') {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify({ ok: true, ...lobby.stats() }));
+    return;
+  }
+  if (path.startsWith('/api/')) {
+    void api.handle(req, res, path);
     return;
   }
   let file = files.get(path);
@@ -145,6 +161,7 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, () => {
     lobby.stop();
     wss.close();
+    store.close();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 1000).unref();
   });

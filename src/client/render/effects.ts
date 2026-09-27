@@ -308,6 +308,64 @@ export class Effects {
     }
   }
 
+  /** Cosmetic knockout effect everyone sees where someone got knocked out (see koFx items). */
+  koEffect(kind: string, x: number, y: number, z: number): void {
+    const rainbow = [0xff3b5c, 0xff8a1f, 0xffd60a, 0x8ee000, 0x2ec5ff, 0x3d6bff, 0x9b4dff];
+    switch (kind) {
+      case 'bubbles':
+        for (let i = 0; i < 40; i++) {
+          this.puffs.spawn(
+            { x: x + (Math.random() - 0.5) * 3, y: y + Math.random() * 2, z: z + (Math.random() - 0.5) * 3, vx: (Math.random() - 0.5) * 2, vy: 2 + Math.random() * 4, vz: (Math.random() - 0.5) * 2, size: 0.2 + Math.random() * 0.35, grow: 0.3, max: 2 + Math.random(), drag: 0.8, gravity: -0.5 },
+            new THREE.Color().setHSL(0.5 + Math.random() * 0.2, 0.8, 0.8),
+          );
+        }
+        break;
+      case 'stars':
+        for (let i = 0; i < 36; i++) {
+          const a = (i / 36) * Math.PI * 2;
+          this.confetti.spawn({ x, y: y + 1, z, vx: Math.cos(a) * 12, vy: Math.sin(a * 3) * 3 + 4, vz: Math.sin(a) * 12, size: 1.6, grow: 0, max: 1.2, drag: 2.5, gravity: 2, spin: 12 }, i % 2 ? 0xffd60a : 0xffffff);
+        }
+        this.shockwave(x, y + 1, z, 6, 0.5, 0xffd60a);
+        break;
+      case 'balloons':
+        for (let i = 0; i < 14; i++) {
+          this.puffs.spawn(
+            { x: x + (Math.random() - 0.5) * 2, y, z: z + (Math.random() - 0.5) * 2, vx: (Math.random() - 0.5) * 3, vy: 4 + Math.random() * 3, vz: (Math.random() - 0.5) * 3, size: 0.45, grow: 0, max: 3, drag: 0.4, gravity: -1 },
+            rainbow[i % rainbow.length],
+          );
+        }
+        break;
+      case 'fireworks':
+        for (let k = 0; k < 3; k++) {
+          const fx = x + (Math.random() - 0.5) * 8;
+          const fy = y + 6 + Math.random() * 5;
+          const fz = z + (Math.random() - 0.5) * 8;
+          const c = rainbow[Math.floor(Math.random() * rainbow.length)];
+          window.setTimeout(() => {
+            for (let i = 0; i < 40; i++) {
+              const a = Math.random() * Math.PI * 2;
+              const e = (Math.random() - 0.5) * Math.PI;
+              const sp = 8 + Math.random() * 4;
+              this.confetti.spawn({ x: fx, y: fy, z: fz, vx: Math.cos(a) * Math.cos(e) * sp, vy: Math.sin(e) * sp, vz: Math.sin(a) * Math.cos(e) * sp, size: 0.9, grow: 0, max: 1.3, drag: 2, gravity: 4, spin: 10 }, c);
+            }
+            this.shockwave(fx, fy, fz, 5, 0.4, c);
+          }, k * 220);
+        }
+        break;
+      case 'rainbow':
+        for (let band = 0; band < rainbow.length; band++) {
+          for (let i = 0; i <= 16; i++) {
+            const a = (i / 16) * Math.PI;
+            const r = 4 - band * 0.35;
+            this.puffs.spawn({ x: x + Math.cos(a) * r, y: y + 1 + Math.sin(a) * r, z, vx: 0, vy: 0.3, vz: 0, size: 0.3, grow: 0.2, max: 2.2, drag: 1 }, rainbow[band]);
+          }
+        }
+        break;
+      default:
+        this.confettiBurst(x, y, z, 70);
+    }
+  }
+
   /**
    * Knocked-out player: a deflating balloon in their color that zips away erratically, like a
    * balloon let go before it was tied.

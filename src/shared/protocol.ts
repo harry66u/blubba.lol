@@ -4,8 +4,9 @@ import type { GameEvent } from './game/events';
 import type { DynamicSolidInfo, MatchPhase, MatchResult, ModeId, Pickup } from './game/sim';
 import type { Loadout } from './loadout';
 import type { ChaosEvent } from './game/chaos';
+import type { Cosmetics, ProgressReport, ReportReason } from './economy';
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 // --- Binary message ids -------------------------------------------------------------------
 export const MSG_INPUTS = 1;
@@ -17,6 +18,8 @@ export type JoinRequest =
   | { kind: 'quick'; mode?: ModeId }
   /** Private 1v1 room whose code is shared as a challenge link. */
   | { kind: 'challenge' }
+  /** Ranked 1v1 matchmaking (needs an account). */
+  | { kind: 'ranked' }
   | { kind: 'create'; settings?: Partial<RoomSettings> }
   | { kind: 'code'; code: string };
 
@@ -32,7 +35,10 @@ export interface RoomSettings {
 }
 
 export type ClientMessage =
-  | { type: 'hello'; v: number; name: string; guestId: string; join: JoinRequest; loadout?: Loadout }
+  | { type: 'hello'; v: number; name: string; guestId: string; join: JoinRequest; loadout?: Loadout; token?: string }
+  /** Quick-chat preset (index into QUICK_CHAT). There is no free text. */
+  | { type: 'chat'; id: number }
+  | { type: 'report'; target: number; reason: ReportReason }
   | { type: 'loadout'; loadout: Loadout }
   | { type: 'ping'; t: number }
   | { type: 'name'; name: string }
@@ -51,6 +57,12 @@ export interface RosterEntry {
   bot: boolean;
   /** 0/1 in team modes, -1 otherwise. */
   team: number;
+  /** What they look like (color, hat, taunt, ...). */
+  cos: Cosmetics;
+  /** Player level (0 for bots). */
+  level: number;
+  /** Ranked rooms only. */
+  rating?: number;
   score: number;
   kos: number;
   deaths: number;
@@ -66,6 +78,7 @@ export interface RoomInfo {
   features: Features;
   /** A private 1v1 made from a challenge link. */
   challenge: boolean;
+  ranked: boolean;
 }
 
 export type ServerMessage =
@@ -83,7 +96,14 @@ export type ServerMessage =
       crownId: number;
     }
   | { type: 'pong'; t: number; tick: number }
-  | { type: 'error'; code: 'full' | 'not_found' | 'version' | 'kicked' | 'bad_name' | 'server'; message: string };
+  /** Ranked matchmaking status while you wait. */
+  | { type: 'queue'; seconds: number; searching: number; rating: number }
+  /** XP, coins, unlocks (and rating) earned in the match that just ended. */
+  | { type: 'progress'; report: ProgressReport }
+  | { type: 'chat'; from: number; id: number }
+  /** Your name was changed (e.g. after several players reported it). */
+  | { type: 'renamed'; name: string; message: string }
+  | { type: 'error'; code: 'full' | 'not_found' | 'version' | 'kicked' | 'bad_name' | 'server' | 'account_required' | 'already' | 'ranked_over'; message: string };
 
 // --- Inputs (client -> server) --------------------------------------------------------------
 

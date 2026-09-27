@@ -28,6 +28,14 @@ export function el<K extends keyof HTMLElementTagNameMap>(tag: K, opts: ElOption
   return e;
 }
 
+/** append() that skips null/false children. */
+export function add(parent: HTMLElement, ...children: Child[]): void {
+  for (const c of children) {
+    if (c === null || c === undefined || c === false) continue;
+    parent.append(typeof c === 'string' || typeof c === 'number' ? document.createTextNode(String(c)) : c);
+  }
+}
+
 export function clear(e: HTMLElement): void {
   while (e.firstChild) e.removeChild(e.firstChild);
 }

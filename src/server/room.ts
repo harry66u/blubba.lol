@@ -4,8 +4,12 @@ import { GameSim } from '../shared/game/sim';
 import { emptyInput } from '../shared/input';
 import { KNOCKOUT_MAPS, MAPS, getMap, mapForMode } from '../shared/maps';
 import { MODE_IDS, type ModeId } from '../shared/game/modes';
-import { type Loadout, weaponIndex } from '../shared/loadout';
+import { type Loadout, sanitizeLoadout, weaponIndex } from '../shared/loadout';
 import { MODE_DEAD } from '../shared/player';
+import { DEFAULT_COSMETICS, QUICK_CHAT, REPORT_REASONS, levelForXp, unlockedAt } from '../shared/economy';
+import { randomGuestName } from '../shared/names';
+import { allowedLoadout, applyRanked, awardMatch } from './progress';
+import { type Store, accountKey } from './store';
 import {
   type ClientMessage,
   MSG_INPUTS,
@@ -19,6 +23,13 @@ import {
   encodeSnapshot,
 } from '../shared/protocol';
 
+/** Who a connection is, for saving progress. */
+export interface Identity {
+  /** Profile key ('a:<id>' or 'g:<guestId>'); null means nothing is saved. */
+  key: string | null;
+  accountId: number | null;
+}
+
 export interface Conn {
   ws: WebSocket;
   playerId: number;
@@ -27,7 +38,20 @@ export interface Conn {
   rtt: number;
   /** Input messages received in the current second (flood protection). */
   inputMsgs: number;
+  key: string | null;
+  accountId: number | null;
+  /** Recent quick-chat times (rate limit). */
+  chatTimes: number[];
+  /** Players this connection already reported (one report each). */
+  reported: Set<number>;
 }
+
+const CHAT_MIN_GAP_MS = 1200;
+const CHAT_BURST = 4;
+const CHAT_BURST_WINDOW_MS = 10_000;
+const MAX_REPORTS = 5;
+/** Distinct players reporting a name before it gets swapped for a safe one. */
+const NAME_REPORTS_TO_RENAME = 3;
 
 const DEFAULT_SETTINGS: RoomSettings = {
   mode: 'knockout',
@@ -53,11 +77,22 @@ export class Room {
   private rotation = 0;
   /** Challenge rooms: the code is shared as a 1v1 link. */
   challenge = false;
+  /** Ranked 1v1: fixed lineup, rating on the line, closes after one match. */
+  ranked = false;
+  /** Set once both ranked players are in; nobody else can join. */
+  rankedLocked = false;
+  /** Ranked players' profile keys by player id (kept after someone leaves, for forfeits). */
+  readonly rankedKeys = new Map<number, string>();
+  private rankedSettled = false;
+  /** The lobby drops closed rooms on its next sweep. */
+  closed = false;
+  private readonly nameReports = new Map<number, Set<string>>();
 
   constructor(
     readonly code: string,
     readonly isPrivate: boolean,
     settings: Partial<RoomSettings> = {},
+    readonly store: Store | null = null,
   ) {
     const clean = sanitizeSettings(settings);
     // 1v1s are shorter unless the host picked a length.
@@ -86,6 +121,7 @@ export class Room {
     sim.onPhaseChange = () => {
       this.broadcastJson(this.matchMessage());
       this.rosterDirty = true;
+      if (sim.phase === 'results' && sim === this.sim) this.awardMatch();
     };
     return sim;
   }
@@ -107,20 +143,38 @@ export class Room {
       settings: this.settings,
       features: { ...this.sim.features },
       challenge: this.challenge,
+      ranked: this.ranked,
     };
   }
 
   canJoin(): boolean {
-    return this.humanCount < this.capacity;
+    return this.humanCount < this.capacity && !this.rankedLocked && !this.closed;
   }
 
-  join(ws: WebSocket, name: string, guestId: string, loadout?: Loadout): Conn | null {
+  /** Mods and utilities this connection has unlocked. */
+  private allowed(conn: { key: string | null }): { mods: string[]; utils: string[] } {
+    return conn.key && this.store ? allowedLoadout(this.store.profile(conn.key)) : unlockedAt(1);
+  }
+
+  /** Your chosen color if nobody else here is wearing it. */
+  private colorFor(cosColor: string, playerId: number): number | undefined {
+    const idx = Number(cosColor.split('.')[1]);
+    if (!Number.isInteger(idx)) return undefined;
+    for (const p of this.sim.players.values()) if (p.id !== playerId && p.color === idx) return undefined;
+    return idx;
+  }
+
+  join(ws: WebSocket, name: string, guestId: string, loadout?: Loadout, identity: Identity = { key: null, accountId: null }): Conn | null {
     if (!this.canJoin()) return null;
     // Make room by removing a bot if needed.
     if (this.playerCount >= BALANCE.match.maxPlayers) this.removeOneBot();
-    const p = this.sim.addPlayer(name, { loadout });
-    const conn: Conn = { ws, playerId: p.id, guestId, name, rtt: 0, inputMsgs: 0 };
+    const profile = identity.key && this.store ? this.store.profile(identity.key) : null;
+    const cos = profile ? { ...profile.cosmetics } : { ...DEFAULT_COSMETICS };
+    const clean = sanitizeLoadout(loadout, this.allowed(identity));
+    const p = this.sim.addPlayer(name, { loadout: clean, cos, color: this.colorFor(cos.color, -1) });
+    const conn: Conn = { ws, playerId: p.id, guestId, name, rtt: 0, inputMsgs: 0, key: identity.key, accountId: identity.accountId, chatTimes: [], reported: new Set() };
     this.conns.set(p.id, conn);
+    if (this.ranked && identity.key) this.rankedKeys.set(p.id, identity.key);
     if (this.hostId < 0 || !this.conns.has(this.hostId)) this.hostId = p.id;
     this.send(conn, { type: 'welcome', v: PROTOCOL_VERSION, you: p.id, room: this.info(), tick: this.sim.tick, name });
     this.send(conn, this.matchMessage());
@@ -133,10 +187,22 @@ export class Room {
     return conn;
   }
 
+  /** Re-reads a player's saved looks (after they buy or equip something). */
+  applyProfile(conn: Conn): void {
+    if (!conn.key || !this.store) return;
+    const p = this.sim.players.get(conn.playerId);
+    if (!p) return;
+    p.cos = { ...this.store.profile(conn.key).cosmetics };
+    const color = this.colorFor(p.cos.color, p.id);
+    if (color !== undefined) p.color = color;
+    this.rosterDirty = true;
+  }
+
   leave(playerId: number): void {
     const conn = this.conns.get(playerId);
     if (!conn) return;
     this.conns.delete(playerId);
+    // Ranked: leaving mid-match forfeits (the sim ends the match and the other player wins).
     this.sim.removePlayer(playerId);
     if (this.hostId === playerId) {
       const next = this.conns.keys().next();
@@ -150,7 +216,7 @@ export class Room {
 
   /** How many bots this room wants right now. */
   private wantedBots(): number {
-    if (!this.settings.bots) return 0;
+    if (!this.settings.bots || this.ranked) return 0;
     const humans = this.humanCount;
     // 1v1: a sparring bot keeps you busy until a real opponent shows up.
     if (this.mode === 'duel') return humans === 1 ? 1 : 0;
@@ -215,10 +281,16 @@ export class Room {
         }
         break;
       case 'loadout':
-        this.sim.setLoadout(conn.playerId, msg.loadout);
+        this.sim.setLoadout(conn.playerId, sanitizeLoadout(msg.loadout, this.allowed(conn)));
+        break;
+      case 'chat':
+        this.chat(conn, msg.id);
+        break;
+      case 'report':
+        this.report(conn, msg.target, msg.reason);
         break;
       case 'host':
-        if (conn.playerId !== this.hostId || !this.isPrivate) return;
+        if (conn.playerId !== this.hostId || !this.isPrivate || this.ranked) return;
         if (msg.action === 'kick' && typeof msg.id === 'number') this.kick(msg.id);
         else if (msg.action === 'settings' && msg.settings && typeof msg.settings === 'object') this.applySettings(msg.settings);
         else if (msg.action === 'restart') this.sim.startMatch();
@@ -232,6 +304,7 @@ export class Room {
     const target = this.conns.get(id);
     if (!target || id === this.hostId) return;
     this.kicked.add(target.guestId);
+    if (target.key) this.kicked.add(target.key);
     this.send(target, { type: 'error', code: 'kicked', message: 'The host removed you from this room.' });
     target.ws.close(4001, 'kicked');
     this.leave(id);
@@ -279,9 +352,100 @@ export class Room {
     this.rosterDirty = true;
   }
 
+  /** Quick chat: a preset index, rate limited, broadcast to the room. */
+  private chat(conn: Conn, id: unknown): void {
+    if (typeof id !== 'number' || !Number.isInteger(id) || id < 0 || id >= QUICK_CHAT.length) return;
+    const now = Date.now();
+    conn.chatTimes = conn.chatTimes.filter((t) => now - t < CHAT_BURST_WINDOW_MS);
+    const last = conn.chatTimes[conn.chatTimes.length - 1] ?? 0;
+    if (now - last < CHAT_MIN_GAP_MS || conn.chatTimes.length >= CHAT_BURST) return;
+    conn.chatTimes.push(now);
+    this.broadcastJson({ type: 'chat', from: conn.playerId, id });
+  }
+
+  /** Saves a report. Several players reporting a name swaps it for a safe random one. */
+  private report(conn: Conn, target: unknown, reason: unknown): void {
+    if (typeof target !== 'number' || target === conn.playerId) return;
+    if (!(REPORT_REASONS as readonly unknown[]).includes(reason)) return;
+    const victim = this.conns.get(target);
+    if (!victim || conn.reported.has(target) || conn.reported.size >= MAX_REPORTS) return;
+    conn.reported.add(target);
+    const reporterKey = conn.key ?? `anon:${conn.guestId || conn.playerId}`;
+    this.store?.addReport(reporterKey, victim.key ?? `anon:${victim.guestId}`, victim.name, this.code, String(reason));
+    if (reason !== 'name') return;
+    const set = this.nameReports.get(target) ?? new Set<string>();
+    set.add(reporterKey);
+    this.nameReports.set(target, set);
+    if (set.size >= NAME_REPORTS_TO_RENAME) {
+      this.nameReports.delete(target);
+      if (victim.accountId !== null) this.store?.flagAccount(victim.accountId);
+      const name = randomGuestName();
+      victim.name = name;
+      const p = this.sim.players.get(target);
+      if (p) p.name = name;
+      this.send(victim, { type: 'renamed', name, message: 'Other players reported your name, so it was changed. Pick a friendly name next time!' });
+      this.rosterDirty = true;
+    }
+  }
+
+  /** Match over: hand out XP, coins and unlocks, and settle ranked ratings. */
+  private awardMatch(): void {
+    const sim = this.sim;
+    const r = sim.lastResult;
+    if (!r || !this.store) return;
+    const store = this.store;
+    const matchSeconds = Math.max(1, sim.time - sim.matchStartedAt);
+    const ratings = new Map<number, { before: number; after: number }>();
+    if (this.ranked && !this.rankedSettled && this.rankedKeys.size === 2) {
+      this.rankedSettled = true;
+      const [a, b] = [...this.rankedKeys.entries()];
+      const sa = r.standings.find((s) => s.id === a[0]);
+      const sb = r.standings.find((s) => s.id === b[0]);
+      // Whoever is missing from the standings left early and forfeits.
+      const aWins = !sb || (sa && sa.score > sb.score);
+      const bWins = !sa || (sb && sb.score > sa.score);
+      if (aWins || bWins) {
+        const [w, l] = aWins ? [a, b] : [b, a];
+        const [rw, rl] = applyRanked(store, w[1], l[1]);
+        ratings.set(w[0], rw);
+        ratings.set(l[0], rl);
+      }
+    }
+    const top = r.standings[0];
+    for (const conn of this.conns.values()) {
+      if (!conn.key) continue;
+      const standing = r.standings.find((s) => s.id === conn.playerId);
+      const p = sim.players.get(conn.playerId);
+      if (!standing || !p) continue;
+      const secondsPlayed = Math.min(matchSeconds, sim.time - Math.max(sim.matchStartedAt, p.joinedAt));
+      const won = r.teams ? p.team === r.teams.winner : r.winnerId === conn.playerId && !!top && top.score > 0 && (r.standings[1]?.score ?? -1) < top.score;
+      const acc = conn.accountId !== null ? store.accountById(conn.accountId) : null;
+      const report = awardMatch(store, conn.key, acc?.name ?? null, !!acc, { mode: r.mode, stats: standing.stats, secondsPlayed, matchSeconds, won });
+      const rating = ratings.get(conn.playerId);
+      if (rating) report.rating = rating;
+      this.send(conn, { type: 'progress', report });
+    }
+    this.rosterDirty = true;
+  }
+
+  /** Ranked rooms close after one match; everyone goes back to the menu. */
+  private closeRanked(): void {
+    for (const conn of [...this.conns.values()]) {
+      this.send(conn, { type: 'error', code: 'ranked_over', message: 'Ranked match complete. Queue again for another!' });
+      conn.ws.close(4002, 'ranked_over');
+    }
+    this.conns.clear();
+    this.closed = true;
+  }
+
   /** Called once per server tick. */
   tick(): void {
     const s = this.sim;
+    if (this.closed) return;
+    if (this.ranked && s.phase === 'results' && s.time + s.dt >= s.phaseEndsAt) {
+      this.closeRanked();
+      return;
+    }
     if (!this.isPrivate && mapForMode(this.mode) === null && s.phase === 'results' && s.time + s.dt >= s.phaseEndsAt && this.humanCount > 0) {
       this.rotateMap();
     }
@@ -318,17 +482,24 @@ export class Room {
   }
 
   roster(): RosterEntry[] {
-    return [...this.sim.players.values()].map((p) => ({
+    return [...this.sim.players.values()].map((p) => {
+      const conn = this.conns.get(p.id);
+      const profile = conn?.key && this.store ? this.store.profile(conn.key) : null;
+      return {
       id: p.id,
       name: p.name,
       color: p.color,
       bot: p.isBot,
       team: p.team,
+      cos: p.cos,
+      level: profile ? levelForXp(profile.xp).level : p.isBot ? 0 : 1,
+      rating: this.ranked && profile ? profile.rating : undefined,
       score: p.score,
       kos: p.stats.kos,
       deaths: p.stats.deaths,
-      ping: Math.round(this.conns.get(p.id)?.rtt ?? 0),
-    }));
+      ping: Math.round(conn?.rtt ?? 0),
+      };
+    });
   }
 
   matchMessage(): ServerMessage {

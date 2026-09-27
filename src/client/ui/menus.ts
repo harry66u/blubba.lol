@@ -2,18 +2,25 @@ import { BALANCE } from '../../shared/balance';
 import { PLAYER_COLORS } from '../../shared/colors';
 import { MODE_IDS, MODE_INFO, type ModeId } from '../../shared/game/modes';
 import type { MatchResult } from '../../shared/game/sim';
+import { type ProgressReport, REPORT_REASONS, REPORT_REASON_TEXT, type ReportReason } from '../../shared/economy';
+import { buildProgressBox } from './accountUi';
 import { KNOCKOUT_MAPS, MAPS, mapForMode } from '../../shared/maps';
 import { checkName, randomGuestName } from '../../shared/names';
 import type { EventFrequency, RoomInfo, RosterEntry } from '../../shared/protocol';
 import { ACTION_LABELS, type Action, DEFAULT_BINDINGS, codeLabel } from '../input/input';
 import type { Settings } from '../settings';
-import { clear, el, hexColor } from './dom';
+import { add, clear, el, hexColor } from './dom';
+
+/** Everything the mode picker offers: the five modes plus ranked 1v1. */
+export type PlayMode = ModeId | 'ranked';
 
 export interface MenuCallbacks {
   onLoadout: () => void;
-  onPlay: (name: string, mode: ModeId) => void;
+  onLocker: () => void;
+  onProfile: () => void;
+  onPlay: (name: string, mode: PlayMode) => void;
   onChallenge: (name: string) => void;
-  onModeChange: (mode: ModeId) => void;
+  onModeChange: (mode: PlayMode) => void;
   onCreate: (name: string) => void;
   onJoinCode: (name: string, code: string) => void;
   onSettings: () => void;
@@ -56,9 +63,14 @@ export interface TeamView {
   percent: boolean;
 }
 
-export function buildMainMenu(name: string, cb: MenuCallbacks, notice?: string, initialMode: ModeId = 'knockout'): HTMLElement {
+export function buildMainMenu(name: string, cb: MenuCallbacks, notice?: string, initialMode: PlayMode = 'knockout', accountName: string | null = null): HTMLElement {
   const err = el('div', { class: 'error-text', text: notice ?? '' });
-  const nameInput = nameField(name, cb.onNameChange, err);
+  const nameInput = nameField(accountName ?? name, cb.onNameChange, err);
+  if (accountName) {
+    // Account names are fixed; guests can pick any (filtered) name.
+    nameInput.disabled = true;
+    nameInput.title = 'Your account name';
+  }
   const dice = el('button', {
     class: 'btn small ghost',
     text: '🎲',
@@ -71,7 +83,7 @@ export function buildMainMenu(name: string, cb: MenuCallbacks, notice?: string, 
       },
     },
   });
-  let mode: ModeId = initialMode;
+  let mode: PlayMode = initialMode;
   const blurb = el('div', { class: 'mode-blurb' });
   const picker = el('div', { class: 'mode-picker', attrs: { role: 'radiogroup', 'aria-label': 'Game mode' } });
   const play = el('button', {
@@ -79,20 +91,21 @@ export function buildMainMenu(name: string, cb: MenuCallbacks, notice?: string, 
     text: 'PLAY',
     on: {
       click: () => {
-        const n = validName(nameInput, err);
+        const n = accountName ?? validName(nameInput, err);
         if (n) cb.onPlay(n, mode);
       },
     },
   });
-  const pick = (m: ModeId) => {
+  const info = (m: PlayMode) => (m === 'ranked' ? { name: 'Ranked', blurb: 'Rated 1v1 against someone near your skill. Needs a free account.' } : MODE_INFO[m]);
+  const pick = (m: PlayMode) => {
     mode = m;
     for (const b of picker.querySelectorAll('button')) b.classList.toggle('on', b.dataset.mode === m);
-    blurb.textContent = MODE_INFO[m].blurb;
+    blurb.textContent = info(m).blurb;
   };
-  for (const m of MODE_IDS) {
+  for (const m of [...MODE_IDS, 'ranked'] as PlayMode[]) {
     const b = el('button', {
-      text: MODE_INFO[m].name,
-      attrs: { 'data-mode': m, role: 'radio', title: MODE_INFO[m].blurb },
+      text: info(m).name,
+      attrs: { 'data-mode': m, role: 'radio', title: info(m).blurb },
       on: {
         click: () => {
           pick(m);
@@ -109,7 +122,7 @@ export function buildMainMenu(name: string, cb: MenuCallbacks, notice?: string, 
     attrs: { title: 'Get a link: the first person to open it plays you 1v1.' },
     on: {
       click: () => {
-        const n = validName(nameInput, err);
+        const n = accountName ?? validName(nameInput, err);
         if (n) cb.onChallenge(n);
       },
     },
@@ -120,7 +133,7 @@ export function buildMainMenu(name: string, cb: MenuCallbacks, notice?: string, 
     text: 'JOIN',
     on: {
       click: () => {
-        const n = validName(nameInput, err);
+        const n = accountName ?? validName(nameInput, err);
         const code = codeInput.value.trim().toUpperCase();
         if (!n) return;
         if (code.length < 5) {
@@ -143,7 +156,7 @@ export function buildMainMenu(name: string, cb: MenuCallbacks, notice?: string, 
     text: 'PRIVATE ROOM',
     on: {
       click: () => {
-        const n = validName(nameInput, err);
+        const n = accountName ?? validName(nameInput, err);
         if (n) cb.onCreate(n);
       },
     },
@@ -152,7 +165,7 @@ export function buildMainMenu(name: string, cb: MenuCallbacks, notice?: string, 
     'div',
     { class: 'panel menu-card interactive' },
     el('div', { class: 'label', text: 'Your name' }),
-    el('div', { class: 'row' }, nameInput, dice),
+    el('div', { class: 'row' }, nameInput, accountName ? null : dice),
     picker,
     blurb,
     play,
@@ -164,6 +177,8 @@ export function buildMainMenu(name: string, cb: MenuCallbacks, notice?: string, 
     'div',
     { class: 'menu-footer' },
     el('button', { class: 'btn small ghost', text: 'Loadout', on: { click: cb.onLoadout } }),
+    el('button', { class: 'btn small ghost', text: 'Locker', on: { click: cb.onLocker } }),
+    el('button', { class: 'btn small ghost', text: 'Profile', on: { click: cb.onProfile } }),
     el('button', { class: 'btn small ghost', text: 'How to play', on: { click: cb.onHowTo } }),
     el('button', { class: 'btn small ghost', text: 'Settings', on: { click: cb.onSettings } }),
   );
@@ -216,6 +231,7 @@ export function buildClickToPlay(text: string, onClick: () => void): HTMLElement
 
 export interface PauseCallbacks {
   onLoadout: () => void;
+  onLocker: () => void;
   onResume: () => void;
   onLeave: () => void;
   onSettings: () => void;
@@ -228,7 +244,9 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
   const panel = el('div', { class: 'panel interactive', style: 'display:flex;flex-direction:column;gap:14px;min-width:360px' });
   panel.append(el('h2', { text: 'Paused' }));
   panel.append(el('button', { class: 'btn big', text: 'RESUME', on: { click: cb.onResume } }));
-  if (room?.isPrivate) {
+  if (room?.ranked) {
+    panel.append(el('div', { class: 'room-banner', text: 'Ranked 1v1 · leaving now counts as a loss' }));
+  } else if (room?.isPrivate) {
     panel.append(
       el(
         'div',
@@ -293,6 +311,7 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
       'div',
       { class: 'row' },
       el('button', { class: 'btn small ghost', text: 'Loadout', on: { click: cb.onLoadout } }),
+      el('button', { class: 'btn small ghost', text: 'Locker', on: { click: cb.onLocker } }),
       el('button', { class: 'btn small ghost', text: 'Settings', on: { click: cb.onSettings } }),
       el('button', { class: 'btn small ghost', text: 'How to play', on: { click: cb.onHowTo } }),
       el('div', { class: 'grow' }),
@@ -302,32 +321,64 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
   return el('div', { class: 'overlay interactive' }, panel);
 }
 
+/** Things you can do from the scoreboard while the mouse is free. */
+export interface ScoreActions {
+  onKick: ((id: number) => void) | null;
+  onReport: (id: number, reason: ReportReason) => void;
+  onMute: (id: number) => void;
+  muted: Set<number>;
+  reported: Set<number>;
+}
+
 export function buildScoreboard(
   roster: RosterEntry[],
   youId: number,
   hostId: number,
   isPrivate: boolean,
-  onKick: ((id: number) => void) | null,
+  actions: ScoreActions | null,
   teams: TeamView | null = null,
 ): HTMLElement {
   const sorted = [...roster].sort((a, b) => b.score - a.score || b.kos - a.kos || a.deaths - b.deaths);
   const panel = el('div', { class: 'panel' });
   if (!teams) {
-    panel.append(scoreTable(sorted, youId, hostId, isPrivate, onKick, null));
+    panel.append(scoreTable(sorted, youId, hostId, isPrivate, actions, null));
   } else {
     for (const t of [0, 1]) {
       const score = teams.percent ? `${Math.floor(teams.scores[t] * 100)}%` : String(teams.scores[t]);
       const head = el('div', { class: 'team-head' }, el('span', { text: `${teams.names[t]}${teams.youTeam === t ? ' (YOU)' : ''}` }), el('span', { text: score }));
       head.style.setProperty('--team', hexColor(teams.colors[t]));
-      panel.append(head, scoreTable(sorted.filter((r) => r.team === t), youId, hostId, isPrivate, onKick, teams.colors[t]));
+      panel.append(head, scoreTable(sorted.filter((r) => r.team === t), youId, hostId, isPrivate, actions, teams.colors[t]));
     }
   }
-  return el('div', { class: `scoreboard${onKick ? ' interactive' : ''}` }, panel);
+  if (actions) panel.append(el('div', { class: 'small-note', style: 'margin-top:8px', text: '🔇 hides someone’s quick chat · ⚑ reports them to us' }));
+  else panel.append(el('div', { class: 'small-note', style: 'margin-top:8px', text: 'Press Esc to free the mouse to mute or report players.' }));
+  return el('div', { class: `scoreboard${actions ? ' interactive' : ''}` }, panel);
 }
 
-function scoreTable(rows: RosterEntry[], youId: number, hostId: number, isPrivate: boolean, onKick: ((id: number) => void) | null, teamColor: number | null): HTMLElement {
+function reportMenu(target: RosterEntry, actions: ScoreActions, cell: HTMLElement): void {
+  clear(cell);
+  for (const reason of REPORT_REASONS) {
+    cell.append(
+      el('button', {
+        class: 'btn small',
+        style: 'margin:2px;font-size:11px;padding:3px 6px',
+        text: REPORT_REASON_TEXT[reason],
+        on: {
+          click: () => {
+            actions.onReport(target.id, reason);
+            clear(cell);
+            cell.append(el('span', { class: 'small-note', text: 'Reported. Thanks!' }));
+          },
+        },
+      }),
+    );
+  }
+}
+
+function scoreTable(rows: RosterEntry[], youId: number, hostId: number, isPrivate: boolean, actions: ScoreActions | null, teamColor: number | null): HTMLElement {
+  const onKick = actions?.onKick ?? null;
   const table = el('table');
-  table.append(el('tr', {}, el('th', { text: '#' }), el('th', { text: 'Player' }), el('th', { text: 'Score' }), el('th', { text: 'KOs' }), el('th', { text: 'Popped' }), el('th', { text: 'Ping' }), onKick ? el('th') : null));
+  table.append(el('tr', {}, el('th', { text: '#' }), el('th', { text: 'Player' }), el('th', { text: 'Score' }), el('th', { text: 'KOs' }), el('th', { text: 'Popped' }), el('th', { text: 'Ping' }), actions ? el('th') : null));
   rows.forEach((r, i) => {
     const tr = el(
       'tr',
@@ -337,7 +388,9 @@ function scoreTable(rows: RosterEntry[], youId: number, hostId: number, isPrivat
         'td',
         {},
         el('span', { class: 'swatch', style: { background: hexColor(teamColor ?? PLAYER_COLORS[r.color]?.hex ?? 0xffffff) } }),
+        r.bot ? null : el('span', { class: 'lv-chip', text: `${r.level}`, attrs: { title: `Level ${r.level}` } }),
         r.name,
+        r.rating !== undefined ? el('span', { class: 'small-note', style: 'margin-left:6px', text: String(r.rating) }) : null,
         r.bot ? el('span', { class: 'key', style: 'margin-left:6px;font-size:10px;min-width:0', text: 'BOT' }) : null,
         r.id === hostId && isPrivate ? el('span', { style: 'margin-left:6px', text: '👑', attrs: { title: 'Host' } }) : null,
       ),
@@ -345,10 +398,34 @@ function scoreTable(rows: RosterEntry[], youId: number, hostId: number, isPrivat
       el('td', { text: String(r.kos) }),
       el('td', { text: String(r.deaths) }),
       el('td', { text: r.bot ? '-' : String(r.ping) }),
-      onKick ? el('td', {}, r.id !== youId && !r.bot ? el('button', { class: 'btn small', text: 'Kick', on: { click: () => onKick(r.id) } }) : null) : null,
+      actions ? actionCell(r) : null,
     );
     table.append(tr);
   });
+  function actionCell(r: RosterEntry): HTMLElement {
+    const cell = el('td', { style: 'white-space:nowrap' });
+    if (!actions || r.id === youId || r.bot) return cell;
+    const muted = actions.muted.has(r.id);
+    add(
+      cell,
+      el('button', {
+        class: `btn small${muted ? ' yellow' : ''}`,
+        style: 'padding:3px 8px',
+        text: muted ? '🔈' : '🔇',
+        attrs: { title: muted ? 'Show their quick chat' : 'Hide their quick chat' },
+        on: {
+          click: () => {
+            actions.onMute(r.id);
+          },
+        },
+      }),
+      actions.reported.has(r.id)
+        ? el('span', { class: 'small-note', text: ' reported' })
+        : el('button', { class: 'btn small', style: 'padding:3px 8px;margin-left:4px', text: '⚑', attrs: { title: 'Report' }, on: { click: () => reportMenu(r, actions, cell) } }),
+      onKick ? el('button', { class: 'btn small', style: 'padding:3px 8px;margin-left:4px', text: 'Kick', on: { click: () => onKick(r.id) } }) : null,
+    );
+    return cell;
+  }
   return table;
 }
 
@@ -369,7 +446,14 @@ export function buildReplayBanner(victim: string, by: string, distance: number, 
   );
 }
 
-export function buildResults(result: MatchResult, roster: Map<number, RosterEntry>, youId: number, secondsLeft: number, teams: TeamView | null = null): HTMLElement {
+export function buildResults(
+  result: MatchResult,
+  roster: Map<number, RosterEntry>,
+  youId: number,
+  secondsLeft: number,
+  teams: TeamView | null = null,
+  progress: { report: ProgressReport | null; guest: boolean; onSignup: () => void; ranked: boolean } | null = null,
+): HTMLElement {
   const top = result.standings.slice(0, 3);
   const order = [top[1], top[0], top[2]];
   const heights = [110, 150, 80];
@@ -441,7 +525,8 @@ export function buildResults(result: MatchResult, roster: Map<number, RosterEntr
       podium,
       awards,
       stats,
-      el('div', { style: 'text-align:center;margin-top:14px;opacity:.7', text: `Next match in ${Math.ceil(secondsLeft)}...` }),
+      progress?.report ? buildProgressBox(progress.report, progress.guest, progress.onSignup) : null,
+      el('div', { style: 'text-align:center;margin-top:14px;opacity:.7', text: progress?.ranked ? `Back to the menu in ${Math.ceil(secondsLeft)}...` : `Next match in ${Math.ceil(secondsLeft)}...` }),
     ),
   );
 }
@@ -451,7 +536,7 @@ export function buildHowTo(onClose: () => void, bindings: Record<Action, string[
   const row = (keys: string[], what: string) => grid.append(el('div', {}, ...keys.map((k) => el('span', { class: 'key', text: k, style: 'margin-right:4px' }))), el('div', { text: what }));
   row(['W', 'A', 'S', 'D'], 'Move');
   row(['Trackpad'], 'Aim (or mouse)');
-  for (const a of ['fire', 'jump', 'dash', 'brace', 'grapple', 'grab', 'reload', 'util1', 'util2', 'taunt', 'scoreboard'] as Action[]) {
+  for (const a of ['fire', 'jump', 'dash', 'brace', 'grapple', 'grab', 'reload', 'util1', 'util2', 'taunt', 'chat', 'scoreboard'] as Action[]) {
     row(bindings[a].slice(0, 2).map(codeLabel), ACTION_LABELS[a]);
   }
   row(['Esc'], 'Menu');
@@ -562,6 +647,7 @@ export function buildSettings(s: Settings, cb: SettingsCallbacks, tab: 'controls
         ['low', 'Low (fastest)'],
       ], () => s.quality, (v) => (s.quality = v as Settings['quality']));
       check('Colorblind-friendly team colors', () => s.colorblindTeams, (v) => (s.colorblindTeams = v));
+      check("Show other players' quick chat", () => s.showQuickChat, (v) => (s.showQuickChat = v));
       check('Show FPS', () => s.showFps, (v) => (s.showFps = v));
       body.append(grid);
     }
@@ -590,6 +676,7 @@ const PAD_ACTION_LABELS: Record<string, string> = {
   util1: 'Utility 1',
   util2: 'Utility 2',
   taunt: 'Taunt',
+  chat: 'Quick chat (hold, aim with R-stick)',
   scoreboard: 'Scoreboard',
   menu: 'Menu',
 };

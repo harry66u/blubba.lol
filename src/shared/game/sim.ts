@@ -27,6 +27,7 @@ import { World } from '../world';
 import { DEFAULT_LOADOUT, type Loadout, MOD_IDS, UTILITY_IDS, type UtilityId, WEAPON_IDS, computeWeaponStats, sanitizeLoadout, utilityCooldown } from '../loadout';
 import { BOT_NAMES, BotBrain } from './bot';
 import type { ModeState } from '../protocol';
+import { COSMETIC_SLOTS, type Cosmetics, DEFAULT_COSMETICS, ITEMS } from '../economy';
 import { type BallEvent, BallGame, type ModeId, PumpGame, isTeamMode } from './modes';
 import { CHAOS_KINDS, type ChaosEvent, type ChaosKind, type Environment, NORMAL_ENV, chaosDuration, envAt } from './chaos';
 import type { GameEvent } from './events';
@@ -46,6 +47,9 @@ export interface MatchStats {
   bestCombo: number;
   throws: number;
   stomps: number;
+  goals: number;
+  /** Seconds spent filling your own team's pump. */
+  pumpTime: number;
 }
 
 export interface SimPlayer {
@@ -96,6 +100,8 @@ export interface SimPlayer {
   /** Last time each target got a "blow" event from this player's leaf blower. */
   blowEvents: Map<number, number>;
   streaming: boolean;
+  /** Looks only; never read by the simulation. */
+  cos: Cosmetics;
 }
 
 /** Thrown or fired objects. Kind 0 is a weapon shot; the rest are utilities. */
@@ -198,7 +204,7 @@ export interface MatchResult {
 }
 
 function newStats(): MatchStats {
-  return { kos: 0, deaths: 0, falls: 0, hits: 0, shots: 0, longestLaunch: 0, chainKos: 0, timesPopped: 0, bestCombo: 0, throws: 0, stomps: 0 };
+  return { kos: 0, deaths: 0, falls: 0, hits: 0, shots: 0, longestLaunch: 0, chainKos: 0, timesPopped: 0, bestCombo: 0, throws: 0, stomps: 0, goals: 0, pumpTime: 0 };
 }
 
 const MAX_QUEUE = 12;
@@ -221,6 +227,9 @@ export class GameSim {
   mode: ModeId;
   durationSec: number;
   phase: MatchPhase = 'waiting';
+  /** Ranked: one match with the same two players, no joining, leaving forfeits. */
+  fixedLineup = false;
+  matchStartedAt = 0;
   phaseEndsAt = 0;
   matchNumber = 0;
   lastResult: MatchResult | null = null;
@@ -283,7 +292,7 @@ export class GameSim {
 
   // --- Players -----------------------------------------------------------------------------
 
-  addPlayer(name: string, opts: { isBot?: boolean; color?: number; id?: number; loadout?: Loadout; team?: number } = {}): SimPlayer {
+  addPlayer(name: string, opts: { isBot?: boolean; color?: number; id?: number; loadout?: Loadout; team?: number; cos?: Cosmetics } = {}): SimPlayer {
     const id = opts.id ?? this.freeId();
     const state = createPlayerState();
     state.mode = MODE_DEAD;
@@ -324,6 +333,7 @@ export class GameSim {
       chainCool: new Map(),
       koTimes: [],
       savedInflation: -1,
+      cos: { ...(opts.cos ?? DEFAULT_COSMETICS) },
     };
     p.weapon = computeWeaponStats(p.loadout.weapon, p.loadout.mods);
     if (this.teams) p.team = opts.team ?? this.smallerTeam();
@@ -340,7 +350,14 @@ export class GameSim {
     const pick = <T,>(xs: readonly T[]) => xs[Math.floor(Math.random() * xs.length)];
     const utils = [...UTILITY_IDS].sort(() => Math.random() - 0.5);
     const loadout = sanitizeLoadout({ weapon: pick(WEAPON_IDS), mods: Math.random() < 0.5 ? [pick(MOD_IDS)] : [], utils: [utils[0], utils[1]] });
-    const p = this.addPlayer(name, { isBot: true, loadout });
+    // Bots dress up too, so every look shows up in public games.
+    const cos = { ...DEFAULT_COSMETICS };
+    for (const slot of COSMETIC_SLOTS) {
+      if (slot === 'color' || Math.random() < 0.4) continue;
+      const options = ITEMS.filter((i) => i.slot === slot);
+      cos[slot] = pick(options).id;
+    }
+    const p = this.addPlayer(name, { isBot: true, loadout, cos });
     this.bots.set(p.id, new BotBrain(skill, p.id * 7919 + this.tick));
     return p;
   }
@@ -1511,8 +1528,12 @@ export class GameSim {
       if (ev) this.onBallEvent(ev);
     }
     if (this.pumpGame) {
-      const list = [...this.players.values()].map((p) => ({ team: p.team, state: p.state }));
+      const list = [...this.players.values()].map((p) => ({ id: p.id, team: p.team, state: p.state }));
       const winner = this.pumpGame.step(this.dt, list);
+      for (const id of this.pumpGame.pumping) {
+        const p = this.players.get(id);
+        if (p) p.stats.pumpTime += this.dt;
+      }
       if (winner !== null) {
         this.events.push({ t: 'pumpFull', tick: this.tick, team: winner });
         this.pendingEnd = true;
@@ -1526,7 +1547,10 @@ export class GameSim {
       this.teamScores[ev.team]++;
       const scorer = this.players.get(ev.scorer);
       // Own goals don't count toward a player's goals.
-      if (scorer && scorer.team === ev.team) scorer.score++;
+      if (scorer && scorer.team === ev.team) {
+        scorer.score++;
+        scorer.stats.goals++;
+      }
       this.events.push({ t: 'goal', tick: this.tick, team: ev.team, scorer: ev.scorer, x: b.x, y: b.y, z: b.z });
       if (this.teamScores[ev.team] >= BALANCE.modes.ball.goalTarget) this.pendingEnd = true;
     } else if (ev.kind === 'out') {
@@ -2123,7 +2147,10 @@ export class GameSim {
 
   private updatePhase(): void {
     if (this.phase === 'waiting' && this.players.size >= 2) this.startMatch();
-    else if (this.phase === 'playing' && this.players.size < 2) {
+    else if (this.phase === 'playing' && this.players.size < 2 && this.fixedLineup) {
+      // Ranked: someone left, so whoever is still here wins.
+      this.endMatch();
+    } else if (this.phase === 'playing' && this.players.size < 2) {
       this.phase = 'waiting';
       this.world.collapseStart = Infinity;
       this.onPhaseChange?.();
@@ -2133,6 +2160,7 @@ export class GameSim {
   startMatch(): void {
     this.phase = 'playing';
     this.matchNumber++;
+    this.matchStartedAt = this.time;
     this.phaseEndsAt = this.time + this.durationSec;
     this.world.collapseStart = this.phaseEndsAt - BALANCE.final.seconds;
     this.world.setTime(this.time);
@@ -2168,7 +2196,7 @@ export class GameSim {
     if (this.phase === 'playing' && (this.time >= this.phaseEndsAt || this.pendingEnd)) {
       this.pendingEnd = false;
       this.endMatch();
-    } else if (this.phase === 'results' && this.time >= this.phaseEndsAt) {
+    } else if (this.phase === 'results' && this.time >= this.phaseEndsAt && !this.fixedLineup) {
       this.world.collapseStart = Infinity;
       if (this.players.size >= 2) this.startMatch();
       else {

@@ -196,6 +196,8 @@ export type PumpState = 0 | 1 | 2;
 export class PumpGame {
   fill: [number, number] = [0, 0];
   states: PumpState[];
+  /** Players filling their own uncontested pump this tick. */
+  readonly pumping = new Set<number>();
 
   constructor(private readonly map: MapDef) {
     this.states = (map.pumps ?? []).map(() => 0 as PumpState);
@@ -207,25 +209,30 @@ export class PumpGame {
   }
 
   /** Advances filling; returns the winning team once a giant is full. */
-  step(dt: number, players: Iterable<{ team: number; state: PlayerState }>): 0 | 1 | null {
+  step(dt: number, players: Iterable<{ id?: number; team: number; state: PlayerState }>): 0 | 1 | null {
     const P = BALANCE.modes.pump;
     const list = [...players];
+    this.pumping.clear();
     (this.map.pumps ?? []).forEach((pump, i) => {
       let mine = 0;
       let enemies = 0;
+      const on: number[] = [];
       for (const p of list) {
         const s = p.state;
         if (s.mode === MODE_DEAD) continue;
         if (Math.hypot(s.px - pump.x, s.pz - pump.z) > pump.r + playerRadius(s) * 0.5) continue;
         if (Math.abs(s.py - pump.y) > 0.6) continue;
-        if (p.team === pump.team) mine++;
-        else enemies++;
+        if (p.team === pump.team) {
+          mine++;
+          if (p.id !== undefined) on.push(p.id);
+        } else enemies++;
       }
       if (enemies > 0 && mine > 0) this.states[i] = 2;
       else if (enemies > 0) this.states[i] = 2;
       else if (mine > 0) this.states[i] = 1;
       else this.states[i] = 0;
       if (this.states[i] === 1) {
+        for (const id of on) this.pumping.add(id);
         const t = pump.team;
         this.fill[t] = Math.min(1, this.fill[t] + P.rate * (1 + P.extraPerPlayer * (mine - 1)) * dt);
       }

@@ -1,5 +1,6 @@
 import { BALANCE } from '../shared/balance';
-import type { ModeId } from '../shared/game/modes';
+import { QUICK_CHAT, unlockedAt } from '../shared/economy';
+import { sanitizeLoadout } from '../shared/loadout';
 import { randomGuestName } from '../shared/names';
 import type { JoinRequest, ServerMessage } from '../shared/protocol';
 import { Audio } from './audio/audio';
@@ -8,11 +9,14 @@ import { ClientGame } from './game/clientGame';
 import { InputManager } from './input/input';
 import { PAD } from './input/gamepad';
 import { Connection } from './net/connection';
+import { AccountClient } from './net/account';
 import { type Quality, Renderer } from './render/renderer';
 import { type Settings, loadIdentity, loadSettings, saveIdentity, saveSettings } from './settings';
 import { clear } from './ui/dom';
+import { type AccountTab, buildAccountChip, buildAccountPanel, buildProfile, buildQueue } from './ui/accountUi';
+import { buildLocker } from './ui/locker';
 import { Hud } from './ui/hud';
-import { buildClickToPlay, buildHowTo, buildMainMenu, buildPause, buildReplayBanner, buildResults, buildRoomJoin, buildScoreboard, buildSettings } from './ui/menus';
+import { type PlayMode, buildClickToPlay, buildHowTo, buildMainMenu, buildPause, buildReplayBanner, buildResults, buildRoomJoin, buildScoreboard, buildSettings } from './ui/menus';
 import { buildLoadout, loadLoadout, saveLoadout } from './ui/loadout';
 
 const settings = loadSettings();
@@ -39,6 +43,10 @@ const net = new Connection();
 const hud = new Hud();
 const game = new ClientGame(renderer, audio, hud, input, net, settings);
 game.setLoadout(loadLoadout(), false);
+const account = new AccountClient(identity.guestId);
+hud.setChatLabels(QUICK_CHAT);
+/** Players you reported this session (one report each). */
+const reported = new Set<number>();
 
 // Layers: HUD at the bottom, then menus/overlays on top.
 const menuLayer = document.createElement('div');
@@ -49,9 +57,11 @@ fpsEl.className = 'ping';
 fpsEl.style.top = '24px';
 uiRoot.append(hud.root, scoreLayer, menuLayer, overlayLayer, fpsEl);
 
-type Screen = 'menu' | 'room-join' | 'connecting' | 'playing';
+type Screen = 'menu' | 'room-join' | 'connecting' | 'queue' | 'playing';
 let screen: Screen = 'menu';
-let overlay: 'none' | 'pause' | 'settings' | 'howto' | 'click' | 'results' | 'loadout' | 'replay' = 'none';
+let overlay: 'none' | 'pause' | 'settings' | 'howto' | 'click' | 'results' | 'loadout' | 'replay' | 'locker' | 'profile' | 'account' = 'none';
+let accountTab: AccountTab = 'signup';
+let lockerDispose: (() => void) | null = null;
 let pendingJoin: JoinRequest | null = null;
 let scoreboardOpen = false;
 /** Playing with a controller: no pointer lock needed. */
@@ -66,17 +76,17 @@ function roomCodeFromPath(): { code: string; challenge: boolean } | null {
 }
 
 const MODE_KEY = 'bubba.mode.v1';
-function loadMode(): ModeId {
+function loadMode(): PlayMode {
   try {
     const m = window.localStorage.getItem(MODE_KEY);
-    if (m === 'knockout' || m === 'teamKnockout' || m === 'ball' || m === 'pump' || m === 'duel') return m;
+    if (m === 'knockout' || m === 'teamKnockout' || m === 'ball' || m === 'pump' || m === 'duel' || m === 'ranked') return m;
   } catch {
     // Storage blocked: default mode.
   }
   return 'knockout';
 }
 let lastMode = loadMode();
-function rememberMode(m: ModeId): void {
+function rememberMode(m: PlayMode): void {
   lastMode = m;
   try {
     window.localStorage.setItem(MODE_KEY, m);
@@ -94,12 +104,23 @@ function setPath(path: string): void {
 function showMenu(notice?: string): void {
   screen = 'menu';
   setOverlay('none');
-  clear(menuLayer);
   setPath('/');
+  renderMenu(notice);
+}
+
+/** Draws the main menu without touching whatever overlay is open. */
+function renderMenu(notice?: string): void {
+  clear(menuLayer);
   menuLayer.append(
     buildMainMenu(identity.name, {
       onLoadout: () => setOverlay('loadout'),
-      onPlay: (name, mode) => startJoin(name, { kind: 'quick', mode }),
+      onLocker: () => setOverlay('locker'),
+      onProfile: () => setOverlay('profile'),
+      onPlay: (name, mode) => {
+        if (mode !== 'ranked') return startJoin(name, { kind: 'quick', mode });
+        if (!account.account) return openAccount('signup');
+        startJoin(name, { kind: 'ranked' });
+      },
       onChallenge: (name) => startJoin(name, { kind: 'challenge' }),
       onModeChange: rememberMode,
       onCreate: (name) => startJoin(name, { kind: 'create' }),
@@ -107,9 +128,30 @@ function showMenu(notice?: string): void {
       onSettings: () => setOverlay('settings'),
       onHowTo: () => setOverlay('howto'),
       onNameChange: rememberName,
-    }, notice, lastMode),
+    }, notice, lastMode, account.account?.name ?? null),
+    buildAccountChip(account, () => openAccount('signup'), () => setOverlay('profile')),
   );
 }
+
+function openAccount(tab: AccountTab): void {
+  accountTab = tab;
+  setOverlay('account');
+}
+
+/** Called when the account or profile changes (log in/out, purchases, match rewards). */
+let lastAccountName: string | null = null;
+account.onChange(() => {
+  // Drop anything the saved loadout has that isn't unlocked yet.
+  const allowed = unlockedAt(account.profile.level);
+  const clean = sanitizeLoadout(game.loadout, allowed);
+  if (JSON.stringify(clean) !== JSON.stringify(game.loadout)) game.setLoadout(clean, false);
+  const name = account.account?.name ?? null;
+  if (name !== lastAccountName) {
+    lastAccountName = name;
+    if (name) rememberName(name);
+    if (screen === 'menu') renderMenu();
+  }
+});
 
 function showRoomJoin(code: string, notice?: string, challenge = false): void {
   screen = 'room-join';
@@ -137,20 +179,51 @@ function startJoin(name: string, join: JoinRequest): void {
   screen = 'connecting';
   pendingJoin = join;
   clear(menuLayer);
-  net.join(name, identity.guestId, join, game.loadout).catch((err: Error) => {
+  if (join.kind === 'ranked') {
+    input.exitLock();
+    screen = 'queue';
+    menuLayer.append(buildQueue(0, 1, account.profile.rating ?? 1000, cancelQueue));
+  }
+  net.join(name, identity.guestId, join, game.loadout, account.token ?? undefined).catch((err: Error) => {
     input.exitLock();
     showMenu(err.message || 'Could not connect. Check your Wi-Fi and try again.');
   });
 }
 
+function cancelQueue(): void {
+  net.close();
+  showMenu();
+  net.warm().catch(() => undefined);
+}
+
 function setOverlay(next: typeof overlay): void {
   overlay = next;
   clear(overlayLayer);
+  lockerDispose?.();
+  lockerDispose = null;
+  const back = () => setOverlay(screen === 'playing' ? 'pause' : 'none');
   switch (next) {
+    case 'locker': {
+      const locker = buildLocker({ account, audio, weapon: game.loadout.weapon, onClose: back, onSignup: () => openAccount('signup') });
+      lockerDispose = locker.dispose;
+      overlayLayer.append(locker.root);
+      break;
+    }
+    case 'profile':
+      overlayLayer.append(
+        buildProfile(account, back, () => openAccount('signup'), () => {
+          void account.logout().then(() => (screen === 'menu' ? showMenu() : back()));
+        }),
+      );
+      break;
+    case 'account':
+      overlayLayer.append(buildAccountPanel(account, accountTab, back, back));
+      break;
     case 'pause':
       overlayLayer.append(
         buildPause(game.room, game.room?.hostId === game.youId, {
           onLoadout: () => setOverlay('loadout'),
+          onLocker: () => setOverlay('locker'),
           onResume: resume,
           onLeave: leaveMatch,
           onSettings: () => setOverlay('settings'),
@@ -203,7 +276,7 @@ function setOverlay(next: typeof overlay): void {
             game.setLoadout(l, true);
           },
           () => setOverlay(screen === 'playing' ? 'pause' : 'none'),
-          undefined,
+          account.locked,
           screen === 'playing' ? 'Changes apply the next time you respawn.' : '',
         ),
       );
@@ -236,7 +309,14 @@ function setOverlay(next: typeof overlay): void {
     case 'results':
       if (game.match.result) {
         const secondsLeft = Math.max(0, (game.match.endsAtTick - game.clock.tickAt(performance.now())) / 60);
-        overlayLayer.append(buildResults(game.match.result, game.roster, game.youId, secondsLeft, game.teamView()));
+        overlayLayer.append(
+          buildResults(game.match.result, game.roster, game.youId, secondsLeft, game.teamView(), {
+            report: game.lastProgress,
+            guest: !account.account,
+            onSignup: () => openAccount('signup'),
+            ranked: !!game.room?.ranked,
+          }),
+        );
       }
       break;
     default:
@@ -254,6 +334,7 @@ function applySettings(s: Settings): void {
   if (q !== renderer.quality) renderer.setQuality(q);
   fpsEl.classList.toggle('hidden', !s.showFps);
   game.refreshTeamColors();
+  game.showChat = s.showQuickChat;
 }
 
 function resume(): void {
@@ -319,7 +400,23 @@ function renderScoreboard(): void {
       game.youId,
       game.room?.hostId ?? -1,
       !!game.room?.isPrivate,
-      isHost && !input.locked ? (id) => net.send({ type: 'host', action: 'kick', id }) : null,
+      input.locked
+        ? null
+        : {
+            onKick: isHost ? (id) => net.send({ type: 'host', action: 'kick', id }) : null,
+            onReport: (id, reason) => {
+              reported.add(id);
+              net.send({ type: 'report', target: id, reason });
+              hud.toast('Thanks. We got your report.');
+            },
+            onMute: (id) => {
+              if (game.muted.has(id)) game.muted.delete(id);
+              else game.muted.add(id);
+              renderScoreboard();
+            },
+            muted: game.muted,
+            reported,
+          },
       game.teamView(),
     ),
   );
@@ -341,6 +438,9 @@ input.onLockChange = (locked) => {
   }
 };
 
+input.onChatWheel = (open, slot) => hud.showChatWheel(open, slot);
+input.onChat = (slot) => game.sendChat(slot);
+
 input.onScoreboard = (show) => {
   scoreboardOpen = show;
   renderScoreboard();
@@ -349,8 +449,36 @@ input.onScoreboard = (show) => {
 net.handlers = {
   onSnapshot: (snap) => game.onSnapshot(snap),
   onMessage: (msg: ServerMessage) => {
+    if (msg.type === 'queue') {
+      if (screen === 'queue') {
+        clear(menuLayer);
+        menuLayer.append(buildQueue(msg.seconds, msg.searching, msg.rating, cancelQueue));
+      }
+      return;
+    }
+    if (msg.type === 'progress') {
+      account.setProfile(msg.report.profile);
+      game.onMessage(msg);
+      if (overlay === 'results') setOverlay('results');
+      return;
+    }
+    if (msg.type === 'renamed') {
+      hud.toast(msg.message, 6000);
+      if (!account.account) rememberName(msg.name);
+      return;
+    }
+    if (msg.type === 'error' && msg.code === 'ranked_over') {
+      net.close();
+      game.leave();
+      input.exitLock();
+      showMenu(msg.message);
+      net.warm().catch(() => undefined);
+      return;
+    }
     if (msg.type === 'welcome') {
+      if (msg.room.ranked) padPlay = padPlay || input.lastDevice === 'pad';
       screen = 'playing';
+      reported.clear();
       clear(menuLayer);
       game.enter(msg);
       if (msg.room.isPrivate) setPath(`/${msg.room.challenge ? 'c' : 'r'}/${msg.room.code}`);
@@ -368,6 +496,9 @@ net.handlers = {
         else manual();
       } else if (msg.room.challenge) {
         hud.callout('1v1!', `First to ${BALANCE.modes.duel.target} knockouts. Good luck!`, 3);
+      } else if (msg.room.ranked) {
+        hud.callout('RANKED 1v1', `First to ${BALANCE.modes.duel.target} knockouts. Click to play!`, 4);
+        audio.goalHorn();
       }
       return;
     }
@@ -378,6 +509,7 @@ net.handlers = {
         input.exitLock();
         if (msg.code === 'not_found' && link) showRoomJoin(link.code, msg.message, link.challenge);
         else showMenu(msg.message);
+        if (msg.code === 'account_required') openAccount('login');
         return;
       }
     }
@@ -385,7 +517,7 @@ net.handlers = {
     if (msg.type === 'roster' && scoreboardOpen) renderScoreboard();
   },
   onClose: (reason) => {
-    if (screen === 'playing' || screen === 'connecting') {
+    if (screen === 'playing' || screen === 'connecting' || screen === 'queue') {
       game.leave();
       input.exitLock();
       showMenu(`Disconnected: ${reason}`);
@@ -394,6 +526,7 @@ net.handlers = {
 };
 
 game.onMatchChange = (m) => {
+  if (m.phase === 'playing') game.lastProgress = null;
   if (m.phase === 'results') {
     if (m.result?.replay && overlay !== 'replay') {
       game.startReplay(m.result.replay, () => {
@@ -464,6 +597,7 @@ requestAnimationFrame(loop);
 
 applySettings(settings);
 net.warm().catch(() => undefined);
+account.refresh().catch(() => undefined);
 const link = roomCodeFromPath();
 if (link) showRoomJoin(link.code, undefined, link.challenge);
 else showMenu();
@@ -476,4 +610,4 @@ if (splash) {
 }
 
 // Expose for debugging and automated tests.
-(window as unknown as { bubba: unknown }).bubba = { game, net, input, renderer, settings, perf };
+(window as unknown as { bubba: unknown }).bubba = { game, net, input, renderer, settings, perf, account };

@@ -120,6 +120,41 @@ The spec leaves the tech stack and many details open. This file records what was
 - **Colorblind-friendly team colors** swap red/blue for orange/blue (Settings → Graphics); the
   pumps, giants, name tags, score strip and scoreboard all follow the setting.
 
+## Accounts and economy (Phase 8)
+
+- **No personal information.** Most players are under 18, so accounts are a name and a
+  password only. No email means no email recovery: sign-up shows a one-time recovery code
+  instead (hashed on the server like the password, replaced whenever it's used).
+- **Passwords** are hashed with scrypt (salted); sessions are random 256-bit tokens stored only
+  as SHA-256 hashes, valid for 90 days, and all of them end when a password is reset. Login and
+  sign-up are rate limited per IP and take the same time whether or not the name exists.
+- **Guest progress** lives on the server keyed by the browser's random guest id (the id acts as
+  the guest's credential). Guest profiles nobody has touched for 120 days are pruned.
+- **Storage:** SQLite via `node:sqlite` (built into Node 22.5+), so there's nothing to compile
+  and the whole thing is still one process. Profiles are cached in memory and written at match
+  end and on purchases.
+- **Coins are earned, not bought.** The spec requires a direct-price store with no loot boxes;
+  this build prices everything in coins earned by playing. Real-money purchases would need a
+  payment provider and parental-consent handling for minors, so they're left out; the store's
+  fixed-price design would take a paid currency later without changing anything else.
+- **Pacing:** a full 4-minute match is worth roughly 60-170 XP and 10-40 coins. Level 8 (every
+  unlock) takes about a dozen matches; items cost 100-450 coins (a few matches each).
+- **Anti-farming:** nothing is earned without 45 seconds in the match and some activity (a shot,
+  a hit, a goal, or time on a pump); knockout rewards cap at 15 per match.
+- **Ranked is 1v1** because it's the cleanest measure of skill and needs only two people online.
+  Elo with K=40 for the first 10 games and K=24 after; draws don't change ratings; leaving
+  mid-match is a loss. Matchmaking starts within ±100 rating and widens by 15 per second, then
+  accepts anyone after 45 seconds (school-sized player counts). One match per queue so friends
+  can't farm each other with rematches.
+- **Quick chat only.** Eight fixed presets; the server only relays a preset number, never text.
+  Max one message per 1.2 s and 4 per 10 s.
+- **Reports** are one per target per reporter per room (max 5), stored with room and reason.
+  Three distinct players reporting a name renames that player immediately; the account (if
+  any) is flagged for review.
+- **Cosmetics never touch the simulation.** They ride along in the roster and are drawn by the
+  client; the server only checks you own what you wear. Bots wear random items so every look
+  shows up in public games.
+
 ## Sound-off versions of every audio joke
 
 | Sound | Visual |
@@ -129,4 +164,6 @@ The spec leaves the tech stack and many details open. This file records what was
 | Groin-shot groan | Target doubles over + "OOF!" popup |
 | Deflating-balloon squeal | Spinning, shrinking balloon zipping into the sky + "WHEEEE!" |
 | Squeaky hits | Hit popups, hit marker, and inflation % jumps |
+| Sound packs (kazoo, duck, trumpet, slide whistle, boing) | "BZZ-BZZ!", "QUACK!", "TA-DAA!", "WHOOEEE!", "BOING!" popups on taunts and knockouts |
+| Goal horn and crowd | Big GOAL! callout in the team color plus confetti |
 | Brace clang | Metallic flash + "BRACED!" popup |

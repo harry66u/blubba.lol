@@ -3,6 +3,20 @@ import { inflationScale } from '../../shared/player';
 import type { WeaponId } from '../../shared/loadout';
 import { FlexTube, noise1 } from './flexTube';
 import { type WeaponModel, buildWeaponModel } from './weapons';
+import { animateHat, applyFinish, buildFaceExtras, buildHat, disposeGroup } from './looks';
+
+/** Cosmetic keys (see shared/economy.ts). */
+export interface Look {
+  pattern: string;
+  face: string;
+  hat: string;
+  finish: string;
+}
+
+export const DEFAULT_LOOK: Look = { pattern: 'solid', face: 'smile', hat: 'spikes', finish: 'team' };
+
+/** How long each taunt animation lasts, in seconds. */
+const TAUNT_TIME: Record<string, number> = { burp: 0.9, wave: 1.6, spin: 1.1, noodle: 1.8, flex: 1.4 };
 
 export interface TubeManPose {
   time: number;
@@ -151,7 +165,6 @@ const sharedGeo = {
   pupil: new THREE.SphereGeometry(0.05, 12, 8),
   mouthSmile: new THREE.TorusGeometry(0.085, 0.022, 6, 14, Math.PI),
   mouthO: new THREE.TorusGeometry(0.05, 0.022, 6, 14),
-  spike: new THREE.ConeGeometry(0.07, 0.3, 8),
   base: new THREE.CylinderGeometry(0.4, 0.46, BASE_H, 20),
   baseRing: new THREE.TorusGeometry(0.34, 0.05, 8, 24),
   bubble: new THREE.SphereGeometry(1, 24, 16),
@@ -173,15 +186,6 @@ const sharedMat = {
     emissiveIntensity: 0.4,
   }),
 };
-
-/** Lighter or darker shade of a color for accents (hair, stripes). */
-function shade(hex: number, amount: number): THREE.Color {
-  const c = new THREE.Color(hex);
-  const hsl = { h: 0, s: 0, l: 0 };
-  c.getHSL(hsl);
-  c.setHSL((hsl.h + 0.08) % 1, Math.min(1, hsl.s * 1.05), Math.max(0, Math.min(1, hsl.l + amount)));
-  return c;
-}
 
 /** A flailing inflatable tube man. Visual only: gameplay hitboxes follow the body capsule. */
 export class TubeMan {
@@ -216,10 +220,16 @@ export class TubeMan {
   private gunId: WeaponId | null = null;
   private readonly pin: THREE.Group;
   private readonly crown: THREE.Group;
+  private look: Look = { ...DEFAULT_LOOK };
+  private hat: THREE.Group;
+  private faceExtras: THREE.Group;
+  private tauntStyle = '';
+  private tauntT = 0;
 
-  constructor(colorHex: number, opts: { physical?: boolean; seed?: number; pattern?: Pattern } = {}) {
+  constructor(colorHex: number, opts: { physical?: boolean; seed?: number; pattern?: Pattern; look?: Partial<Look> } = {}) {
     this.seed = opts.seed ?? Math.random() * 100;
-    const matOpts = { color: colorHex, roughness: 0.3, metalness: 0.0, emissive: new THREE.Color(colorHex), emissiveIntensity: 0.0, map: patternTexture(opts.pattern ?? 'solid') };
+    this.look = { ...DEFAULT_LOOK, ...(opts.pattern ? { pattern: opts.pattern } : {}), ...opts.look };
+    const matOpts = { color: colorHex, roughness: 0.3, metalness: 0.0, emissive: new THREE.Color(colorHex), emissiveIntensity: 0.0, map: patternTexture(this.look.pattern as Pattern) };
     this.bodyMat = opts.physical
       ? new THREE.MeshPhysicalMaterial({ ...matOpts, clearcoat: 0.7, clearcoatRoughness: 0.2 })
       : new THREE.MeshStandardMaterial(matOpts);
@@ -257,15 +267,11 @@ export class TubeMan {
     this.mouthO.visible = false;
     this.face.add(this.mouthSmile, this.mouthO);
 
-    const hairMat = new THREE.MeshStandardMaterial({ color: shade(colorHex, 0.12), roughness: 0.35 });
-    for (let i = 0; i < 6; i++) {
-      const spike = new THREE.Mesh(sharedGeo.spike, hairMat);
-      const a = (i / 6) * Math.PI * 2;
-      spike.position.set(Math.cos(a) * 0.12, 0.08, Math.sin(a) * 0.12);
-      spike.rotation.set(Math.sin(a) * 0.7, 0, -Math.cos(a) * 0.7);
-      spike.castShadow = true;
-      this.hair.add(spike);
-    }
+    this.hat = buildHat(this.look.hat, colorHex);
+    this.hair.add(this.hat);
+    this.faceExtras = buildFaceExtras(this.look.face);
+    this.face.add(this.faceExtras);
+    this.applyFaceBase();
 
     this.bubble = new THREE.Mesh(sharedGeo.bubble, sharedMat.bubble);
     this.bubble.visible = false;
@@ -284,7 +290,51 @@ export class TubeMan {
     this.color.set(hex);
     this.bodyMat.color.set(hex);
     this.bodyMat.emissive.set(hex);
-    this.gun?.setColor(hex);
+    if (this.gun) applyFinish(this.gun, this.look.finish, hex);
+    // Some hats are tinted from the body color.
+    this.rebuildHat();
+  }
+
+  /** Changes pattern, face, hat and weapon finish. */
+  setLook(look: Partial<Look>): void {
+    const next = { ...this.look, ...look };
+    const prev = this.look;
+    this.look = next;
+    if (next.pattern !== prev.pattern) {
+      this.bodyMat.map = patternTexture(next.pattern as Pattern);
+      this.bodyMat.needsUpdate = true;
+    }
+    if (next.hat !== prev.hat) this.rebuildHat();
+    if (next.face !== prev.face) {
+      this.face.remove(this.faceExtras);
+      disposeGroup(this.faceExtras);
+      this.faceExtras = buildFaceExtras(next.face);
+      this.face.add(this.faceExtras);
+      this.applyFaceBase();
+    }
+    if (next.finish !== prev.finish && this.gun) applyFinish(this.gun, next.finish, this.color.getHex());
+  }
+
+  private rebuildHat(): void {
+    this.hair.remove(this.hat);
+    disposeGroup(this.hat);
+    this.hat = buildHat(this.look.hat, this.color.getHex());
+    this.hair.add(this.hat);
+  }
+
+  /** Base eye/mouth layout for the current face (update() animates on top of this). */
+  private applyFaceBase(): void {
+    const f = this.look.face;
+    const hideEyes = f === 'cyclops' || f === 'shades';
+    for (const e of this.eyes) e.visible = !hideEyes;
+    for (const p of this.pupils) p.visible = !hideEyes;
+    this.mouthSmile.scale.setScalar(f === 'grin' ? 1.45 : 1);
+  }
+
+  /** Plays a taunt animation (visual only). */
+  taunt(style: string): void {
+    this.tauntStyle = style;
+    this.tauntT = TAUNT_TIME[style] ?? 1;
   }
 
   get weapon(): WeaponId | null {
@@ -301,6 +351,7 @@ export class TubeMan {
     this.gunId = id;
     if (id) {
       this.gun = buildWeaponModel(id, this.color.getHex());
+      applyFinish(this.gun, this.look.finish, this.color.getHex());
       this.gun.root.scale.setScalar(0.9);
       this.gunMount.add(this.gun.root);
     }
@@ -320,9 +371,23 @@ export class TubeMan {
   update(p: TubeManPose): void {
     const dt = Math.min(0.05, p.dt);
     const t = p.time;
-    const s = inflationScale(p.inflation);
+    let s = inflationScale(p.inflation);
+    // Taunts are pure animation: spin, flex, wave, go floppy.
+    let tauntSpin = 0;
+    let flop = 0;
+    let wave = 0;
+    if (this.tauntT > 0) {
+      this.tauntT = Math.max(0, this.tauntT - dt);
+      const total = TAUNT_TIME[this.tauntStyle] ?? 1;
+      const k = 1 - this.tauntT / total;
+      const env = Math.sin(Math.min(1, k) * Math.PI);
+      if (this.tauntStyle === 'spin') tauntSpin = k * Math.PI * 4;
+      else if (this.tauntStyle === 'flex') s *= 1 + 0.35 * env;
+      else if (this.tauntStyle === 'noodle') flop = env;
+      else if (this.tauntStyle === 'wave') wave = env;
+    }
     this.rig.scale.setScalar(s);
-    this.group.rotation.y = p.yaw + Math.PI;
+    this.group.rotation.y = p.yaw + Math.PI + tauntSpin;
 
     // Velocity in the character's local frame (+z forward, +x left).
     const cy = Math.cos(p.yaw + Math.PI);
@@ -339,6 +404,7 @@ export class TubeMan {
     }
     if (p.doubled) targetZ += 1.6;
     if (p.hanging) targetZ += 0.25;
+    if (flop > 0) targetX += Math.sin(t * 7) * 1.4 * flop;
     const lim = p.launched ? 1.8 : 1.1;
     targetX = Math.max(-lim, Math.min(lim, targetX));
     targetZ = Math.max(-lim, Math.min(lim, targetZ));
@@ -364,7 +430,7 @@ export class TubeMan {
     // --- Body spine. ---
     const lenScale = 1 + this.squash;
     const radScale = 1 / Math.sqrt(Math.max(0.6, lenScale));
-    const wobbleAmp = p.bracing ? 0.02 : 0.09 + Math.min(0.12, Math.hypot(lvx, lvz) * 0.01);
+    const wobbleAmp = (p.bracing ? 0.02 : 0.09 + Math.min(0.12, Math.hypot(lvx, lvz) * 0.01)) + flop * 0.25;
     const spine = this.body.spine;
     const radii = this.body.radii;
     const n = BODY_RINGS;
@@ -426,15 +492,29 @@ export class TubeMan {
     this.mouthSmile.visible = !this.mouthO.visible;
     this.mouthSmile.rotation.z = ouch ? 0 : Math.PI;
     this.mouthSmile.position.y = ouch ? -0.26 : -0.2;
+    const face = this.look.face;
+    if (face === 'angry' && !scared && !ouch) this.mouthSmile.rotation.z = 0;
     const blink = noise1(t * 0.9, this.seed + 9) > 0.93 ? 0.1 : 1;
+    const lids = face === 'sleepy' ? 0.42 : 1;
+    const squint = (ouch ? 0.15 : p.charge > 0.5 ? 0.7 : 1) * lids;
     for (let i = 0; i < 2; i++) {
       const eye = this.eyes[i];
       const pupil = this.pupils[i];
-      const squint = ouch ? 0.15 : p.charge > 0.5 ? 0.7 : 1;
-      eye.scale.set(1, squint * blink, 1);
-      pupil.scale.set(scared ? 0.6 : 1, (scared ? 0.6 : 1) * squint * blink, 1);
+      const size = face === 'derp' ? (i === 0 ? 1.3 : 0.8) : 1;
+      eye.scale.set(size, size * squint * blink, size);
+      pupil.scale.set((scared ? 0.6 : 1) * size, (scared ? 0.6 : 1) * size * squint * blink, size);
       const look = noise1(t * 0.6 + i * 0.01, this.seed + 5) * 0.025;
-      pupil.position.x = (i === 0 ? -0.12 : 0.12) + look;
+      pupil.position.x = (i === 0 ? -0.12 : 0.12) + look + (face === 'derp' ? (i === 0 ? -0.03 : 0.03) : 0);
+      pupil.position.y = face === 'derp' ? (i === 0 ? 0.03 : -0.03) : face === 'sleepy' ? -0.02 : 0;
+      pupil.position.z = 0.065 * size;
+    }
+    const cyc = this.faceExtras.userData.eye as THREE.Object3D | undefined;
+    if (cyc) {
+      cyc.scale.set(1, squint * blink, 1);
+      const cp = this.faceExtras.userData.pupil as THREE.Object3D;
+      const k = scared ? 0.6 : 1;
+      cp.scale.set(k, k * squint * blink, 1);
+      cp.position.x = noise1(t * 0.6, this.seed + 5) * 0.04;
     }
 
     // Hair tuft on the very top, following the tip's direction.
@@ -443,6 +523,7 @@ export class TubeMan {
     this.hair.position.set(spine[top * 3], spine[top * 3 + 1] - 0.05, spine[top * 3 + 2]);
     const tip = SV1.set(spine[top * 3] - spine[pre * 3], spine[top * 3 + 1] - spine[pre * 3 + 1], spine[top * 3 + 2] - spine[pre * 3 + 2]).normalize();
     this.hair.quaternion.setFromUnitVectors(Y_UP, tip);
+    animateHat(this.hat, t, dt, p.launched);
 
     // --- Arms: constant, joyful flailing. ---
     const flailTarget = p.bracing || p.holding ? 0.15 : p.held ? 2.4 : p.hanging ? 0.3 : p.launched ? 1.8 : 1 + Math.min(0.6, Math.hypot(lvx, lvz) * 0.05);
@@ -468,7 +549,11 @@ export class TubeMan {
       // Base direction: out and up.
       let ang = 0.5 + noise1(t * 2.2, this.seed + side * 11) * 0.7 * this.flail;
       let yaw = noise1(t * 1.6, this.seed + side * 17) * 0.8 * this.flail;
-      if (p.hanging) {
+      if (wave > 0 && side === 0) {
+        // Big friendly wave.
+        ang = 1.2 * wave + ang * (1 - wave);
+        yaw = Math.sin(t * 12) * 0.9 * wave;
+      } else if (p.hanging) {
         // Reaching up to the ledge.
         ang = 1.25;
         yaw = 0.9;
@@ -546,6 +631,8 @@ export class TubeMan {
     this.body.dispose();
     for (const a of this.arms) a.dispose();
     this.bodyMat.dispose();
+    disposeGroup(this.hat);
+    disposeGroup(this.faceExtras);
   }
 }
 

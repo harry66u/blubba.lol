@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { WeaponId } from '../../shared/loadout';
 import { type WeaponModel, buildWeaponModel } from './weapons';
+import { applyFinish } from './looks';
 
 /** First-person weapon held in the lower right of the screen. */
 export class ViewModel {
@@ -9,6 +10,7 @@ export class ViewModel {
   private model: WeaponModel;
   private weaponId: WeaponId = 'airCannon';
   private color: number;
+  private finish = 'team';
   private recoil = 0;
   private recoilV = 0;
   private bobT = 0;
@@ -49,6 +51,7 @@ export class ViewModel {
     this.gun.remove(this.model.root);
     this.model.dispose();
     this.model = buildWeaponModel(id, this.color);
+    applyFinish(this.model, this.finish, this.color);
     this.gun.add(this.model.root);
     this.model.muzzle.add(this.muzzle);
     this.markLayer();
@@ -59,7 +62,14 @@ export class ViewModel {
 
   setColor(hex: number): void {
     this.color = hex;
-    this.model.setColor(hex);
+    applyFinish(this.model, this.finish, hex);
+  }
+
+  /** Weapon finish from the player's cosmetics. */
+  setFinish(key: string): void {
+    if (key === this.finish) return;
+    this.finish = key;
+    applyFinish(this.model, key, this.color);
   }
 
   kick(power: number): void {

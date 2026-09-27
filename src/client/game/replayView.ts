@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { ReplayData } from '../../shared/game/sim';
 import type { WeaponId } from '../../shared/loadout';
 import type { Effects } from '../render/effects';
-import { TubeMan, type TubeManPose, defaultPose } from '../render/tubeMan';
+import { type Look, TubeMan, type TubeManPose, defaultPose } from '../render/tubeMan';
 
 interface Actor {
   man: TubeMan;
@@ -37,7 +37,7 @@ export class ReplayView {
     this.scene.add(this.root);
   }
 
-  start(data: ReplayData, colorOf: (id: number) => number, weaponOf: (id: number) => WeaponId | null): void {
+  start(data: ReplayData, colorOf: (id: number) => number, weaponOf: (id: number) => WeaponId | null, lookOf?: (id: number) => Look): void {
     this.stop();
     if (data.frames.length < 2) return;
     this.data = data;
@@ -49,7 +49,7 @@ export class ReplayView {
     const ids = new Set<number>();
     for (const f of data.frames) for (let i = 1; i < f.length; i += FIELDS) ids.add(f[i]);
     for (const id of ids) {
-      const man = new TubeMan(colorOf(id), { seed: id * 3.3 });
+      const man = new TubeMan(colorOf(id), { seed: id * 3.3, look: lookOf?.(id) });
       man.setWeapon(weaponOf(id));
       this.root.add(man.group);
       this.actors.set(id, { man, pose: defaultPose(), visible: false, lastX: 0, lastY: 0, lastZ: 0 });

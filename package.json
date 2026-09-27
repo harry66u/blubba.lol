@@ -5,7 +5,7 @@
   "description": "Bubba: a browser multiplayer FPS where inflatable tube men blast each other off floating maps.",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.5"
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",
@@ -14,7 +14,7 @@
     "build": "npm run build:client && npm run build:server",
     "build:client": "vite build",
     "build:server": "node scripts/build-server.mjs",
-    "start": "node dist/server/index.js",
+    "start": "node --disable-warning=ExperimentalWarning dist/server/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest"
