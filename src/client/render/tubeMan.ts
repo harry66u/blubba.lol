@@ -67,6 +67,85 @@ const ARM_R = 0.11;
 const BODY_RINGS = 24;
 const ARM_RINGS = 11;
 
+// Scratch objects so animating a dozen tube men every frame allocates nothing.
+const SV1 = new THREE.Vector3();
+const SV2 = new THREE.Vector3();
+const SV3 = new THREE.Vector3();
+const SM = new THREE.Matrix4();
+const Y_UP = new THREE.Vector3(0, 1, 0);
+
+export type Pattern = 'solid' | 'stripes' | 'dots' | 'zigzag' | 'stars' | 'checker';
+
+const patternCache = new Map<Pattern, THREE.Texture | null>();
+
+/**
+ * Grayscale pattern texture multiplied with the body color. Light parts stay the base color and
+ * darker parts give a two-tone look, so every pattern works with every color.
+ */
+export function patternTexture(p: Pattern): THREE.Texture | null {
+  if (p === 'solid') return null;
+  const cached = patternCache.get(p);
+  if (cached !== undefined) return cached;
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 256;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, 0, 128, 256);
+  g.fillStyle = '#b8b8c8';
+  if (p === 'stripes') {
+    for (let y = 0; y < 256; y += 32) g.fillRect(0, y, 128, 14);
+  } else if (p === 'dots') {
+    for (let y = 16; y < 256; y += 32) for (let x = (y / 32) % 2 ? 16 : 0; x < 128 + 16; x += 32) {
+      g.beginPath();
+      g.arc(x, y, 8, 0, Math.PI * 2);
+      g.fill();
+    }
+  } else if (p === 'zigzag') {
+    g.lineWidth = 9;
+    g.strokeStyle = '#b8b8c8';
+    for (let y = 20; y < 256; y += 40) {
+      g.beginPath();
+      for (let x = 0; x <= 128; x += 16) g.lineTo(x, y + ((x / 16) % 2 ? 10 : -10));
+      g.stroke();
+    }
+  } else if (p === 'stars') {
+    for (let y = 20; y < 256; y += 42) for (let x = (y / 42) % 2 ? 22 : 0; x < 150; x += 44) {
+      g.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+        const r = i % 2 ? 5 : 12;
+        g.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
+      }
+      g.fill();
+    }
+  } else if (p === 'checker') {
+    for (let y = 0; y < 256; y += 32) for (let x = (y / 32) % 2 ? 32 : 0; x < 128; x += 64) g.fillRect(x, y, 32, 32);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2, 2);
+  patternCache.set(p, tex);
+  return tex;
+}
+
+/** Adds a soft candy-colored rim light (fresnel glow) to a standard material. */
+export function addRim(mat: THREE.MeshStandardMaterial, strength = 0.35): void {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.rimStrength = { value: strength };
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float rimStrength;')
+      .replace(
+        '#include <opaque_fragment>',
+        `float rimF = pow(1.0 - saturate(dot(normalize(normal), normalize(vViewPosition))), 3.0);
+        outgoingLight += (diffuseColor.rgb * 0.6 + vec3(0.4)) * rimF * rimStrength;
+        #include <opaque_fragment>`,
+      );
+  };
+  mat.customProgramCacheKey = () => `rim${strength}`;
+}
+
 const sharedGeo = {
   eye: new THREE.SphereGeometry(0.095, 16, 12),
   pupil: new THREE.SphereGeometry(0.05, 12, 8),
@@ -138,12 +217,13 @@ export class TubeMan {
   private readonly pin: THREE.Group;
   private readonly crown: THREE.Group;
 
-  constructor(colorHex: number, opts: { physical?: boolean; seed?: number } = {}) {
+  constructor(colorHex: number, opts: { physical?: boolean; seed?: number; pattern?: Pattern } = {}) {
     this.seed = opts.seed ?? Math.random() * 100;
-    const matOpts = { color: colorHex, roughness: 0.3, metalness: 0.0, emissive: new THREE.Color(colorHex), emissiveIntensity: 0.0 };
+    const matOpts = { color: colorHex, roughness: 0.3, metalness: 0.0, emissive: new THREE.Color(colorHex), emissiveIntensity: 0.0, map: patternTexture(opts.pattern ?? 'solid') };
     this.bodyMat = opts.physical
       ? new THREE.MeshPhysicalMaterial({ ...matOpts, clearcoat: 0.7, clearcoatRoughness: 0.2 })
       : new THREE.MeshStandardMaterial(matOpts);
+    addRim(this.bodyMat);
     this.color.set(colorHex);
 
     this.body = new FlexTube(BODY_RINGS, 18, this.bodyMat);
@@ -205,6 +285,10 @@ export class TubeMan {
     this.bodyMat.color.set(hex);
     this.bodyMat.emissive.set(hex);
     this.gun?.setColor(hex);
+  }
+
+  get weapon(): WeaponId | null {
+    return this.gunId;
   }
 
   setWeapon(id: WeaponId | null): void {
@@ -329,10 +413,10 @@ export class TubeMan {
     this.face.position.set(hx + nx * hr * 0.92, hy + ny * hr * 0.92, hz + nz * hr * 0.92);
     // Orient the face so +z points along the ring normal and +y along the tube.
     const ti = headRing + 1;
-    const up = new THREE.Vector3(spine[ti * 3] - hx, spine[ti * 3 + 1] - hy, spine[ti * 3 + 2] - hz).normalize();
-    const fwd = new THREE.Vector3(nx, ny, nz);
-    const right = new THREE.Vector3().crossVectors(up, fwd).normalize();
-    const m = new THREE.Matrix4().makeBasis(right, up, fwd);
+    const up = SV1.set(spine[ti * 3] - hx, spine[ti * 3 + 1] - hy, spine[ti * 3 + 2] - hz).normalize();
+    const fwd = SV2.set(nx, ny, nz);
+    const right = SV3.crossVectors(up, fwd).normalize();
+    const m = SM.makeBasis(right, up, fwd);
     this.face.quaternion.setFromRotationMatrix(m);
 
     // Expressions.
@@ -357,8 +441,8 @@ export class TubeMan {
     const top = n - 1;
     const pre = n - 3;
     this.hair.position.set(spine[top * 3], spine[top * 3 + 1] - 0.05, spine[top * 3 + 2]);
-    const tip = new THREE.Vector3(spine[top * 3] - spine[pre * 3], spine[top * 3 + 1] - spine[pre * 3 + 1], spine[top * 3 + 2] - spine[pre * 3 + 2]).normalize();
-    this.hair.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tip);
+    const tip = SV1.set(spine[top * 3] - spine[pre * 3], spine[top * 3 + 1] - spine[pre * 3 + 1], spine[top * 3 + 2] - spine[pre * 3 + 2]).normalize();
+    this.hair.quaternion.setFromUnitVectors(Y_UP, tip);
 
     // --- Arms: constant, joyful flailing. ---
     const flailTarget = p.bracing || p.holding ? 0.15 : p.held ? 2.4 : p.hanging ? 0.3 : p.launched ? 1.8 : 1 + Math.min(0.6, Math.hypot(lvx, lvz) * 0.05);

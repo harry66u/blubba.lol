@@ -66,6 +66,7 @@ export interface SimPlayer {
   launchFromX: number;
   launchFromZ: number;
   launchBy: number;
+  launchStartTick: number;
   joinedAt: number;
   /** Air combo tracking: who is juggling this player and how many hits so far. */
   comboBy: number;
@@ -166,10 +167,27 @@ export interface SimOptions {
   features?: Partial<StepContext['features']>;
 }
 
+export interface ReplayData {
+  victim: number;
+  by: number;
+  distance: number;
+  ko: boolean;
+  /** Frames at 30 fps: [tick, then per player: id, x, y, z, yaw, inflation %, flags]. */
+  frames: number[][];
+}
+
+export interface MatchAward {
+  key: 'longestLaunch' | 'mostKos' | 'mostChain' | 'mostPopped' | 'bestCombo';
+  id: number;
+  value: number;
+}
+
 export interface MatchResult {
   winnerId: number;
   standings: { id: number; name: string; score: number; stats: MatchStats; isBot: boolean }[];
   longestLaunch: { id: number; distance: number } | null;
+  awards: MatchAward[];
+  replay: ReplayData | null;
 }
 
 function newStats(): MatchStats {
@@ -222,6 +240,11 @@ export class GameSim {
   private finalAnnounced = false;
   private firstKo = false;
   private readonly env: Environment = { ...NORMAL_ENV };
+  /** Rolling recording of the last few seconds (for the longest-launch replay). */
+  private replayBuf: number[][] = [];
+  private bestReplay: ReplayData | null = null;
+  private replayIds: Set<number> = new Set();
+  private replayPostRoll = 0;
   /** Center of the main play area; bots recover toward it. */
   readonly homePoint: { x: number; y: number; z: number };
 
@@ -267,6 +290,7 @@ export class GameSim {
       launchFromX: 0,
       launchFromZ: 0,
       launchBy: -1,
+      launchStartTick: 0,
       joinedAt: this.time,
       comboBy: -1,
       comboCount: 0,
@@ -403,6 +427,7 @@ export class GameSim {
     this.stepPickups();
     this.expireDynamics();
     this.recordHistory();
+    this.recordReplayFrame();
     this.checkBlastZones();
   }
 
@@ -777,6 +802,7 @@ export class GameSim {
     }
     target.launchFromX = s.px;
     target.launchFromZ = s.pz;
+    target.launchStartTick = this.tick;
     target.launchBy = attackerId;
 
     this.events.push({
@@ -806,7 +832,55 @@ export class GameSim {
     if (attacker && attacker.id !== p.id && dist > attacker.stats.longestLaunch) {
       attacker.stats.longestLaunch = dist;
     }
+    if (attacker && attacker.id !== p.id && this.phase === 'playing' && dist > (this.bestReplay?.distance ?? 4)) this.captureReplay(p, attacker, dist, dead);
     if (!dead) p.launchBy = -1;
+  }
+
+  private recordReplayFrame(): void {
+    if (this.tick % 2 !== 0) return;
+    const f: number[] = [this.tick];
+    for (const p of this.players.values()) {
+      const s = p.state;
+      if (s.mode === MODE_DEAD) continue;
+      const r2 = (v: number) => Math.round(v * 100) / 100;
+      let flags = 0;
+      if (s.onGround) flags |= 1;
+      if (s.launchTimer > 0) flags |= 2;
+      if (s.charging) flags |= 8;
+      if (s.doubledTimer > 0) flags |= 16;
+      f.push(p.id, r2(s.px), r2(s.py), r2(s.pz), r2(s.yaw), Math.round(s.inflation * 100), flags);
+    }
+    this.replayBuf.push(f);
+    if (this.replayBuf.length > 300) this.replayBuf.shift();
+    if (this.replayPostRoll > 0 && this.bestReplay) {
+      this.replayPostRoll--;
+      this.bestReplay.frames.push(this.filterFrame(f));
+    }
+  }
+
+  private filterFrame(f: number[]): number[] {
+    const out = [f[0]];
+    for (let i = 1; i < f.length; i += 7) if (this.replayIds.has(f[i])) out.push(...f.slice(i, i + 7));
+    return out;
+  }
+
+  /** Keeps a copy of the last few seconds around a new longest launch. */
+  private captureReplay(victim: SimPlayer, by: SimPlayer, distance: number, ko: boolean): void {
+    const from = victim.launchStartTick - 30;
+    const frames = this.replayBuf.filter((f) => f[0] >= from).slice(-180);
+    if (frames.length < 5) return;
+    // Only the players near the action.
+    const ids = new Set<number>([victim.id, by.id]);
+    const first = frames[0];
+    const vi = first.indexOf(victim.id, 1);
+    const vx = vi > 0 ? first[vi + 1] : victim.state.px;
+    const vz = vi > 0 ? first[vi + 3] : victim.state.pz;
+    for (let i = 1; i < first.length; i += 7) {
+      if (Math.hypot(first[i + 1] - vx, first[i + 3] - vz) < 25) ids.add(first[i]);
+    }
+    this.replayIds = ids;
+    this.bestReplay = { victim: victim.id, by: by.id, distance, ko, frames: frames.map((f) => this.filterFrame(f)) };
+    this.replayPostRoll = ko ? 12 : 20;
   }
 
   // --- Weapons ---------------------------------------------------------------------------
@@ -953,6 +1027,7 @@ export class GameSim {
         o.launchBy = p.id;
         o.launchFromX = t.px;
         o.launchFromZ = t.pz;
+        o.launchStartTick = this.tick;
       }
       const lastEv = p.blowEvents.get(o.id) ?? -1;
       if (this.time - lastEv > 0.35) {
@@ -1504,6 +1579,7 @@ export class GameSim {
       o.launchBy = p.id;
       o.launchFromX = h.px;
       o.launchFromZ = h.pz;
+      o.launchStartTick = this.tick;
       p.stats.stomps++;
       this.events.push({ t: 'stomp', tick: this.tick, id: p.id, target: o.id, x: h.hangX, y: h.hangY, z: h.hangZ });
       return true;
@@ -1559,6 +1635,7 @@ export class GameSim {
       target.launchBy = p.id;
       target.launchFromX = t.px;
       target.launchFromZ = t.pz;
+      target.launchStartTick = this.tick;
       s.grappleCool = G.cooldown;
       this.events.push({ t: 'grapple', tick: this.tick, id: p.id, target: target.id, x: t.px, y: cy, z: t.pz, miss: false });
     } else if (wh) {
@@ -1895,6 +1972,8 @@ export class GameSim {
     this.crownId = -1;
     this.finalAnnounced = false;
     this.firstKo = false;
+    this.bestReplay = null;
+    this.replayPostRoll = 0;
     for (const p of this.players.values()) {
       p.score = 0;
       p.stats = newStats();
@@ -1930,7 +2009,21 @@ export class GameSim {
     for (const s of standings) {
       if (s.stats.longestLaunch > 0 && (!longest || s.stats.longestLaunch > longest.distance)) longest = { id: s.id, distance: s.stats.longestLaunch };
     }
-    this.lastResult = { winnerId: standings[0]?.id ?? -1, standings, longestLaunch: longest };
+    const awards: MatchAward[] = [];
+    const best = (key: MatchAward['key'], f: (s: MatchStats) => number) => {
+      let top: MatchAward | null = null;
+      for (const s of standings) {
+        const v = f(s.stats);
+        if (v > 0 && (!top || v > top.value)) top = { key, id: s.id, value: v };
+      }
+      if (top) awards.push(top);
+    };
+    if (longest) awards.push({ key: 'longestLaunch', id: longest.id, value: Math.round(longest.distance * 10) / 10 });
+    best('mostKos', (s) => s.kos);
+    best('mostChain', (s) => s.chainKos);
+    best('bestCombo', (s) => (s.bestCombo >= 2 ? s.bestCombo : 0));
+    best('mostPopped', (s) => s.timesPopped);
+    this.lastResult = { winnerId: standings[0]?.id ?? -1, standings, longestLaunch: longest, awards, replay: this.bestReplay };
     this.phase = 'results';
     this.phaseEndsAt = this.time + BALANCE.match.resultsSec;
     this.onPhaseChange?.();

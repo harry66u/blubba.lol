@@ -245,7 +245,7 @@ export const BALANCE = {
     durationSec: 240,
     minDurationSec: 180,
     maxDurationSec: 300,
-    resultsSec: 14,
+    resultsSec: 22,
     respawnDelay: 2.4,
     spawnProtection: 2.0,
     maxPlayers: 10,

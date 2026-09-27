@@ -39,7 +39,8 @@ export type ClientMessage =
   | { type: 'host'; action: 'restart' }
   /** Only honored when the server runs with BUBBA_DEBUG=1 (for testing events quickly). */
   | { type: 'debug'; action: 'chaos'; kind: string }
-  | { type: 'debug'; action: 'endIn'; seconds: number };
+  | { type: 'debug'; action: 'endIn'; seconds: number }
+  | { type: 'debug'; action: 'bots'; count: number };
 
 export interface RosterEntry {
   id: number;

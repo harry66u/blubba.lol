@@ -168,6 +168,9 @@ export class Room {
         if (process.env.BUBBA_DEBUG !== '1') return;
         if (msg.action === 'chaos' && ['fan', 'lowGravity', 'ice', 'maxInflate'].includes(msg.kind)) {
           this.sim.triggerChaos(msg.kind as 'fan', 1, 0);
+        } else if (msg.action === 'bots' && typeof msg.count === 'number') {
+          while (this.sim.bots.size < msg.count && this.playerCount < BALANCE.match.maxPlayers) this.sim.addBot(0.5);
+          this.rosterDirty = true;
         } else if (msg.action === 'endIn' && typeof msg.seconds === 'number') {
           // Jump the match clock forward (to see the final 30 seconds).
           this.sim.phaseEndsAt = this.sim.time + msg.seconds;

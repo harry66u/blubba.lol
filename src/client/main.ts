@@ -1,6 +1,7 @@
 import { randomGuestName } from '../shared/names';
 import type { JoinRequest, ServerMessage } from '../shared/protocol';
 import { Audio } from './audio/audio';
+import { Music } from './audio/music';
 import { ClientGame } from './game/clientGame';
 import { InputManager } from './input/input';
 import { Connection } from './net/connection';
@@ -8,7 +9,7 @@ import { type Quality, Renderer } from './render/renderer';
 import { type Settings, loadIdentity, loadSettings, saveIdentity, saveSettings } from './settings';
 import { clear } from './ui/dom';
 import { Hud } from './ui/hud';
-import { buildClickToPlay, buildHowTo, buildMainMenu, buildPause, buildResults, buildRoomJoin, buildScoreboard, buildSettings } from './ui/menus';
+import { buildClickToPlay, buildHowTo, buildMainMenu, buildPause, buildReplayBanner, buildResults, buildRoomJoin, buildScoreboard, buildSettings } from './ui/menus';
 import { buildLoadout, loadLoadout, saveLoadout } from './ui/loadout';
 
 const settings = loadSettings();
@@ -25,6 +26,11 @@ function qualityFor(s: Settings): Quality {
 const renderer = new Renderer(canvas, qualityFor(settings));
 renderer.baseFov = settings.fov;
 const audio = new Audio(settings.volumes);
+const music = new Music(() => audio.ctx, () => audio.musicBus);
+// Browsers only allow sound after a user gesture; unlock on the first click or key.
+const unlockAudio = () => audio.unlock();
+window.addEventListener('pointerdown', unlockAudio, { once: true });
+window.addEventListener('keydown', unlockAudio, { once: true });
 const input = new InputManager(canvas, settings);
 const net = new Connection();
 const hud = new Hud();
@@ -42,7 +48,7 @@ uiRoot.append(hud.root, scoreLayer, menuLayer, overlayLayer, fpsEl);
 
 type Screen = 'menu' | 'room-join' | 'connecting' | 'playing';
 let screen: Screen = 'menu';
-let overlay: 'none' | 'pause' | 'settings' | 'howto' | 'click' | 'results' | 'loadout' = 'none';
+let overlay: 'none' | 'pause' | 'settings' | 'howto' | 'click' | 'results' | 'loadout' | 'replay' = 'none';
 let pendingJoin: JoinRequest | null = null;
 let scoreboardOpen = false;
 
@@ -165,6 +171,19 @@ function setOverlay(next: typeof overlay): void {
     case 'click':
       overlayLayer.append(buildClickToPlay(game.alive ? 'READY?' : 'WAITING...', resume));
       break;
+    case 'replay': {
+      const rp = game.match.result?.replay;
+      if (rp) {
+        const name = (id: number) => game.roster.get(id)?.name ?? '?';
+        overlayLayer.append(
+          buildReplayBanner(name(rp.victim), name(rp.by), rp.distance, rp.ko, () => {
+            game.stopReplay();
+            setOverlay('results');
+          }),
+        );
+      }
+      break;
+    }
     case 'results':
       if (game.match.result) {
         const secondsLeft = Math.max(0, (game.match.endsAtTick - game.clock.tickAt(performance.now())) / 60);
@@ -174,7 +193,7 @@ function setOverlay(next: typeof overlay): void {
     default:
       break;
   }
-  input.enabled = screen === 'playing' && (next === 'none' || next === 'results') && input.locked;
+  input.enabled = screen === 'playing' && (next === 'none' || next === 'results' || next === 'replay') && input.locked;
 }
 
 function applySettings(s: Settings): void {
@@ -276,9 +295,18 @@ net.handlers = {
 
 game.onMatchChange = (m) => {
   if (m.phase === 'results') {
-    setOverlay('results');
+    if (m.result?.replay && overlay !== 'replay') {
+      game.startReplay(m.result.replay, () => {
+        game.stopReplay();
+        if (overlay === 'replay') setOverlay('results');
+      });
+      setOverlay('replay');
+    } else if (overlay !== 'replay') {
+      setOverlay('results');
+    }
     input.enabled = false;
-  } else if (overlay === 'results') {
+  } else if (overlay === 'results' || overlay === 'replay') {
+    game.stopReplay();
     setOverlay(input.locked ? 'none' : 'click');
     if (m.phase === 'playing') hud.callout('GO!', 'Blast them off the map!', 1.6);
   }
@@ -300,6 +328,8 @@ window.addEventListener('beforeunload', (e) => {
 
 // --- Main loop -------------------------------------------------------------------------------
 
+/** CPU time spent per frame (exposed for performance testing). */
+const perf = { update: 0, render: 0, frames: 0 };
 let last = performance.now();
 let fpsFrames = 0;
 let fpsTime = 0;
@@ -307,8 +337,15 @@ function loop(now: number): void {
   const dtMs = Math.min(100, now - last);
   last = now;
   const dt = dtMs / 1000;
+  const t0 = performance.now();
   game.frame(dt);
+  const t1 = performance.now();
   renderer.render();
+  const t2 = performance.now();
+  perf.update += t1 - t0;
+  perf.render += t2 - t1;
+  perf.frames++;
+  if (audio.ctx) music.setMood(screen === 'playing' ? (game.match.phase === 'results' ? 'menu' : game.inFinal ? 'final' : 'match') : 'menu');
   renderer.trackFrame(dtMs, now);
   fpsFrames++;
   fpsTime += dtMs;
@@ -330,5 +367,12 @@ const code = roomCodeFromPath();
 if (code) showRoomJoin(code);
 else showMenu();
 
+// Fade out the HTML splash now that the game is ready.
+const splash = document.getElementById('splash');
+if (splash) {
+  splash.style.opacity = '0';
+  window.setTimeout(() => splash.remove(), 350);
+}
+
 // Expose for debugging and automated tests.
-(window as unknown as { bubba: unknown }).bubba = { game, net, input, renderer, settings };
+(window as unknown as { bubba: unknown }).bubba = { game, net, input, renderer, settings, perf };

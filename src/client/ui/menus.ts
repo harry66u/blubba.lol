@@ -256,6 +256,23 @@ export function buildScoreboard(roster: RosterEntry[], youId: number, hostId: nu
   return el('div', { class: `scoreboard${onKick ? ' interactive' : ''}` }, el('div', { class: 'panel' }, table));
 }
 
+export function buildReplayBanner(victim: string, by: string, distance: number, ko: boolean, onSkip: () => void): HTMLElement {
+  return el(
+    'div',
+    { class: 'replay-wrap' },
+    el('div', { class: 'letterbox top' }),
+    el('div', { class: 'letterbox bottom' }),
+    el(
+      'div',
+      { class: 'replay-banner interactive' },
+      el('div', { class: 'tag', text: 'REPLAY' }),
+      el('div', { class: 'title', text: 'LONGEST LAUNCH' }),
+      el('div', { class: 'sub', text: `${by} sent ${victim} flying ${distance.toFixed(1)} m${ko ? ' right off the map!' : '!'}` }),
+      el('button', { class: 'btn small ghost', text: 'Skip ▸', on: { click: onSkip } }),
+    ),
+  );
+}
+
 export function buildResults(result: MatchResult, roster: Map<number, RosterEntry>, youId: number, secondsLeft: number): HTMLElement {
   const top = result.standings.slice(0, 3);
   const order = [top[1], top[0], top[2]];
@@ -290,9 +307,17 @@ export function buildResults(result: MatchResult, roster: Map<number, RosterEntr
     addStat('Your longest launch', `${me.stats.longestLaunch.toFixed(1)} m`);
     addStat('Hits landed', String(me.stats.hits));
   }
-  if (result.longestLaunch) {
-    const who = result.standings.find((s) => s.id === result.longestLaunch!.id)?.name ?? '?';
-    addStat('Longest launch of the match', `${result.longestLaunch.distance.toFixed(1)} m by ${who}`);
+  const nameOf = (id: number) => result.standings.find((s) => s.id === id)?.name ?? '?';
+  const awardText: Record<string, (v: number) => string> = {
+    longestLaunch: (v) => `Longest launch · ${v.toFixed(1)} m`,
+    mostKos: (v) => `Most knockouts · ${v}`,
+    mostChain: (v) => `Most chain knockouts · ${v}`,
+    bestCombo: (v) => `Best air combo · ${v} hits`,
+    mostPopped: (v) => `Popped the most · ${v}`,
+  };
+  const awards = el('div', { class: 'awards' });
+  for (const a of result.awards ?? []) {
+    awards.append(el('div', { class: `award${a.id === youId ? ' me' : ''}` }, el('div', { class: 'k', text: awardText[a.key]?.(a.value) ?? a.key }), el('div', { class: 'v', text: nameOf(a.id) })));
   }
   return el(
     'div',
@@ -302,6 +327,7 @@ export function buildResults(result: MatchResult, roster: Map<number, RosterEntr
       { class: 'panel', style: 'min-width:520px' },
       el('h2', { text: title, style: 'text-align:center' }),
       podium,
+      awards,
       stats,
       el('div', { style: 'text-align:center;margin-top:14px;opacity:.7', text: `Next match in ${Math.ceil(secondsLeft)}...` }),
     ),

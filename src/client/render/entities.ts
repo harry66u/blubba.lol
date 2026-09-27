@@ -25,7 +25,7 @@ export class EntityView {
   private readonly canMat = new THREE.MeshStandardMaterial({ color: 0xff3b5c, roughness: 0.25, metalness: 0.4 });
   private readonly canTop = new THREE.MeshStandardMaterial({ color: 0xdde3ee, roughness: 0.2, metalness: 0.8 });
   private readonly stripeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
-  private readonly vacMat = new THREE.MeshBasicMaterial({ color: 0xb58cff, transparent: true, opacity: 0.25, side: THREE.DoubleSide, depthWrite: false });
+  private readonly vacMat = new THREE.MeshBasicMaterial({ color: 0xb58cff, transparent: true, opacity: 0.09, side: THREE.FrontSide, depthWrite: false });
 
   addSolid(id: number, min: [number, number, number], max: [number, number, number], raft: boolean): void {
     this.removeSolid(id, true);

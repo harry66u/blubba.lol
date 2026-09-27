@@ -45,6 +45,8 @@ import { DEFAULT_LOADOUT, type Loadout, UTILITY_INFO, WEAPON_IDS, WEAPON_INFO, t
 import { EntityView } from '../render/entities';
 import { CHAOS_INFO, type ChaosEvent, type Environment, NORMAL_ENV, envAt } from '../../shared/game/chaos';
 import { Announcer } from '../audio/announcer';
+import { ReplayView } from './replayView';
+import type { ReplayData } from '../../shared/game/sim';
 import type { Audio } from '../audio/audio';
 import { type Action, type InputManager, codeLabel } from '../input/input';
 import type { Connection } from '../net/connection';
@@ -141,6 +143,7 @@ export class ClientGame {
   weapon: WeaponStats = computeWeaponStats('airCannon', []);
   private streamStrength = 0;
   readonly announcer = new Announcer();
+  readonly replay: ReplayView;
   /** Random events we know about (current and announced), for prediction and visuals. */
   private chaos: ChaosEvent[] = [];
   private readonly envTmp: Environment = { ...NORMAL_ENV };
@@ -206,6 +209,7 @@ export class ClientGame {
     r.scene.add(this.mapView.root, this.effects.root, this.circles.root, this.entities.root);
     r.scene.add(r.camera);
     r.camera.add(this.viewModel.root);
+    this.replay = new ReplayView(r.scene, this.effects);
     this.viewModel.root.visible = false;
     r.setTheme(this.map.theme);
   }
@@ -1124,10 +1128,21 @@ export class ClientGame {
     this.world.setTime(this.predTick() * DT);
     this.updateRemotes(dt);
     this.updateShots(dt);
-    this.updateCamera(dt);
+    if (this.replay.active) {
+      for (const rv of this.remotes.values()) {
+        rv.man.setVisible(false);
+        rv.tag.el.style.display = 'none';
+      }
+      this.viewModel.root.visible = false;
+      this.replay.update(dt, this.r.camera);
+    } else {
+      this.updateCamera(dt);
+    }
     this.updateLocalFeedback(dt);
     this.updateChaos(dt);
     this.mapView.update(dt, this.time);
+    for (const v of this.entities.vacuums) this.effects.vacuumSwirl(v.x, v.y, v.z, BALANCE.utilities.vacuumGrenade.radius, dt);
+    this.entities.update(dt, this.clock.tickAt(performance.now()));
     this.effects.update(dt);
     this.updateCircles();
     this.hud.updatePopups(this.r.camera, dt);
@@ -1220,7 +1235,8 @@ export class ClientGame {
   private createRemote(id: number): RemoteView {
     const entry = this.roster.get(id);
     const color = PLAYER_COLORS[entry?.color ?? 0]?.hex ?? 0xffffff;
-    const man = new TubeMan(color, { physical: this.r.profile.physical, seed: id * 13.7 });
+    const patterns = ['solid', 'stripes', 'dots', 'zigzag', 'stars', 'checker'] as const;
+    const man = new TubeMan(color, { physical: this.r.profile.physical, seed: id * 13.7, pattern: patterns[id % patterns.length] });
     this.r.scene.add(man.group);
     const tag = this.hud.createNametag(entry?.name ?? '...', entry?.bot ?? false);
     return { id, man, pose: defaultPose(), tag, color, name: entry?.name ?? '...', bot: entry?.bot ?? false, cur: null, lastTagText: '' };
@@ -1553,7 +1569,31 @@ export class ClientGame {
     this.effects.update(dt);
   }
 
+  /** Plays the end-of-match slow-motion replay of the longest launch. */
+  startReplay(data: ReplayData, onDone: () => void): void {
+    this.replay.onDone = onDone;
+    this.replay.start(
+      data,
+      (id) => this.colorOf(id),
+      (id) => (id === this.youId ? this.viewModel.weapon : (this.remotes.get(id)?.man.weapon ?? null)),
+    );
+    this.hud.show(false);
+    this.audio.setCharge(0);
+    this.audio.setBlower(0);
+    this.announcer.say('Replay! Longest launch!', 3);
+  }
+
+  stopReplay(): void {
+    if (this.replay.active) this.replay.stop();
+    if (this.active) this.hud.show(true);
+  }
+
   // --- Queries used by UI --------------------------------------------------------------------
+
+  /** True during the final-30-seconds countdown. */
+  get inFinal(): boolean {
+    return this.match.phase === 'playing' && this.clock.tickAt(performance.now()) * DT >= this.world.collapseStart;
+  }
 
   get alive(): boolean {
     return this.pred.mode !== MODE_DEAD;

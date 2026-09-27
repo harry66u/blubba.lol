@@ -70,3 +70,20 @@ Phases follow spec §14. Each phase is committed separately and playable on its 
   knockouts count double.
 - Callouts: FIRST POP, DOUBLE/TRIPLE POP, CHAIN REACTION, CROWN SNATCHED, REVENGE, PINNED, with a
   hype announcer (browser speech synthesis) and kill-feed icons.
+
+## Phase 5: Look and sound ✅
+
+- Fall Guys-style look: glossy candy tube men with a soft rim light, six body patterns, clearcoat
+  on High quality, soft shadows, bloom glow, calm map colors, landing circles, fart puff clouds.
+- End-of-match slow-motion replay of the longest launch (recorded by the server, letterboxed,
+  orbiting camera, skippable), followed by the podium and awards: longest launch, most
+  knockouts, most chain knockouts, best air combo, popped the most.
+- Procedural music on the music bus: calm menu loop, bouncy match loop, and a faster final-30
+  version. No audio files to download.
+- Full sound set (all synthesized): shots, blasts, squeaky hits, groin-shot groan, fart dashes
+  with random pitch and a rare extra-long one, burps, deflating-balloon squeal, honks, rifle
+  cracks, blower roar, grenade and vacuum sounds, soda cans, pin pops, siren, announcer.
+- Instant-feeling load: an HTML splash paints before the script runs; the whole client is about
+  200 KB gzipped.
+- Performance: a full 10-player lobby leaves the main thread ~80% idle in profiling; quality
+  presets plus automatic resolution scaling hold frame rate on slower GPUs.
