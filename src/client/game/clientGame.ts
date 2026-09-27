@@ -6,8 +6,10 @@ import { type InputFrame, emptyInput, quantizeInput } from '../../shared/input';
 import { getMap } from '../../shared/maps';
 import type { MapDef } from '../../shared/maps/types';
 import {
+  ALL_FEATURES,
   MODE_DEAD,
   MODE_HANG,
+  MODE_HELD,
   type PlayerState,
   StepResult,
   type StepContext,
@@ -37,7 +39,7 @@ import {
 import type { MatchPhase, MatchResult } from '../../shared/game/sim';
 import { World } from '../../shared/world';
 import type { Audio } from '../audio/audio';
-import type { InputManager } from '../input/input';
+import { type Action, type InputManager, codeLabel } from '../input/input';
 import type { Connection } from '../net/connection';
 import { Effects, LandingCircles, type Projectile3D } from '../render/effects';
 import { MapView } from '../render/mapView';
@@ -102,6 +104,8 @@ export interface MatchInfo {
 const DT = 1 / BALANCE.tickRate;
 const tmpV = new THREE.Vector3();
 const tmpV2 = new THREE.Vector3();
+const tmpV3 = new THREE.Vector3();
+const UP_ONE = new THREE.Vector3(0, 1, 0);
 const tmpDir = { x: 0, y: 0, z: 0 };
 
 function lerpAngle(a: number, b: number, t: number): number {
@@ -159,6 +163,8 @@ export class ClientGame {
   private lastAmmo = 0;
   private attractAngle = 0;
   private pendingSend: InputFrame[] = [];
+  private launchTips = 0;
+  private wasLaunched = false;
   onMatchChange: ((m: MatchInfo) => void) | null = null;
   onRosterChange: (() => void) | null = null;
   onRoomChange: ((room: RoomInfo) => void) | null = null;
@@ -175,7 +181,7 @@ export class ClientGame {
     this.map = getMap('dealership');
     this.world = new World(this.map);
     this.mapView = new MapView(this.map, this.world);
-    this.ctx = this.makeCtx({ brace: false, ledge: false });
+    this.ctx = this.makeCtx({ ...ALL_FEATURES });
     r.scene.add(this.mapView.root, this.effects.root, this.circles.root);
     r.scene.add(r.camera);
     r.camera.add(this.viewModel.root);
@@ -212,7 +218,7 @@ export class ClientGame {
     this.room = msg.room;
     this.setMap(msg.room.mapId);
     this.ctx = this.makeCtx(msg.room.features);
-    this.hud.showBrace(msg.room.features.brace);
+    this.hud.showAbilities(msg.room.features);
     this.clock.reset();
     this.clock.observe(msg.tick, performance.now());
     this.havePred = false;
@@ -376,6 +382,15 @@ export class ClientGame {
         return e.id === you;
       case 'shield':
         return e.target === you;
+      case 'grab':
+      case 'throw':
+      case 'stomp':
+        return e.id === you || e.target === you;
+      case 'escape':
+        return e.id === you || e.from === you;
+      case 'escapeFail':
+      case 'grapple':
+        return e.id === you;
       default:
         return false;
     }
@@ -464,6 +479,7 @@ export class ClientGame {
         if (e.attacker === you && e.target !== you) {
           this.hud.hitMarker();
           a.hitConfirm();
+          if (e.combo >= 2) this.hud.callout(`${e.combo}x COMBO!`, e.combo >= 3 ? 'Juggle master!' : 'Keep them in the air!', 1.2, e.combo >= 3 ? '#ff5fd2' : '#ffd60a');
           this.hud.popup(tmpV.set(e.x, e.y + 0.6, e.z), `+${Math.round(e.infl * 100)}%`, '#ffd60a', 0.8, 0.8);
         }
         if (e.target === you) {
@@ -478,6 +494,7 @@ export class ClientGame {
         } else if (e.braced) {
           a.clang(e.target === you ? null : pos);
           this.hud.popup(tmpV.set(e.x, e.y + 1.2, e.z), 'BRACED!', '#9fe8ff', 1, 0.9);
+          if (e.target === you) this.hud.flash('rgba(120, 220, 255, 0.55)', 350);
         } else if (e.direct && (e.attacker === you || e.target === you || e.speed > 18)) {
           this.hud.popup(tmpV.set(e.x, e.y + 1, e.z), e.speed > 20 ? 'WHAM!' : 'BOP!', '#ffffff', 0.7 + Math.min(0.6, e.speed * 0.02), 0.7);
         }
@@ -539,10 +556,70 @@ export class ClientGame {
       }
       case 'reload':
         break;
+      case 'grab': {
+        const p = this.posOf(e.target);
+        a.stretch(e.id === you || e.target === you ? null : p ? [p.x, p.y, p.z] : null);
+        if (p) this.hud.popup(tmpV.set(p.x, p.y + 2.6, p.z), e.drag ? 'TAKE YOU WITH ME!' : 'GOTCHA!', e.drag ? '#ff5fd2' : '#ffffff', e.drag ? 1.1 : 0.9, 1.1);
+        if (e.target === you) {
+          this.trauma = Math.min(1, this.trauma + 0.3);
+          this.hud.callout(e.drag ? 'DRAGGED!' : 'GRABBED!', 'Dash when the marker hits green!', 1.4, '#ff9f1c');
+        } else if (e.id === you && e.drag) {
+          this.hud.callout('TAKE YOU WITH ME!', '', 1.6, '#ff5fd2');
+        }
+        break;
+      }
+      case 'throw': {
+        const p = this.posOf(e.target);
+        if (p) {
+          a.whoosh(1, e.target === you ? null : [p.x, p.y, p.z]);
+          this.hud.popup(tmpV.set(p.x, p.y + 2.4, p.z), 'YEET!', '#ffd60a', 1.3, 1.1);
+        }
+        break;
+      }
+      case 'escape': {
+        const p = this.posOf(e.id);
+        if (p) {
+          fx.fartCloud(p.x, p.y, p.z, 0, 0, false);
+          a.fart(e.id === you ? null : [p.x, p.y, p.z]);
+          this.hud.popup(tmpV.set(p.x, p.y + 2.4, p.z), 'BROKE FREE!', '#5ee05e', 1, 1);
+        }
+        if (e.id === you) this.hud.callout('ESCAPED!', '', 1.2, '#5ee05e');
+        break;
+      }
+      case 'escapeFail':
+        if (e.id === you) this.hud.callout(e.early ? 'TOO EARLY!' : 'TOO LATE!', 'One try per grab', 1.2, '#ff3b5c');
+        break;
+      case 'stomp': {
+        a.thud(e.id === you || e.target === you ? null : [e.x, e.y, e.z], 14);
+        this.hud.popup(tmpV.set(e.x, e.y + 1, e.z), 'STOMP!', '#ff9f1c', 1.3, 1);
+        fx.groundRing(e.x, e.y, e.z, 0.8);
+        if (e.target === you) this.hud.callout('STOMPED!', '', 1.2, '#ff9f1c');
+        break;
+      }
+      case 'grapple': {
+        const from = () => this.handPos(e.id);
+        const fixed = new THREE.Vector3(e.x, e.y, e.z);
+        const to = e.target >= 0 ? () => (this.posOf(e.target) ? tmpV3.copy(this.posOf(e.target)!).add(UP_ONE) : null) : () => fixed;
+        fx.rope(from, to, e.miss ? 0.25 : e.target >= 0 ? 0.45 : 0.35);
+        a.thwip(e.id === you ? null : [e.x, e.y, e.z]);
+        if (e.target === you) this.hud.callout('YOINK!', '', 1, '#ffd60a');
+        break;
+      }
       default:
         break;
     }
     void immediate;
+  }
+
+  /** Where a player's grapple line starts (your gun muzzle, or another player's chest). */
+  private handPos(id: number): THREE.Vector3 | null {
+    if (id === this.youId) {
+      if (!this.viewModel.root.visible) return null;
+      return this.viewModel.muzzle.getWorldPosition(new THREE.Vector3());
+    }
+    const rv = this.remotes.get(id);
+    if (!rv?.cur || rv.cur.mode === MODE_DEAD) return null;
+    return new THREE.Vector3(rv.cur.px, rv.cur.py + 1.3 * inflationScale(rv.cur.inflation), rv.cur.pz);
   }
 
   private showBlast(x: number, y: number, z: number, r: number, power: number): void {
@@ -626,6 +703,15 @@ export class ClientGame {
       a.boing(null, true);
     }
     if (out.bounced || out.wallBounce) a.boing(null);
+    if (out.ledgeGrab) {
+      a.squeak(0.2, null);
+      this.hud.popup(tmpV.set(p.hangX, p.hangY + 0.4, p.hangZ), 'CAUGHT IT!', '#5ee05e', 0.8, 0.8);
+    }
+    if (out.braced) {
+      a.clang(null);
+      this.hud.flash('rgba(120, 220, 255, 0.35)', 200);
+    }
+    if (out.techEscape) this.hud.popup(tmpV.set(p.px, p.py + 1.5, p.pz), 'ESCAPE!', '#9fe8ff', 0.8, 0.7);
     if (out.reloadStart) {
       a.reload();
       this.viewModel.startReload(BALANCE.weapons.airCannon.reloadTime);
@@ -815,6 +901,8 @@ export class ClientGame {
     p.bracing = (c.flags & FLAG_BRACING) !== 0;
     p.charge = (c.flags & FLAG_CHARGING) !== 0 ? c.charge : 0;
     p.hanging = c.mode === MODE_HANG;
+    p.holding = c.holding >= 0;
+    p.held = c.mode === MODE_HELD;
     p.dashing = (c.flags & FLAG_DASHING) !== 0;
     p.protected = (c.flags & FLAG_PROTECTED) !== 0;
     rv.man.update(p);
@@ -964,6 +1052,9 @@ export class ClientGame {
       this.lastCharge = charge;
     }
     if (p.ammo === 0 && this.lastAmmo > 0) this.hud.setNote('Reloading...');
+    const launched = p.launchTimer > 0;
+    if (launched && !this.wasLaunched) this.launchTips++;
+    this.wasLaunched = launched;
     this.lastAmmo = p.ammo;
 
     const me = this.roster.get(this.youId);
@@ -986,6 +1077,11 @@ export class ClientGame {
         dashCharges: p.dashCharges,
         dashRechargeFrac: p.dashCharges < BALANCE.dash.charges ? 1 - p.dashRecharge / BALANCE.dash.rechargeTime : 1,
         braceReady: 1 - p.braceCool / BALANCE.brace.cooldown,
+        grabReady: 1 - Math.min(1, p.grabCool / BALANCE.grab.cooldown),
+        grappleReady: 1 - Math.min(1, p.grappleCool / BALANCE.grapple.cooldown),
+        heldTime: alive && p.mode === MODE_HELD ? p.holdTimer : -1,
+        escapeUsed: p.escapeUsed === 1,
+        hint: alive ? this.contextHint() : '',
         timeLeft,
         phase: this.match.phase,
         sub,
@@ -1003,6 +1099,38 @@ export class ClientGame {
     }
     if (p.reloadTimer <= 0) this.hud.setNote(alive && p.spawnProt > 0 ? 'Spawn shield: fire to drop it' : '');
     this.hud.ping.textContent = `${Math.round(this.net.rtt)} ms`;
+  }
+
+  private key(a: Action): string {
+    return codeLabel(this.input.getBindings()[a][0] ?? '?');
+  }
+
+  /** Short on-screen tip for whatever situation you're in right now. */
+  private contextHint(): string {
+    const p = this.pred;
+    const f = this.ctx.features;
+    if (p.mode === MODE_HANG) return `${this.key('forward')} climb · ${this.key('jump')} jump up · ${this.key('back')} let go`;
+    if (p.holding >= 0) return p.holdTimer < BALANCE.grab.minHold ? 'Hold on...' : `${this.key('fire')} to THROW!`;
+    if (p.mode === MODE_HELD) return '';
+    if (p.onGround === 0 && p.zipTimer <= 0) {
+      const ground = this.world.groundBelow(p.px, p.py + 0.2, p.pz, 60);
+      if (ground === null || ground < p.py - 15) {
+        const tips: string[] = [];
+        if (p.dashCharges > 0) tips.push(`${this.key('dash')} dash`);
+        if (p.jumpsUsed < 2) tips.push(`${this.key('jump')} jump`);
+        if (f.grapple && p.grappleCool <= 0) tips.push(`${this.key('grapple')} grapple`);
+        if (f.ledge) tips.push(`hold ${this.key('grab')} to catch a ledge`);
+        return tips.length ? `Falling! ${tips.join(' · ')}` : 'Falling!';
+      }
+    }
+    if (p.launchTimer > 0 && this.launchTips < 6) return `Steer with ${this.key('forward')}${this.key('left')}${this.key('back')}${this.key('right')} · ${this.key('dash')} to dash out`;
+    if (f.ledge) {
+      for (const rv of this.remotes.values()) {
+        const c = rv.cur;
+        if (c?.mode === MODE_HANG && p.onGround && Math.hypot(c.px - p.px, c.pz - p.pz) < 2.2 && Math.abs(c.py - p.py) < 3) return `${this.key('grab')} to STOMP their hands!`;
+      }
+    }
+    return '';
   }
 
   private updateCircles(): void {

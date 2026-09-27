@@ -527,6 +527,43 @@ export class Audio {
     osc.stop(t + 0.1);
   }
 
+  /** Grapple line shooting out. */
+  thwip(pos: [number, number, number] | null): void {
+    const out = this.out(pos, 0.45);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.Q.value = 6;
+    f.frequency.setValueAtTime(600, t);
+    f.frequency.exponentialRampToValueAtTime(4000, t + 0.12);
+    const g = ctx.createGain();
+    this.env(g, t, 0.005, 1, 0.14);
+    f.connect(g).connect(out);
+    this.noise(f, t, 0.16);
+  }
+
+  /** Rubbery stretch when grabbing someone. */
+  stretch(pos: [number, number, number] | null): void {
+    const out = this.out(pos, 0.5);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(140, t);
+    osc.frequency.exponentialRampToValueAtTime(420, t + 0.25);
+    const lp = ctx.createBiquadFilter();
+    lp.frequency.value = 900;
+    lp.Q.value = 8;
+    const g = ctx.createGain();
+    this.env(g, t, 0.01, 0.6, 0.28);
+    osc.connect(lp).connect(g).connect(out);
+    osc.start(t);
+    osc.stop(t + 0.35);
+  }
+
   /** Rising whine while charging a shot (only for your own weapon). */
   setCharge(charge: number): void {
     if (!this.ctx) return;

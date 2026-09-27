@@ -97,6 +97,14 @@ interface Ring {
   size: number;
 }
 
+interface Rope {
+  mesh: THREE.Mesh;
+  from: () => THREE.Vector3 | null;
+  to: () => THREE.Vector3 | null;
+  life: number;
+  max: number;
+}
+
 interface Balloon {
   mesh: THREE.Group;
   life: number;
@@ -153,6 +161,9 @@ export class Effects {
   private readonly confetti: ParticlePool;
   private readonly rings: Ring[] = [];
   private readonly balloons: Balloon[] = [];
+  private readonly ropes: Rope[] = [];
+  private readonly ropeGeo = new THREE.CylinderGeometry(0.045, 0.045, 1, 6, 1, true).translate(0, 0.5, 0).rotateX(Math.PI / 2);
+  private readonly ropeMat = new THREE.MeshStandardMaterial({ color: 0xffd60a, roughness: 0.4, emissive: 0xffa000, emissiveIntensity: 0.3 });
   readonly projectiles = new Map<number, Projectile3D>();
   private readonly airMat: THREE.ShaderMaterial;
   private readonly airGeo = new THREE.SphereGeometry(1, 20, 14);
@@ -350,8 +361,33 @@ export class Effects {
     }
   }
 
+  /** Grapple line between two moving points; each getter returns null once its end is gone. */
+  rope(from: () => THREE.Vector3 | null, to: () => THREE.Vector3 | null, life = 0.35): void {
+    const mesh = new THREE.Mesh(this.ropeGeo, this.ropeMat);
+    mesh.frustumCulled = false;
+    this.root.add(mesh);
+    this.ropes.push({ mesh, from, to, life, max: life });
+  }
+
   update(dt: number): void {
     this.time += dt;
+    for (let i = this.ropes.length - 1; i >= 0; i--) {
+      const r = this.ropes[i];
+      r.life -= dt;
+      const a = r.from();
+      const b = r.to();
+      if (r.life <= 0 || !a || !b) {
+        this.root.remove(r.mesh);
+        this.ropes.splice(i, 1);
+        continue;
+      }
+      // Shoot out quickly, then hold.
+      const t = Math.min(1, (1 - r.life / r.max) * 5);
+      const len = a.distanceTo(b) * t;
+      r.mesh.position.copy(a);
+      r.mesh.lookAt(b);
+      r.mesh.scale.set(1, 1, Math.max(0.01, len));
+    }
     this.airMat.uniforms.time.value = this.time;
     this.puffs.update(dt);
     this.confetti.update(dt);

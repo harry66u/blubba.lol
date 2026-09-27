@@ -1,5 +1,5 @@
 import { BALANCE } from './balance';
-import { BTN_FIRE, type InputFrame, pressesSince } from './input';
+import { BTN_FIRE, BTN_GRAB, type InputFrame, pressesSince } from './input';
 import type { World } from './world';
 
 /**
@@ -106,6 +106,7 @@ export class StepResult {
   climbed = false;
   reloadStart = false;
   grabIntent = false;
+  throwIntent = false;
   escapeAttempt = false;
   grapple = false;
   util1 = false;
@@ -128,6 +129,7 @@ export class StepResult {
     this.climbed = false;
     this.reloadStart = false;
     this.grabIntent = false;
+    this.throwIntent = false;
     this.escapeAttempt = false;
     this.grapple = false;
     this.util1 = false;
@@ -145,12 +147,21 @@ export interface WeaponStats {
   tapPower: number;
 }
 
+export interface Features {
+  brace: boolean;
+  ledge: boolean;
+  grab: boolean;
+  grapple: boolean;
+}
+
+export const ALL_FEATURES: Features = { brace: true, ledge: true, grab: true, grapple: true };
+
 export interface StepContext {
   world: World;
   dt: number;
   weapon: WeaponStats;
   /** Feature switches so earlier build phases can be played without later mechanics. */
-  features: { brace: boolean; ledge: boolean };
+  features: Features;
 }
 
 const tmpSweep = { d: 0, hit: -1 };
@@ -245,6 +256,7 @@ function tickTimers(p: PlayerState, dt: number): void {
   p.u2Cool = Math.max(0, p.u2Cool - dt);
   p.hoverTimer = Math.max(0, p.hoverTimer - dt);
   p.sinceHit += dt;
+  if (p.mode === MODE_HELD || p.holding >= 0) p.holdTimer += dt;
   if (p.launchTimer > 0) {
     p.launchTimer = Math.max(0, p.launchTimer - dt);
     p.launchElapsed += dt;
@@ -311,6 +323,34 @@ function stepMove(
     p.coyote -= dt;
     p.airTime += dt;
     if (p.coyote <= 0 && p.jumpsUsed === 0) p.jumpsUsed = 1;
+  }
+
+  // --- Grapple zip: pulled toward the grapple point, ignoring gravity. ---------------------
+  if (p.zipTimer > 0) {
+    p.zipTimer -= dt;
+    const h = playerHeight(p);
+    const dx = p.zipX - p.px;
+    const dy = p.zipY - (p.py + h * 0.5);
+    const dz = p.zipZ - p.pz;
+    const d = Math.hypot(dx, dy, dz);
+    const G = BALANCE.grapple;
+    if (d < 1.2 || p.zipTimer <= 0) {
+      p.zipTimer = 0;
+      p.vx *= 0.6;
+      p.vy = Math.max(p.vy * 0.6, 4);
+      p.vz *= 0.6;
+      p.jumpsUsed = Math.min(p.jumpsUsed, 1);
+    } else {
+      p.vx = (dx / d) * G.zipSpeed;
+      p.vy = (dy / d) * G.zipSpeed;
+      p.vz = (dz / d) * G.zipSpeed;
+      p.launchTimer = 0;
+      p.dashTimer = 0;
+      p.slideTimer = 0;
+      moveBody(p, world, dt, out);
+      if (p.onGround) p.zipTimer = 0;
+      return;
+    }
   }
 
   // --- Jumping ---------------------------------------------------------------------------
@@ -452,12 +492,16 @@ function stepMove(
 
   // --- Ledge grabbing ----------------------------------------------------------------------
   if (grabP) {
-    out.grabIntent = true;
-    p.grabBuffer = 0.2;
+    if (p.holding >= 0) {
+      out.throwIntent = true;
+    } else {
+      out.grabIntent = true;
+      p.grabBuffer = BALANCE.ledge.buffer;
+    }
   }
   if (
     ctx.features.ledge &&
-    p.grabBuffer > 0 &&
+    (p.grabBuffer > 0 || (inp.buttons & BTN_GRAB) !== 0) &&
     !p.onGround &&
     p.vy < 2 &&
     p.regrabCool <= 0 &&
@@ -620,8 +664,6 @@ function moveHorizontal(
 // --- Ledges ---------------------------------------------------------------------------------
 
 const HANG_DROP = 0.82; // fraction of body height hanging below the ledge top
-const HANG_MAX_TIME = 3.5;
-const CLIMB_TIME = 0.3;
 
 function tryLedgeGrab(p: PlayerState, world: World): boolean {
   const r = playerRadius(p);
@@ -690,7 +732,7 @@ export function releaseLedge(p: PlayerState, vy = 0): void {
   p.mode = MODE_NORMAL;
   p.hangId = -1;
   p.vy = vy;
-  p.regrabCool = 0.5;
+  p.regrabCool = BALANCE.ledge.regrabCooldown;
 }
 
 function stepHang(p: PlayerState, inp: InputFrame, ctx: StepContext, out: StepResult, jumpP: boolean): void {
@@ -725,12 +767,12 @@ function stepHang(p: PlayerState, inp: InputFrame, ctx: StepContext, out: StepRe
     out.jumped = true;
   } else if (toward > 0.5) {
     p.mode = MODE_CLIMB;
-    p.climbTimer = CLIMB_TIME;
+    p.climbTimer = BALANCE.ledge.climbTime;
     p.climbFromX = p.px;
     p.climbFromY = p.py;
     p.climbFromZ = p.pz;
     out.climbed = true;
-  } else if (toward < -0.5 || p.hangTimer > HANG_MAX_TIME) {
+  } else if (toward < -0.5 || p.hangTimer > BALANCE.ledge.maxHang) {
     releaseLedge(p, 0);
   }
 }
@@ -750,7 +792,7 @@ function stepClimb(p: PlayerState, ctx: StepContext, _out: StepResult): void {
   const tx = p.hangX - p.hangNx * (r + 0.1);
   const tz = p.hangZ - p.hangNz * (r + 0.1);
   const ty = p.hangY + 0.002;
-  const t = clamp(1 - p.climbTimer / CLIMB_TIME, 0, 1);
+  const t = clamp(1 - p.climbTimer / BALANCE.ledge.climbTime, 0, 1);
   // Rise first, then pull in over the lip.
   const ty1 = clamp(t / 0.6, 0, 1);
   const tx1 = clamp((t - 0.4) / 0.6, 0, 1);
@@ -786,6 +828,8 @@ function stepWeapon(p: PlayerState, inp: InputFrame, ctx: StepContext, out: Step
   }
   const canAct = p.mode === MODE_NORMAL && p.doubledTimer <= 0 && p.holding < 0;
   const fireHeld = (inp.buttons & BTN_FIRE) !== 0 && canAct;
+  // While holding someone, pulling the trigger throws them instead of shooting.
+  if (p.holding >= 0 && (inp.buttons & BTN_FIRE) !== 0) out.throwIntent = true;
 
   if (!canAct && p.charging) {
     p.charging = 0;

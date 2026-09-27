@@ -9,9 +9,14 @@ const human = sim.addPlayer('idle');
 const d = new Driver(sim, human);
 for (const skill of [0.25, 0.45, 0.65]) sim.addBot(skill);
 const t0 = Date.now();
-run(sim, [d], minutes * 60 * 60, () => sim.drainEvents());
+const counts = new Map<string, number>();
+run(sim, [d], minutes * 60 * 60, () => {
+  for (const e of sim.drainEvents()) counts.set(e.t, (counts.get(e.t) ?? 0) + 1);
+});
 const ms = Date.now() - t0;
 for (const p of sim.players.values()) {
-  console.log(`${p.name.padEnd(14)} kos ${p.stats.kos} deaths ${p.stats.deaths} selfFalls ${p.stats.falls} shots ${p.stats.shots} hits ${p.stats.hits}`);
+  const st = p.stats;
+  console.log(`${p.name.padEnd(14)} kos ${st.kos} deaths ${st.deaths} selfFalls ${st.falls} shots ${st.shots} hits ${st.hits} throws ${st.throws} stomps ${st.stomps} bestCombo ${st.bestCombo}`);
 }
+console.log('events:', [...counts].filter(([k]) => !['move', 'shot', 'boom', 'fizzle', 'hit'].includes(k)).map(([k, v]) => `${k}=${v}`).join(' '));
 console.log(`simulated ${minutes} min in ${ms} ms (${((minutes * 60 * 1000) / ms).toFixed(0)}x realtime)`);

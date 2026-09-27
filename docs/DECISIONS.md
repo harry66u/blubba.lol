@@ -59,6 +59,16 @@ The spec leaves the tech stack and many details open. This file records what was
   are clearly tagged BOT, spread their attention across targets, pause between shots, and come in
   mixed skill levels. Private room hosts can turn them off.
 - **Tube man arms** flail constantly but are visual only; hitboxes are a capsule around the body.
+- **Grab escapes** are judged on the held player's own input timeline (the server compares the
+  dash press against the grab timer carried in that player's state), so high-ping players see a fair
+  window. The grabber can't throw until the escape window has closed, so a skilled defender with a
+  dash charge always escapes; the price is the dash they may need to recover later.
+- **Take-you-with-me** reuses the grab: a grab started while falling with no ground below keeps
+  holding for up to 3 seconds instead of auto-throwing, and the held player can still break free
+  with a well-timed dash.
+- **Ledges** can be caught by tapping grab up to 0.2 s early or by holding it, so catching a ledge
+  is about positioning, not frame-perfect timing.
+- **Grapple** targets players first (with a 0.5 m aim forgiveness for trackpads), then surfaces.
 
 ## Sound-off versions of every audio joke
 

@@ -1,6 +1,6 @@
 import { BALANCE } from '../balance';
 import { BTN_FIRE, type InputFrame, emptyInput } from '../input';
-import { MODE_DEAD, MODE_HANG, eyeHeight, playerHeight } from '../player';
+import { MODE_DEAD, MODE_HANG, MODE_HELD, eyeHeight, playerHeight } from '../player';
 import type { GameSim, SimPlayer } from './sim';
 
 export const BOT_NAMES = [
@@ -61,7 +61,10 @@ export class BotBrain {
     };
   }
 
-  private press(key: 'jump' | 'dash' | 'brace' | 'grab'): void {
+  /** When (in seconds after being grabbed) this bot will try to dash free. */
+  private escapeAt = -1;
+
+  private press(key: 'jump' | 'dash' | 'brace' | 'grab' | 'grapple'): void {
     this.input[key] = (this.input[key] + 1) & 255;
   }
 
@@ -83,6 +86,27 @@ export class BotBrain {
     // --- Recovery: no ground below us means we're about to fall off. ---
     const ground = world.groundBelow(s.px, s.py + 0.2, s.pz, 60);
     const offStage = !s.onGround && (ground === null || ground < s.py - 12);
+    if (s.mode === MODE_HELD) {
+      f.buttons = 0;
+      if (this.escapeAt < 0) {
+        // Skilled bots aim for the middle of the window; weak ones are often early or late.
+        const G = BALANCE.grab;
+        const mid = (G.escapeStart + G.escapeEnd) / 2;
+        this.escapeAt = mid + (rnd() - 0.5) * (0.12 + (1 - this.skill) * 0.7);
+      }
+      if (s.holdTimer >= this.escapeAt && !s.escapeUsed) this.press('dash');
+      return { ...f };
+    }
+    this.escapeAt = -1;
+    if (s.holding >= 0) {
+      // Throw toward the nearest edge once allowed.
+      const e = nearestEdgeDir(sim, s.px, s.pz);
+      f.yaw = Math.atan2(-e.x, -e.z);
+      f.pitch = 0.3;
+      this.aimYaw = f.yaw;
+      f.buttons = s.holdTimer >= BALANCE.grab.minHold + 0.05 + (1 - this.skill) * 0.3 ? BTN_FIRE : 0;
+      return { ...f };
+    }
     if (s.mode === MODE_HANG) {
       f.buttons = 0;
       f.moveZ = 1;
@@ -100,7 +124,12 @@ export class BotBrain {
       f.moveZ = 1;
       f.buttons = 0;
       const recoverSkill = 0.4 + this.skill * 0.6;
-      if (s.vy < -3 && s.jumpsUsed < 2 && s.launchTimer <= 0 && rnd() < 0.25 * recoverSkill) this.press('jump');
+      if (sim.features.grapple && s.grappleCool <= 0 && rnd() < 0.08 * recoverSkill) {
+        // Aim at the near edge of the main deck and zip back.
+        const dy = home.y + 0.5 - (s.py + eyeHeight(s));
+        f.pitch = Math.atan2(dy, Math.hypot(home.x - s.px, home.z - s.pz));
+        this.press('grapple');
+      } else if (s.vy < -3 && s.jumpsUsed < 2 && s.launchTimer <= 0 && rnd() < 0.25 * recoverSkill) this.press('jump');
       else if (s.vy < -5 && s.dashCharges > 0 && rnd() < 0.2 * recoverSkill) this.press('dash');
       if (rnd() < 0.08 * this.skill) this.press('grab'); // try to catch a ledge
       return { ...f };
@@ -183,6 +212,30 @@ export class BotBrain {
       this.strafeSign = -this.strafeSign;
     }
 
+    // --- Close range: grab and throw, or stomp hands on a ledge. ---
+    if (target && sim.features.grab && s.grabCool <= 0 && s.onGround && dist < 2.2 && rnd() < 0.02 + this.skill * 0.03) {
+      this.press('grab');
+    }
+    if (sim.features.ledge && s.onGround) {
+      for (const o of sim.players.values()) {
+        if (o.id === me.id || o.state.mode !== MODE_HANG) continue;
+        const hx = o.state.hangX - s.px;
+        const hz = o.state.hangZ - s.pz;
+        const hd = Math.hypot(hx, hz);
+        if (hd < 6 && Math.abs(o.state.hangY - s.py) < 1) {
+          // Walk to the hands and stomp.
+          const fx = -Math.sin(f.yaw);
+          const fz = -Math.cos(f.yaw);
+          const rx = Math.cos(f.yaw);
+          const rz = -Math.sin(f.yaw);
+          f.moveZ = (hx * fx + hz * fz) / (hd || 1);
+          f.moveX = (hx * rx + hz * rz) / (hd || 1);
+          if (hd < 1.2 && rnd() < 0.3) this.press('grab');
+          break;
+        }
+      }
+    }
+
     // --- Jump and dash to dodge. ---
     if (s.onGround && rnd() < 0.006 + this.skill * 0.006) this.press('jump');
     else if (!s.onGround && s.jumpsUsed === 1 && s.vy < 0 && rnd() < 0.02) this.press('jump');
@@ -248,4 +301,19 @@ export class BotBrain {
     }
     return best;
   }
+}
+
+/** Unit vector (x, z) from a point toward the closest edge of the main deck (the largest solid). */
+function nearestEdgeDir(sim: GameSim, x: number, z: number): { x: number; z: number } {
+  let deck = sim.world.solids[0];
+  for (const so of sim.world.solids) {
+    if ((so.maxX - so.minX) * (so.maxZ - so.minZ) > (deck.maxX - deck.minX) * (deck.maxZ - deck.minZ)) deck = so;
+  }
+  const d = [
+    { x: 1, z: 0, dist: deck.maxX - x },
+    { x: -1, z: 0, dist: x - deck.minX },
+    { x: 0, z: 1, dist: deck.maxZ - z },
+    { x: 0, z: -1, dist: z - deck.minZ },
+  ].sort((a, b) => a.dist - b.dist)[0];
+  return { x: d.x, z: d.z };
 }

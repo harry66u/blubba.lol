@@ -59,7 +59,6 @@ export class Room {
       map: getMap(this.settings.mapId),
       mode: this.settings.mode,
       durationSec: this.settings.durationSec,
-      features: { brace: false, ledge: false },
     });
     sim.onPhaseChange = () => {
       this.broadcastJson(this.matchMessage());

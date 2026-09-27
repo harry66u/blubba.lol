@@ -19,6 +19,8 @@ export interface TubeManPose {
   hanging: boolean;
   dashing: boolean;
   protected: boolean;
+  holding: boolean;
+  held: boolean;
 }
 
 export function defaultPose(): TubeManPose {
@@ -38,6 +40,8 @@ export function defaultPose(): TubeManPose {
     hanging: false,
     dashing: false,
     protected: false,
+    holding: false,
+    held: false,
   };
 }
 
@@ -310,7 +314,7 @@ export class TubeMan {
     this.hair.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tip);
 
     // --- Arms: constant, joyful flailing. ---
-    const flailTarget = p.bracing ? 0.15 : p.launched ? 1.8 : 1 + Math.min(0.6, Math.hypot(lvx, lvz) * 0.05);
+    const flailTarget = p.bracing || p.holding ? 0.15 : p.held ? 2.4 : p.hanging ? 0.3 : p.launched ? 1.8 : 1 + Math.min(0.6, Math.hypot(lvx, lvz) * 0.05);
     this.flail += (flailTarget - this.flail) * Math.min(1, dt * 6);
     const shoulderRing = Math.round(n * 0.52);
     const sx0 = spine[shoulderRing * 3];
@@ -333,6 +337,15 @@ export class TubeMan {
       // Base direction: out and up.
       let ang = 0.5 + noise1(t * 2.2, this.seed + side * 11) * 0.7 * this.flail;
       let yaw = noise1(t * 1.6, this.seed + side * 17) * 0.8 * this.flail;
+      if (p.hanging) {
+        // Reaching up to the ledge.
+        ang = 1.25;
+        yaw = 0.9;
+      } else if (p.holding) {
+        // Bear hug out in front.
+        ang = 0.15;
+        yaw = 1.2;
+      }
       const seg = ARM_LEN / (ARM_RINGS - 1);
       for (let i = 0; i < ARM_RINGS; i++) {
         as[i * 3] = px;

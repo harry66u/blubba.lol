@@ -19,6 +19,8 @@ export type GameEvent =
       low: boolean;
       braced: boolean;
       infl: number;
+      /** Hits in the current air combo (1 = not a combo). */
+      combo: number;
     }
   | { t: 'shield'; tick: number; target: number; x: number; y: number; z: number }
   | { t: 'blastjump'; tick: number; id: number }
@@ -27,6 +29,12 @@ export type GameEvent =
   | { t: 'move'; tick: number; id: number; kind: 'jump' | 'djump' | 'dash' | 'slide' | 'land' | 'pad' | 'ledge' | 'climb' | 'wall' | 'bounce' | 'tech'; x: number; y: number; z: number; v?: number; long?: boolean }
   | { t: 'brace'; tick: number; id: number }
   | { t: 'taunt'; tick: number; id: number; n: number }
-  | { t: 'reload'; tick: number; id: number };
+  | { t: 'reload'; tick: number; id: number }
+  | { t: 'grab'; tick: number; id: number; target: number; drag: boolean }
+  | { t: 'throw'; tick: number; id: number; target: number }
+  | { t: 'escape'; tick: number; id: number; from: number }
+  | { t: 'escapeFail'; tick: number; id: number; early: boolean }
+  | { t: 'stomp'; tick: number; id: number; target: number; x: number; y: number; z: number }
+  | { t: 'grapple'; tick: number; id: number; target: number; x: number; y: number; z: number; miss: boolean };
 
 export type GameEventType = GameEvent['t'];

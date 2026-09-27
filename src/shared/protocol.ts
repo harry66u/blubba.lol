@@ -1,5 +1,5 @@
 import { INPUT_BYTES, type InputFrame, readInput, writeInput } from './input';
-import { MODE_DEAD, PLAYER_FIELDS, type PlayerState } from './player';
+import { type Features, MODE_DEAD, PLAYER_FIELDS, type PlayerState } from './player';
 import type { GameEvent } from './game/events';
 import type { MatchPhase, MatchResult, ModeId } from './game/sim';
 
@@ -48,7 +48,7 @@ export interface RoomInfo {
   hostId: number;
   mapId: string;
   settings: RoomSettings;
-  features: { brace: boolean; ledge: boolean };
+  features: Features;
 }
 
 export type ServerMessage =

@@ -2,9 +2,11 @@ import { BALANCE } from '../balance';
 import { type InputFrame, emptyInput } from '../input';
 import type { MapDef } from '../maps/types';
 import {
+  ALL_FEATURES,
   MODE_CLIMB,
   MODE_DEAD,
   MODE_HANG,
+  MODE_HELD,
   MODE_NORMAL,
   type PlayerState,
   StepResult,
@@ -12,7 +14,9 @@ import {
   type WeaponStats,
   createPlayerState,
   depenetrate,
+  eyeHeight,
   inflationMass,
+  lookDir,
   playerHeight,
   playerRadius,
   releaseLedge,
@@ -34,6 +38,9 @@ export interface MatchStats {
   longestLaunch: number;
   chainKos: number;
   timesPopped: number;
+  bestCombo: number;
+  throws: number;
+  stomps: number;
 }
 
 export interface SimPlayer {
@@ -57,6 +64,10 @@ export interface SimPlayer {
   launchFromZ: number;
   launchBy: number;
   joinedAt: number;
+  /** Air combo tracking: who is juggling this player and how many hits so far. */
+  comboBy: number;
+  comboCount: number;
+  comboTime: number;
 }
 
 export interface Projectile {
@@ -93,7 +104,7 @@ export interface MatchResult {
 }
 
 function newStats(): MatchStats {
-  return { kos: 0, deaths: 0, falls: 0, hits: 0, shots: 0, longestLaunch: 0, chainKos: 0, timesPopped: 0 };
+  return { kos: 0, deaths: 0, falls: 0, hits: 0, shots: 0, longestLaunch: 0, chainKos: 0, timesPopped: 0, bestCombo: 0, throws: 0, stomps: 0 };
 }
 
 const MAX_QUEUE = 12;
@@ -134,7 +145,7 @@ export class GameSim {
     this.world = new World(opts.map);
     this.mode = opts.mode ?? 'knockout';
     this.durationSec = opts.durationSec ?? BALANCE.match.durationSec;
-    this.features = { brace: true, ledge: true, ...opts.features };
+    this.features = { ...ALL_FEATURES, ...opts.features };
     this.ctx = { world: this.world, dt: this.dt, weapon: this.weaponStats(), features: this.features };
     const n = this.map.spawns.length;
     this.homePoint = {
@@ -174,6 +185,9 @@ export class GameSim {
       launchFromZ: 0,
       launchBy: -1,
       joinedAt: this.time,
+      comboBy: -1,
+      comboCount: 0,
+      comboTime: -999,
     };
     this.players.set(id, p);
     this.respawn(p);
@@ -192,6 +206,7 @@ export class GameSim {
   removePlayer(id: number): void {
     const p = this.players.get(id);
     if (!p) return;
+    this.releaseInvolving(p);
     this.players.delete(id);
     this.bots.delete(id);
     for (const other of this.players.values()) {
@@ -254,6 +269,7 @@ export class GameSim {
     }
     this.world.setTime(this.time);
 
+    this.updateHolds();
     this.separatePlayers();
     this.stepProjectiles();
     this.checkBlastZones();
@@ -340,6 +356,12 @@ export class GameSim {
     if (out.braced) this.events.push({ t: 'brace', tick, id: p.id });
     if (out.reloadStart) this.events.push({ t: 'reload', tick, id: p.id });
     if (out.taunt) this.events.push({ t: 'taunt', tick, id: p.id, n: (tick + p.id) % 4 });
+    if (out.escapeAttempt) this.tryEscape(p);
+    if (out.throwIntent && s.holding >= 0 && s.holdTimer >= BALANCE.grab.minHold) this.throwHeld(p);
+    if (out.grabIntent) this.tryGrab(p);
+    if (out.grapple) this.tryGrapple(p);
+    if (out.landed > 0 && this.features.ledge) this.tryStomp(p);
+    if (s.onGround && p.comboCount > 0 && this.time - p.comboTime > 0.1) p.comboCount = 0;
     if (s.launchTimer <= 0 && p.launchBy >= 0 && s.onGround) {
       this.finishLaunch(p);
     }
@@ -518,6 +540,16 @@ export class GameSim {
       this.events.push({ t: 'shield', tick: this.tick, target: target.id, x: info.x, y: info.y, z: info.z });
       return;
     }
+    // Getting hit breaks any grab you're part of.
+    this.releaseInvolving(target);
+    const wasAirborne = !s.onGround;
+    if (attackerId >= 0 && attackerId !== target.id && target.comboBy === attackerId && wasAirborne && this.time - target.comboTime <= BALANCE.combo.window) {
+      target.comboCount++;
+    } else {
+      target.comboCount = 1;
+    }
+    target.comboBy = attackerId;
+    target.comboTime = this.time;
     const braced = s.braceTimer > 0;
     const Br = BALANCE.brace;
     s.inflation = Math.min(BALANCE.inflation.max, s.inflation + inflationAdd * (braced ? Br.inflationMult : 1));
@@ -569,7 +601,10 @@ export class GameSim {
       target.lastAttacker = attackerId;
       target.lastAttackTime = this.time;
       const a = this.players.get(attackerId);
-      if (a) a.stats.hits++;
+      if (a) {
+        a.stats.hits++;
+        a.stats.bestCombo = Math.max(a.stats.bestCombo, target.comboCount);
+      }
     }
     target.launchFromX = s.px;
     target.launchFromZ = s.pz;
@@ -591,6 +626,7 @@ export class GameSim {
       low: info.low,
       braced,
       infl: s.inflation,
+      combo: target.comboCount,
     });
   }
 
@@ -605,6 +641,277 @@ export class GameSim {
   }
 
   // --- Player interactions -----------------------------------------------------------------
+
+  /** Grab key: stomp a hanging player's hands, or grab someone in front of you. */
+  private tryGrab(p: SimPlayer): void {
+    const s = p.state;
+    const G = BALANCE.grab;
+    if (s.mode !== MODE_NORMAL || s.holding >= 0 || s.doubledTimer > 0) return;
+    if (this.features.ledge && this.tryStomp(p)) return;
+    if (!this.features.grab || s.grabCool > 0) return;
+    const r = playerRadius(s);
+    const fx = -Math.sin(s.yaw);
+    const fz = -Math.cos(s.yaw);
+    let best: SimPlayer | null = null;
+    let bestD = Infinity;
+    for (const o of this.players.values()) {
+      if (o === p) continue;
+      const t = o.state;
+      if (t.mode !== MODE_NORMAL && t.mode !== MODE_HANG) continue;
+      if (t.spawnProt > 0 || t.heldBy >= 0) continue;
+      const dx = t.px - s.px;
+      const dz = t.pz - s.pz;
+      const dy = t.py + playerHeight(t) * 0.5 - (s.py + playerHeight(s) * 0.5);
+      const horiz = Math.hypot(dx, dz);
+      if (horiz > r + playerRadius(t) + G.range) continue;
+      if (Math.abs(dy) > playerHeight(s) * 0.8 + 0.5) continue;
+      if (horiz > 0.3 && (dx * fx + dz * fz) / horiz < Math.cos(G.cone)) continue;
+      if (horiz < bestD) {
+        bestD = horiz;
+        best = o;
+      }
+    }
+    if (!best) {
+      if (s.onGround) s.grabCool = G.whiffCooldown;
+      return;
+    }
+    this.startGrab(p, best);
+  }
+
+  private startGrab(p: SimPlayer, target: SimPlayer): void {
+    const s = p.state;
+    const t = target.state;
+    if (t.mode === MODE_HANG || t.mode === MODE_CLIMB) releaseLedge(t, 0);
+    if (t.holding >= 0) this.releaseHold(target);
+    t.mode = MODE_HELD;
+    t.heldBy = p.id;
+    t.holdTimer = 0;
+    t.escapeUsed = 0;
+    t.charging = 0;
+    t.charge = 0;
+    t.launchTimer = 0;
+    t.dashTimer = 0;
+    t.slideTimer = 0;
+    t.zipTimer = 0;
+    t.vx = t.vy = t.vz = 0;
+    t.onGround = 0;
+    s.holding = target.id;
+    s.holdTimer = 0;
+    s.charging = 0;
+    s.charge = 0;
+    target.lastAttacker = p.id;
+    target.lastAttackTime = this.time;
+    // Falling with nothing below you: this is a take-you-with-me.
+    const drag = !s.onGround && s.vy < 0 && this.world.groundBelow(s.px, s.py, s.pz, 40) === null;
+    this.events.push({ t: 'grab', tick: this.tick, id: p.id, target: target.id, drag });
+  }
+
+  /** Keeps held players in the grabber's arms and handles automatic throws. */
+  private updateHolds(): void {
+    const G = BALANCE.grab;
+    for (const p of this.players.values()) {
+      const s = p.state;
+      if (s.holding < 0) continue;
+      const target = this.players.get(s.holding);
+      if (!target || target.state.heldBy !== p.id || target.state.mode !== MODE_HELD || s.mode !== MODE_NORMAL) {
+        this.releaseHold(p);
+        continue;
+      }
+      const t = target.state;
+      const fx = -Math.sin(s.yaw);
+      const fz = -Math.cos(s.yaw);
+      const dist = playerRadius(s) + playerRadius(t) + 0.1;
+      t.px = s.px + fx * dist;
+      t.py = s.py + 0.4;
+      t.pz = s.pz + fz * dist;
+      t.vx = s.vx;
+      t.vy = s.vy;
+      t.vz = s.vz;
+      t.yaw = s.yaw + Math.PI;
+      depenetrate(t, this.world);
+      t.mode = MODE_HELD;
+      t.onGround = 0;
+      if (s.onGround && s.holdTimer >= G.maxHold) this.throwHeld(p);
+      else if (!s.onGround && s.holdTimer >= G.maxDragHold) this.releaseHold(p);
+    }
+  }
+
+  private throwHeld(p: SimPlayer): void {
+    const s = p.state;
+    const target = this.players.get(s.holding);
+    const G = BALANCE.grab;
+    if (!target) {
+      this.releaseHold(p);
+      return;
+    }
+    const dir = lookDir(s.yaw, Math.max(s.pitch, G.throwMinPitch), { x: 0, y: 0, z: 0 });
+    this.releaseHold(p);
+    const t = target.state;
+    p.stats.throws++;
+    this.events.push({ t: 'throw', tick: this.tick, id: p.id, target: target.id });
+    this.applyHit(target, p.id, dir.x, dir.y, dir.z, G.throwPower, G.throwInflation, {
+      direct: true,
+      low: false,
+      x: t.px,
+      y: t.py + playerHeight(t) * 0.5,
+      z: t.pz,
+    });
+  }
+
+  /** Lets go of whoever this player is holding. The held player keeps the grabber's momentum. */
+  private releaseHold(p: SimPlayer): void {
+    const s = p.state;
+    const tid = s.holding;
+    s.holding = -1;
+    s.holdTimer = 0;
+    s.grabCool = Math.max(s.grabCool, BALANCE.grab.cooldown);
+    const target = this.players.get(tid);
+    if (target && target.state.heldBy === p.id) {
+      const t = target.state;
+      t.heldBy = -1;
+      t.holdTimer = 0;
+      if (t.mode === MODE_HELD) t.mode = MODE_NORMAL;
+      t.vx = s.vx;
+      t.vy = s.vy;
+      t.vz = s.vz;
+      t.onGround = 0;
+    }
+  }
+
+  /** Breaks any grab this player is part of (as grabber or as the one being held). */
+  private releaseInvolving(p: SimPlayer): void {
+    const s = p.state;
+    if (s.holding >= 0) this.releaseHold(p);
+    if (s.heldBy >= 0) {
+      const g = this.players.get(s.heldBy);
+      if (g && g.state.holding === p.id) this.releaseHold(g);
+      else {
+        s.heldBy = -1;
+        if (s.mode === MODE_HELD) s.mode = MODE_NORMAL;
+      }
+    }
+  }
+
+  /** One well-timed dash breaks free. Early or late presses use up your only attempt. */
+  private tryEscape(p: SimPlayer): void {
+    const t = p.state;
+    const G = BALANCE.grab;
+    if (t.mode !== MODE_HELD || t.heldBy < 0 || t.escapeUsed) return;
+    t.escapeUsed = 1;
+    const g = this.players.get(t.heldBy);
+    if (!g) return;
+    if (t.holdTimer >= G.escapeStart && t.holdTimer <= G.escapeEnd && t.dashCharges >= 1) {
+      if (t.dashCharges >= BALANCE.dash.charges) t.dashRecharge = BALANCE.dash.rechargeTime;
+      t.dashCharges -= 1;
+      this.releaseHold(g);
+      const gs = g.state;
+      const fx = -Math.sin(gs.yaw);
+      const fz = -Math.cos(gs.yaw);
+      t.vx = fx * G.escapePush;
+      t.vy = 5;
+      t.vz = fz * G.escapePush;
+      gs.vx -= fx * 4;
+      gs.vz -= fz * 4;
+      this.events.push({ t: 'escape', tick: this.tick, id: p.id, from: g.id });
+    } else {
+      this.events.push({ t: 'escapeFail', tick: this.tick, id: p.id, early: t.holdTimer < G.escapeStart });
+    }
+  }
+
+  /** Landing on, or pressing grab next to, a hanging player's hands knocks them off. */
+  private tryStomp(p: SimPlayer): boolean {
+    const s = p.state;
+    const L = BALANCE.ledge;
+    if (s.mode !== MODE_NORMAL || !s.onGround) return false;
+    for (const o of this.players.values()) {
+      if (o === p) continue;
+      const h = o.state;
+      if (h.mode !== MODE_HANG) continue;
+      if (Math.abs(s.py - h.hangY) > 0.6) continue;
+      if (Math.hypot(s.px - h.hangX, s.pz - h.hangZ) > playerRadius(s) + L.stompReach) continue;
+      releaseLedge(h, -L.stompDropSpeed);
+      h.vx = h.hangNx * 2;
+      h.vz = h.hangNz * 2;
+      h.launchTimer = L.stompStun;
+      h.launchElapsed = 0;
+      h.regrabCool = 1;
+      o.lastAttacker = p.id;
+      o.lastAttackTime = this.time;
+      o.launchBy = p.id;
+      o.launchFromX = h.px;
+      o.launchFromZ = h.pz;
+      p.stats.stomps++;
+      this.events.push({ t: 'stomp', tick: this.tick, id: p.id, target: o.id, x: h.hangX, y: h.hangY, z: h.hangZ });
+      return true;
+    }
+    return false;
+  }
+
+  /** Grapple: pull an enemy toward you, or pull yourself to a surface. */
+  private tryGrapple(p: SimPlayer): void {
+    const s = p.state;
+    const G = BALANCE.grapple;
+    if (!this.features.grapple || s.grappleCool > 0 || s.mode !== MODE_NORMAL || s.holding >= 0) return;
+    const d = lookDir(s.yaw, s.pitch, { x: 0, y: 0, z: 0 });
+    const ex = s.px;
+    const ey = s.py + eyeHeight(s);
+    const ez = s.pz;
+    let target: SimPlayer | null = null;
+    let bestT = G.range;
+    for (const o of this.players.values()) {
+      if (o === p) continue;
+      const t = o.state;
+      if (t.mode === MODE_DEAD || t.mode === MODE_HELD || t.spawnProt > 0) continue;
+      const hit = rayCapsule(ex, ey, ez, d.x, d.y, d.z, t, playerRadius(t) + G.aimForgiveness);
+      if (hit !== null && hit < bestT) {
+        bestT = hit;
+        target = o;
+      }
+    }
+    const wh = this.world.raycast(ex, ey, ez, d.x, d.y, d.z, G.range);
+    if (target && (!wh || bestT < wh.dist)) {
+      const t = target.state;
+      if (t.mode === MODE_HANG || t.mode === MODE_CLIMB) releaseLedge(t, 0);
+      const cy = t.py + playerHeight(t) * 0.5;
+      let dx = ex - t.px;
+      let dy = ey - cy;
+      let dz = ez - t.pz;
+      const l = Math.hypot(dx, dy, dz) || 1;
+      dx /= l;
+      dy /= l;
+      dz /= l;
+      t.vx = dx * G.pullSpeed;
+      t.vy = dy * G.pullSpeed + G.pullUp;
+      t.vz = dz * G.pullSpeed;
+      t.onGround = 0;
+      t.groundId = -1;
+      t.slideTimer = 0;
+      t.dashTimer = 0;
+      t.zipTimer = 0;
+      t.launchTimer = Math.max(t.launchTimer, G.pullHitstun);
+      t.launchElapsed = 0;
+      target.lastAttacker = p.id;
+      target.lastAttackTime = this.time;
+      target.launchBy = p.id;
+      target.launchFromX = t.px;
+      target.launchFromZ = t.pz;
+      s.grappleCool = G.cooldown;
+      this.events.push({ t: 'grapple', tick: this.tick, id: p.id, target: target.id, x: t.px, y: cy, z: t.pz, miss: false });
+    } else if (wh) {
+      const h = playerHeight(s);
+      s.zipTimer = G.zipMaxTime;
+      s.zipX = wh.x + wh.nx * (playerRadius(s) + 0.3);
+      s.zipY = wh.y + wh.ny * 0.6 + (wh.ny > 0.5 ? h * 0.5 : 0.3);
+      s.zipZ = wh.z + wh.nz * (playerRadius(s) + 0.3);
+      s.onGround = 0;
+      s.grappleCool = G.cooldown;
+      this.events.push({ t: 'grapple', tick: this.tick, id: p.id, target: -1, x: wh.x, y: wh.y, z: wh.z, miss: false });
+    } else {
+      s.grappleCool = G.missCooldown;
+      this.events.push({ t: 'grapple', tick: this.tick, id: p.id, target: -1, x: ex + d.x * G.range, y: ey + d.y * G.range, z: ez + d.z * G.range, miss: true });
+    }
+  }
+
 
   private separatePlayers(): void {
     const list = [...this.players.values()].filter((p) => p.state.mode === MODE_NORMAL);
@@ -649,6 +956,7 @@ export class GameSim {
 
   knockout(p: SimPlayer): void {
     const s = p.state;
+    this.releaseInvolving(p);
     const credit = p.lastAttacker >= 0 && this.time - p.lastAttackTime <= BALANCE.knockback.creditWindow;
     const killer = credit ? this.players.get(p.lastAttacker) : undefined;
     let points = 0;
@@ -806,4 +1114,25 @@ export function capsuleSphere(s: PlayerState, x: number, y: number, z: number, r
   if (d > pr + r) return null;
   if (d < 1e-5) return { x: s.px, y: ay, z: s.pz };
   return { x: s.px + (dx / d) * pr, y: ay + (dy / d) * pr, z: s.pz + (dz / d) * pr };
+}
+
+/** Distance along a ray to a player's capsule (with the given radius), or null if it misses. */
+export function rayCapsule(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, s: PlayerState, r: number): number | null {
+  const h = playerHeight(s);
+  const y0 = s.py + r;
+  const y1 = Math.max(y0, s.py + h - r);
+  // Closest approach between the ray and the capsule's vertical axis: refine twice.
+  let ay = Math.max(y0, Math.min(y1, oy));
+  let t = 0;
+  for (let i = 0; i < 3; i++) {
+    t = Math.max(0, (s.px - ox) * dx + (ay - oy) * dy + (s.pz - oz) * dz);
+    ay = Math.max(y0, Math.min(y1, oy + dy * t));
+  }
+  const cx = ox + dx * t - s.px;
+  const cy = oy + dy * t - ay;
+  const cz = oz + dz * t - s.pz;
+  const d2 = cx * cx + cy * cy + cz * cz;
+  if (d2 > r * r) return null;
+  // Step back to the surface.
+  return Math.max(0, t - Math.sqrt(r * r - d2));
 }

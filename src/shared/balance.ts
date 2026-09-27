@@ -153,6 +153,60 @@ export const BALANCE = {
   scoring: {
     knockout: 1,
   },
+
+  ledge: {
+    /** How long a press of grab keeps trying to catch a ledge while falling. */
+    buffer: 0.2,
+    maxHang: 3.5,
+    climbTime: 0.3,
+    regrabCooldown: 0.5,
+    /** Horizontal reach from a stomping player's feet to the hanging player's hands. */
+    stompReach: 0.9,
+    stompDropSpeed: 7,
+    stompStun: 0.5,
+  },
+
+  grab: {
+    /** Reach beyond both bodies' radii. */
+    range: 1.3,
+    /** Half-angle (radians) in front of you that a grab can catch. */
+    cone: 1.0,
+    cooldown: 3,
+    whiffCooldown: 0.6,
+    /** The held player escapes only with a dash pressed inside this window (seconds after the grab). */
+    escapeStart: 0.35,
+    escapeEnd: 0.6,
+    /** The grabber can throw once the escape window has closed. */
+    minHold: 0.6,
+    /** Grounded grabbers throw automatically after this long. */
+    maxHold: 1.4,
+    /** Airborne grabbers (take-you-with-me) hold on until this long. */
+    maxDragHold: 3,
+    throwPower: 1.15,
+    throwInflation: 0.1,
+    /** Minimum upward angle of a throw (radians). */
+    throwMinPitch: 0.25,
+    escapePush: 9,
+    moveMult: 0.6,
+  },
+
+  grapple: {
+    range: 24,
+    cooldown: 5,
+    missCooldown: 1.2,
+    /** Extra radius around bodies so trackpad players can land grapples. */
+    aimForgiveness: 0.5,
+    pullSpeed: 15,
+    pullUp: 5,
+    pullHitstun: 0.35,
+    zipSpeed: 26,
+    zipMaxTime: 0.8,
+  },
+
+  combo: {
+    /** Hits within this long of the previous hit, before the target lands, extend a combo. */
+    window: 1.2,
+  },
 };
 
 export type WeaponId = 'airCannon';

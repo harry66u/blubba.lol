@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { BALANCE } from '../../shared/balance';
 import { clear, el, formatTime } from './dom';
 
+const ESCAPE_BAR_SEC = 0.8;
+
 interface WorldPopup {
   el: HTMLElement;
   pos: THREE.Vector3;
@@ -13,6 +15,12 @@ interface WorldPopup {
 
 export interface HudState {
   inflation: number;
+  grabReady: number;
+  grappleReady: number;
+  /** Escape-timing bar while held: seconds since the grab, or -1 when not held. */
+  heldTime: number;
+  escapeUsed: boolean;
+  hint: string;
   ammo: number;
   maxAmmo: number;
   reloadFrac: number;
@@ -48,6 +56,15 @@ export class Hud {
   private readonly dashPips: HTMLElement;
   private readonly braceWrap: HTMLElement;
   private readonly braceFill: HTMLElement;
+  private readonly grabWrap: HTMLElement;
+  private readonly grabFill: HTMLElement;
+  private readonly grappleWrap: HTMLElement;
+  private readonly grappleFill: HTMLElement;
+  private readonly hintEl: HTMLElement;
+  private readonly escapeBox: HTMLElement;
+  private readonly escapeMarker: HTMLElement;
+  private readonly escapeLabel: HTMLElement;
+  private readonly flashEl: HTMLElement;
   private readonly clock: HTMLElement;
   private readonly sub: HTMLElement;
   private readonly killfeed: HTMLElement;
@@ -105,9 +122,25 @@ export class Hud {
     const ammo = el('div', { class: 'ammo' }, this.weaponName, this.ammoPips, this.reloadBar);
 
     this.dashPips = el('div', { class: 'pips' });
-    this.braceFill = el('div', { class: 'fill' });
-    this.braceWrap = el('div', { class: 'group hidden' }, el('div', { class: 'pips' }, el('div', { class: 'pip' }, this.braceFill)), el('div', { text: 'BRACE' }));
-    const movement = el('div', { class: 'movement' }, el('div', { class: 'group' }, this.dashPips, el('div', { text: 'DASH' })), this.braceWrap);
+    const ability = (label: string): [HTMLElement, HTMLElement] => {
+      const fill = el('div', { class: 'fill' });
+      const wrap = el('div', { class: 'group hidden' }, el('div', { class: 'pips' }, el('div', { class: 'pip' }, fill)), el('div', { text: label }));
+      return [wrap, fill];
+    };
+    [this.braceWrap, this.braceFill] = ability('BRACE');
+    [this.grabWrap, this.grabFill] = ability('GRAB');
+    [this.grappleWrap, this.grappleFill] = ability('GRAPPLE');
+    const movement = el('div', { class: 'movement' }, el('div', { class: 'group' }, this.dashPips, el('div', { text: 'DASH' })), this.braceWrap, this.grabWrap, this.grappleWrap);
+    this.hintEl = el('div', { class: 'hint hidden' });
+    this.escapeMarker = el('div', { class: 'marker' });
+    this.escapeLabel = el('div', { class: 'lbl', text: 'DASH TO BREAK FREE!' });
+    const zone = el('div', { class: 'zone' });
+    const lo = BALANCE.grab.escapeStart / ESCAPE_BAR_SEC;
+    const hi = BALANCE.grab.escapeEnd / ESCAPE_BAR_SEC;
+    zone.style.left = `${lo * 100}%`;
+    zone.style.width = `${(hi - lo) * 100}%`;
+    this.escapeBox = el('div', { class: 'escape hidden' }, this.escapeLabel, el('div', { class: 'bar' }, zone, this.escapeMarker));
+    this.flashEl = el('div', { class: 'screen-flash' });
 
     this.clock = el('div', { class: 'clock', text: '4:00' });
     this.sub = el('div', { class: 'sub' });
@@ -122,7 +155,7 @@ export class Hud {
     this.damage = el('div', { class: 'damage-dir' });
     this.ping = el('div', { class: 'ping' });
 
-    this.root.append(this.nametags, this.popups, this.damage, this.crosshair, this.hitmarker, inflation, movement, ammo, timer, this.killfeed, this.calloutBox, this.respawnBox, this.note, this.ping);
+    this.root.append(this.flashEl, this.nametags, this.popups, this.damage, this.crosshair, this.hitmarker, inflation, movement, ammo, timer, this.killfeed, this.calloutBox, this.respawnBox, this.note, this.hintEl, this.escapeBox, this.ping);
   }
 
   show(v: boolean): void {
@@ -161,6 +194,20 @@ export class Hud {
       }
     });
     this.braceFill.style.height = `${Math.round(s.braceReady * 100)}%`;
+    this.grabFill.style.height = `${Math.round(s.grabReady * 100)}%`;
+    this.grappleFill.style.height = `${Math.round(s.grappleReady * 100)}%`;
+    this.setIf('hint', s.hint, () => {
+      this.hintEl.textContent = s.hint;
+      this.hintEl.classList.toggle('hidden', !s.hint);
+    });
+    this.escapeBox.classList.toggle('hidden', s.heldTime < 0);
+    if (s.heldTime >= 0) {
+      const f = Math.min(1, s.heldTime / ESCAPE_BAR_SEC);
+      this.escapeMarker.style.left = `${f * 100}%`;
+      const inZone = s.heldTime >= BALANCE.grab.escapeStart && s.heldTime <= BALANCE.grab.escapeEnd;
+      this.escapeBox.classList.toggle('in-zone', inZone && !s.escapeUsed);
+      this.escapeLabel.textContent = s.escapeUsed ? 'MISSED IT!' : inZone ? 'NOW! DASH!' : 'DASH IN THE GREEN!';
+    }
     const circ = 2 * Math.PI * 20;
     this.chargeArc.setAttribute('stroke-dashoffset', `${circ * (1 - s.charge)}`);
     this.chargeArc.setAttribute('stroke', s.charge >= 1 ? '#ff3b8a' : '#ffd60a');
@@ -177,8 +224,16 @@ export class Hud {
     }
   }
 
-  showBrace(v: boolean): void {
-    this.braceWrap.classList.toggle('hidden', !v);
+  showAbilities(f: { brace: boolean; grab: boolean; grapple: boolean }): void {
+    this.braceWrap.classList.toggle('hidden', !f.brace);
+    this.grabWrap.classList.toggle('hidden', !f.grab);
+    this.grappleWrap.classList.toggle('hidden', !f.grapple);
+  }
+
+  /** Brief full-screen tint (e.g. blue when a brace succeeds). */
+  flash(color: string, ms = 250): void {
+    this.flashEl.style.boxShadow = `inset 0 0 160px 40px ${color}`;
+    this.flashEl.animate([{ opacity: 1 }, { opacity: 0 }], { duration: ms, easing: 'ease-out' });
   }
 
   hitMarker(): void {
