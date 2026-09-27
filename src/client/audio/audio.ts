@@ -1,7 +1,13 @@
 /**
- * Procedural sound effects with Web Audio: no audio files to download, so the game loads
- * instantly. Every sound here has a matching visual elsewhere (spec §2: fully playable muted).
+ * Sound effects with Web Audio. Body sounds (farts, burps, groans, squeals, squeaks, impacts)
+ * are physically modelled into sample buffers at startup (voices.ts), or taken from recordings
+ * if sounds/manifest.json lists any; the rest are synthesized live. No downloads are required,
+ * so the game still loads instantly. Every sound has a matching visual elsewhere (spec §2).
  */
+
+import { type Rng, makeRng, renderBurp, renderFart, renderGroan, renderImpact, renderSqueak, renderSqueal } from './voices';
+
+export type SampleKind = 'fart' | 'fartLong' | 'burp' | 'groan' | 'squeal' | 'squeak' | 'impact';
 
 export interface VolumeSettings {
   master: number;
@@ -28,6 +34,9 @@ export class Audio {
   private chargeOsc: OscillatorNode | null = null;
   private chargeGain: GainNode | null = null;
   private lastPlay = new Map<string, number>();
+  /** Pre-rendered sample variants per sound (modelled, or recordings from /sounds if provided). */
+  private readonly bank = new Map<SampleKind, AudioBuffer[]>();
+  private readonly recorded = new Set<SampleKind>();
 
   constructor(volumes: VolumeSettings) {
     this.volumes = { ...volumes };
@@ -55,8 +64,89 @@ export class Audio {
       const d = this.noiseBuf.getChannelData(0);
       for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
       this.applyVolumes();
+      this.buildBank();
     }
     if (this.ctx.state === 'suspended') void this.ctx.resume();
+  }
+
+  /**
+   * Renders a few variants of each body sound, one at a time between frames so the first click
+   * never stutters, then looks for optional recorded samples (sounds/manifest.json) that replace
+   * the modelled ones.
+   */
+  private buildBank(): void {
+    const ctx = this.ctx!;
+    const sr = ctx.sampleRate;
+    const jobs: [SampleKind, () => Float32Array][] = [];
+    let seed = Math.floor(Math.random() * 1e6);
+    const add = (kind: SampleKind, count: number, fn: (rng: Rng) => Float32Array) => {
+      for (let i = 0; i < count; i++) {
+        const rng = makeRng(seed++);
+        jobs.push([kind, () => fn(rng)]);
+      }
+    };
+    add('fart', 8, (r) => renderFart(sr, r));
+    add('impact', 4, (r) => renderImpact(sr, r));
+    add('squeak', 6, (r) => renderSqueak(sr, r));
+    add('burp', 4, (r) => renderBurp(sr, r));
+    add('groan', 4, (r) => renderGroan(sr, r));
+    add('squeal', 4, (r) => renderSqueal(sr, r));
+    add('fartLong', 3, (r) => renderFart(sr, r, { long: true }));
+    const step = () => {
+      const job = jobs.shift();
+      if (!job) return;
+      const [kind, render] = job;
+      if (!this.recorded.has(kind)) {
+        const data = render();
+        const buf = ctx.createBuffer(1, data.length, sr);
+        buf.copyToChannel(data as Float32Array<ArrayBuffer>, 0);
+        const list = this.bank.get(kind) ?? [];
+        list.push(buf);
+        this.bank.set(kind, list);
+      }
+      window.setTimeout(step, 0);
+    };
+    step();
+    void this.loadRecorded();
+  }
+
+  /** Optional real recordings: sounds/manifest.json maps a kind to a list of files. */
+  private async loadRecorded(): Promise<void> {
+    try {
+      const res = await fetch('sounds/manifest.json', { cache: 'no-cache' });
+      if (!res.ok) return;
+      const manifest = (await res.json()) as Partial<Record<SampleKind, string[]>>;
+      for (const [kind, files] of Object.entries(manifest) as [SampleKind, string[]][]) {
+        const bufs: AudioBuffer[] = [];
+        for (const f of files ?? []) {
+          try {
+            const data = await (await fetch(`sounds/${f}`)).arrayBuffer();
+            bufs.push(await this.ctx!.decodeAudioData(data));
+          } catch {
+            // Skip files that fail to load.
+          }
+        }
+        if (bufs.length) {
+          this.recorded.add(kind);
+          this.bank.set(kind, bufs);
+        }
+      }
+    } catch {
+      // No recordings: the modelled sounds are used.
+    }
+  }
+
+  /** Plays a random variant of a sample at a playback rate (pitch). */
+  private playSample(kind: SampleKind, pos: [number, number, number] | null, gain: number, rate: number): void {
+    const list = this.bank.get(kind) ?? (kind === 'fartLong' ? this.bank.get('fart') : undefined);
+    if (!list?.length) return;
+    const out = this.out(pos, gain);
+    if (!out) return;
+    const src = this.ctx!.createBufferSource();
+    src.buffer = list[Math.floor(Math.random() * list.length)];
+    src.playbackRate.value = rate;
+    src.connect(out);
+    src.start();
   }
 
   setVolumes(v: VolumeSettings): void {
@@ -181,180 +271,29 @@ export class Audio {
   /** Squeaky rubber hit. Higher pitch the more inflated the target is. */
   squeak(inflation: number, pos: [number, number, number] | null): void {
     if (!this.throttle('squeak', 40)) return;
-    const out = this.out(pos, 0.45);
-    if (!out) return;
-    const ctx = this.ctx!;
-    const t = ctx.currentTime;
-    const base = 520 + inflation * 700 + Math.random() * 120;
-    const osc = ctx.createOscillator();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(base, t);
-    osc.frequency.exponentialRampToValueAtTime(base * 1.9, t + 0.06);
-    osc.frequency.exponentialRampToValueAtTime(base * 1.1, t + 0.16);
-    const vib = ctx.createOscillator();
-    vib.frequency.value = 38;
-    const vg = ctx.createGain();
-    vg.gain.value = base * 0.06;
-    vib.connect(vg).connect(osc.frequency);
-    const g = ctx.createGain();
-    this.env(g, t, 0.005, 0.7, 0.17);
-    osc.connect(g).connect(out);
-    osc.start(t);
-    vib.start(t);
-    osc.stop(t + 0.25);
-    vib.stop(t + 0.25);
+    // Tighter (more inflated) vinyl squeaks higher.
+    this.playSample('squeak', pos, 0.45, 0.8 + inflation * 0.8 + Math.random() * 0.15);
   }
 
   /** Groin-shot groan: a descending, formant-filtered "ooof". */
   groan(pos: [number, number, number] | null): void {
-    const out = this.out(pos, 0.8);
-    if (!out) return;
-    const ctx = this.ctx!;
-    const t = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    osc.type = 'sawtooth';
-    const f0 = 150 + Math.random() * 30;
-    osc.frequency.setValueAtTime(f0 * 1.25, t);
-    osc.frequency.linearRampToValueAtTime(f0, t + 0.12);
-    osc.frequency.exponentialRampToValueAtTime(f0 * 0.6, t + 0.6);
-    const g = ctx.createGain();
-    this.env(g, t, 0.03, 0.6, 0.6);
-    for (const [freq, q, amp] of [
-      [600, 8, 1],
-      [1000, 10, 0.5],
-      [2400, 12, 0.2],
-    ]) {
-      const bp = ctx.createBiquadFilter();
-      bp.type = 'bandpass';
-      bp.frequency.setValueAtTime(freq, t);
-      bp.frequency.linearRampToValueAtTime(freq * 0.7, t + 0.6);
-      bp.Q.value = q;
-      const a = ctx.createGain();
-      a.gain.value = amp * 3;
-      osc.connect(bp).connect(a).connect(g);
-    }
-    g.connect(out);
-    osc.start(t);
-    osc.stop(t + 0.7);
+    this.playSample('groan', pos, 0.95, 0.9 + Math.random() * 0.2);
   }
 
   /** Dash fart with a randomized pitch; `long` is the rare extra-long one. */
   fart(pos: [number, number, number] | null, long = false): void {
-    const out = this.out(pos, 0.75);
-    if (!out) return;
-    const ctx = this.ctx!;
-    const t = ctx.currentTime;
-    const dur = long ? 1.4 + Math.random() * 0.4 : 0.22 + Math.random() * 0.14;
-    const f0 = 65 + Math.random() * 55;
-    const osc = ctx.createOscillator();
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(f0 * 1.3, t);
-    if (long) {
-      osc.frequency.linearRampToValueAtTime(f0 * 0.9, t + dur * 0.3);
-      osc.frequency.linearRampToValueAtTime(f0 * 1.25, t + dur * 0.55);
-      osc.frequency.linearRampToValueAtTime(f0 * 0.7, t + dur);
-    } else {
-      osc.frequency.exponentialRampToValueAtTime(f0 * 0.75, t + dur);
-    }
-    // Flutter: amplitude modulation gives the rubbery "brrrt".
-    const flutter = ctx.createOscillator();
-    flutter.type = 'square';
-    flutter.frequency.setValueAtTime(24 + Math.random() * 14, t);
-    const fg = ctx.createGain();
-    fg.gain.value = 0.45;
-    const am = ctx.createGain();
-    am.gain.value = 0.55;
-    flutter.connect(fg).connect(am.gain);
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.value = 520 + Math.random() * 300;
-    lp.Q.value = 4;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.9, t + 0.02);
-    g.gain.setValueAtTime(0.9, t + dur * 0.7);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    osc.connect(am).connect(lp).connect(g).connect(out);
-    const nf = ctx.createBiquadFilter();
-    nf.type = 'lowpass';
-    nf.frequency.value = 400;
-    const ng = ctx.createGain();
-    ng.gain.value = 0.25;
-    nf.connect(ng).connect(g);
-    this.noise(nf, t, dur);
-    osc.start(t);
-    flutter.start(t);
-    osc.stop(t + dur + 0.05);
-    flutter.stop(t + dur + 0.05);
+    // Random pitch every time so no two dashes sound the same.
+    this.playSample(long ? 'fartLong' : 'fart', pos, 0.85, 0.85 + Math.random() * 0.35);
   }
 
   /** Burp for taunts and soda cans. */
   burp(pos: [number, number, number] | null): void {
-    const out = this.out(pos, 0.8);
-    if (!out) return;
-    const ctx = this.ctx!;
-    const t = ctx.currentTime;
-    const dur = 0.45 + Math.random() * 0.3;
-    const osc = ctx.createOscillator();
-    osc.type = 'sawtooth';
-    const f0 = 85 + Math.random() * 30;
-    osc.frequency.setValueAtTime(f0, t);
-    osc.frequency.linearRampToValueAtTime(f0 * 1.15, t + dur * 0.4);
-    osc.frequency.linearRampToValueAtTime(f0 * 0.8, t + dur);
-    const flutter = ctx.createOscillator();
-    flutter.frequency.value = 17;
-    const fg = ctx.createGain();
-    fg.gain.value = 0.35;
-    const am = ctx.createGain();
-    am.gain.value = 0.65;
-    flutter.connect(fg).connect(am.gain);
-    const bp = ctx.createBiquadFilter();
-    bp.type = 'bandpass';
-    bp.frequency.setValueAtTime(420, t);
-    bp.frequency.linearRampToValueAtTime(650, t + dur);
-    bp.Q.value = 3;
-    const g = ctx.createGain();
-    this.env(g, t, 0.03, 1.2, dur);
-    osc.connect(am).connect(bp).connect(g).connect(out);
-    osc.start(t);
-    flutter.start(t);
-    osc.stop(t + dur + 0.1);
-    flutter.stop(t + dur + 0.1);
+    this.playSample('burp', pos, 0.9, 0.88 + Math.random() * 0.25);
   }
 
   /** Deflating-balloon squeal when a player is knocked off the map. */
   squeal(pos: [number, number, number] | null): void {
-    const out = this.out(pos, 0.6);
-    if (!out) return;
-    const ctx = this.ctx!;
-    const t = ctx.currentTime;
-    const dur = 1.3;
-    const osc = ctx.createOscillator();
-    osc.type = 'square';
-    const f0 = 900 + Math.random() * 300;
-    osc.frequency.setValueAtTime(f0, t);
-    for (let i = 1; i <= 10; i++) {
-      osc.frequency.linearRampToValueAtTime(f0 * (1 - i * 0.05) * (1 + (Math.random() - 0.5) * 0.25), t + (i / 10) * dur);
-    }
-    const vib = ctx.createOscillator();
-    vib.frequency.value = 22;
-    const vg = ctx.createGain();
-    vg.gain.value = 60;
-    vib.connect(vg).connect(osc.frequency);
-    const bp = ctx.createBiquadFilter();
-    bp.type = 'bandpass';
-    bp.frequency.value = 1400;
-    bp.Q.value = 1.5;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.5, t + 0.04);
-    g.gain.setValueAtTime(0.5, t + dur * 0.75);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    osc.connect(bp).connect(g).connect(out);
-    osc.start(t);
-    vib.start(t);
-    osc.stop(t + dur + 0.05);
-    vib.stop(t + dur + 0.05);
+    this.playSample('squeal', pos, 0.65, 0.9 + Math.random() * 0.25);
   }
 
   /** Springy boing for jumps and bounce pads. */
@@ -848,51 +787,12 @@ export class Audio {
     }
   }
 
-  /**
-   * A landed hit: a sub-bass thump (the weight), a rubbery pitch-dropping "bwomp" (the tube man),
-   * and a bright slap transient (the contact). Louder and lower for harder hits.
-   */
+  /** A landed hit: a deep thump, a rubbery "bwomp" and a slap (see voices.ts). */
   impact(strength: number, pos: [number, number, number] | null): void {
     if (!this.throttle('impact', 40)) return;
     const k = Math.min(1, strength / 30);
-    const out = this.out(pos, 0.45 + k * 0.4);
-    if (!out) return;
-    const ctx = this.ctx!;
-    const t = ctx.currentTime;
-    // Thump.
-    const sub = ctx.createOscillator();
-    sub.type = 'sine';
-    sub.frequency.setValueAtTime(120 - k * 30, t);
-    sub.frequency.exponentialRampToValueAtTime(38, t + 0.18);
-    const sg = ctx.createGain();
-    this.env(sg, t, 0.002, 1, 0.22 + k * 0.1);
-    sub.connect(sg).connect(out);
-    sub.start(t);
-    sub.stop(t + 0.4);
-    // Rubber bwomp: a buzzy tone through a resonant filter that closes as the pitch drops.
-    const rub = ctx.createOscillator();
-    rub.type = 'sawtooth';
-    const f0 = 260 - k * 90 + Math.random() * 30;
-    rub.frequency.setValueAtTime(f0, t);
-    rub.frequency.exponentialRampToValueAtTime(f0 * 0.45, t + 0.16);
-    const bp = ctx.createBiquadFilter();
-    bp.type = 'lowpass';
-    bp.Q.value = 9;
-    bp.frequency.setValueAtTime(1400, t);
-    bp.frequency.exponentialRampToValueAtTime(260, t + 0.18);
-    const rg = ctx.createGain();
-    this.env(rg, t, 0.003, 0.45, 0.2);
-    rub.connect(bp).connect(rg).connect(out);
-    rub.start(t);
-    rub.stop(t + 0.3);
-    // Slap.
-    const hp = ctx.createBiquadFilter();
-    hp.type = 'highpass';
-    hp.frequency.value = 1800;
-    const ng = ctx.createGain();
-    this.env(ng, t, 0.0005, 0.7, 0.035);
-    this.noise(hp, t, 0.06);
-    hp.connect(ng).connect(out);
+    // Harder hits are louder and deeper.
+    this.playSample('impact', pos, 0.5 + k * 0.45, 1.15 - k * 0.35 + Math.random() * 0.1);
   }
 
   /** Stadium horn plus a crowd roar (noise swell) for goals and giant tube men filling up. */
