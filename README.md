@@ -16,9 +16,11 @@ npm run build        # builds the client (Vite) and the server (esbuild)
 npm start            # serves everything on http://localhost:8080
 ```
 
-Open http://localhost:8080 and click **PLAY**. Public rooms are topped up with bots, so you can play
-alone. To play with friends, click **Create private room**, press **Esc** in the match, and use
-**Copy invite link** (links look like `http://host/r/ABCDE`).
+Open http://localhost:8080, pick a mode (Knockout, Team Knockout, Ball, Pump, 1v1) and click
+**PLAY**. Public rooms are topped up with bots, so you can play alone. To play with friends, click
+**Private room**, press **Esc** in the match, and use **Copy invite link** (links look like
+`http://host/r/ABCDE`). **1v1 challenge** copies a `http://host/c/ABCDE` link: whoever opens it
+plays you one-on-one.
 
 ### Development
 
@@ -36,6 +38,9 @@ npm run typecheck
 node scripts/smoke.mjs http://localhost:8080/   # headless browser smoke test with screenshots
 npx tsx scripts/bot-soak.ts 3                   # bots vs. an idle player for 3 simulated minutes
 npx tsx scripts/balance-report.ts               # hits-to-knockout report for tuning
+npx tsx scripts/mode-soak.ts                    # a bot match of every mode and map
+node scripts/smoke-modes.mjs                    # every mode + the challenge-link flow in a browser
+BUBBA_DEBUG=1 npm start & node scripts/smoke-host.mjs   # host controls and the team results screen
 ```
 
 ## Tuning
@@ -55,6 +60,8 @@ src/
     world.ts         Axis-aligned collision world, movers, raycasts
     game/sim.ts      Authoritative match simulation: projectiles, hits, knockouts, match flow
     game/bot.ts      Bot AI (fills public rooms, drives soak tests)
+    game/modes.ts    Mode list, Ball physics and Pump filling
+    game/chaos.ts    Random events and the final-30 collapse
     protocol.ts      Binary snapshots/inputs + JSON messages
     maps/            Map data
     names.ts         Username rules and profanity filter
@@ -68,7 +75,7 @@ src/
 - **Client prediction + reconciliation** for your own movement and weapon, so controls feel instant
   on school Wi-Fi; everyone else is interpolated about 70-120 ms in the past.
 - **No asset downloads.** All geometry is procedural and all sounds are synthesized with Web Audio,
-  so the whole game is one ~190 KB (gzipped) script. The server precompresses it with Brotli.
+  so the whole game is one ~220 KB (gzipped) script. The server precompresses it with Brotli.
 
 ## Deploying
 

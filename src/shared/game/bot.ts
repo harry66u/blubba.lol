@@ -20,6 +20,18 @@ export const BOT_NAMES = [
   'Captain Gust',
 ];
 
+interface Objective {
+  /** Where to go (null: stay put). */
+  move: { x: number; z: number } | null;
+  /** Close enough to the move point. */
+  arrive: number;
+  /** Stand still once there (pumps). */
+  hold: boolean;
+  /** Aim here instead of at the target. */
+  aim: { x: number; y: number; z: number } | null;
+  shoot: boolean;
+}
+
 function wrapAngle(a: number): number {
   while (a > Math.PI) a -= Math.PI * 2;
   while (a < -Math.PI) a += Math.PI * 2;
@@ -103,7 +115,7 @@ export class BotBrain {
     this.escapeAt = -1;
     if (s.holding >= 0) {
       // Throw toward the nearest edge once allowed.
-      const e = nearestEdgeDir(sim, s.px, s.pz);
+      const e = nearestEdgeDir(sim, s.px, s.pz, s.groundId);
       f.yaw = Math.atan2(-e.x, -e.z);
       f.pitch = 0.3;
       this.aimYaw = f.yaw;
@@ -161,6 +173,7 @@ export class BotBrain {
       this.aimFeet = rnd() < 0.35;
     }
     const target = sim.players.get(this.targetId);
+    const obj = this.objective(sim, me, target);
 
     // --- Aim. ---
     const turnRate = (2.5 + this.skill * 6) * sim.dt;
@@ -172,7 +185,15 @@ export class BotBrain {
     let dist = 20;
     let wantYaw = this.aimYaw;
     let wantPitch = 0;
-    if (target) {
+    if (obj?.aim) {
+      const ey = s.py + eyeHeight(s);
+      const dx = obj.aim.x - s.px;
+      const dy = obj.aim.y - ey;
+      const dz = obj.aim.z - s.pz;
+      dist = Math.hypot(dx, dz);
+      wantYaw = Math.atan2(-dx, -dz) + this.noiseYaw * 0.5;
+      wantPitch = Math.atan2(dy, dist) + this.noisePitch * 0.5;
+    } else if (target) {
       const t = target.state;
       const ex = s.px;
       const ey = s.py + eyeHeight(s);
@@ -200,7 +221,22 @@ export class BotBrain {
       this.strafeSign = rnd() < 0.5 ? -1 : 1;
       this.strafeUntil = sim.time + 0.6 + rnd() * 1.6;
     }
-    if (target) {
+    if (obj?.move) {
+      // Head for the objective (behind the ball, onto a pump), expressed relative to our yaw.
+      const hx = obj.move.x - s.px;
+      const hz = obj.move.z - s.pz;
+      const hl = Math.hypot(hx, hz);
+      if (hl > obj.arrive) {
+        const k = Math.min(1, hl / 2) / (hl || 1);
+        f.moveZ = (hx * -Math.sin(f.yaw) + hz * -Math.cos(f.yaw)) * k;
+        f.moveX = (hx * Math.cos(f.yaw) + hz * -Math.sin(f.yaw)) * k;
+        if (hl > 12 && s.onGround && s.dashCharges > 0 && rnd() < 0.01 * this.skill) this.press('dash');
+      } else if (obj.hold) {
+        f.moveX = f.moveZ = 0;
+      } else {
+        f.moveX = this.strafeSign * 0.5;
+      }
+    } else if (target) {
       if (dist > this.desiredDist + 3) f.moveZ = 1;
       else if (dist < this.desiredDist - 3) f.moveZ = -1;
       f.moveX = this.strafeSign * 0.8;
@@ -234,7 +270,7 @@ export class BotBrain {
     }
     if (sim.features.ledge && s.onGround) {
       for (const o of sim.players.values()) {
-        if (o.id === me.id || o.state.mode !== MODE_HANG) continue;
+        if (o.id === me.id || o.state.mode !== MODE_HANG || !sim.isEnemy(me.id, o.id)) continue;
         const hx = o.state.hangX - s.px;
         const hz = o.state.hangZ - s.pz;
         const hd = Math.hypot(hx, hz);
@@ -294,7 +330,7 @@ export class BotBrain {
 
     // --- Shoot: hold to charge, release when charged and on target. ---
     const range = me.weapon.kind === 'projectile' ? me.weapon.projSpeed * me.weapon.projLifetime : me.weapon.range;
-    const hasTarget = !!target && dist < Math.min(40, range + 1);
+    const hasTarget = obj?.aim ? obj.shoot && dist < Math.min(40, range + 1) : !!target && dist < Math.min(40, range + 1);
     if (!hasTarget) {
       f.buttons = 0;
     } else if (me.weapon.kind === 'stream') {
@@ -320,6 +356,55 @@ export class BotBrain {
     return !!t && t.state.mode !== MODE_DEAD && t.state.spawnProt <= 0;
   }
 
+  /**
+   * Team-mode goals. Ball: half the team plays the ball (gets behind it and blasts it at the enemy
+   * goal), the rest fight. Pump: most bots hold their own pumps and shoot enemies nearby; a few
+   * go and stand on enemy pumps to contest them.
+   */
+  private objective(sim: GameSim, me: SimPlayer, target: SimPlayer | undefined): Objective | null {
+    const s = me.state;
+    if (me.team < 0) return null;
+    // Roles go by rank within the team so every team gets the same mix.
+    let rank = 0;
+    for (const o of sim.players.values()) if (o.team === me.team && o.id < me.id) rank++;
+    const ball = sim.ballGame;
+    if (ball) {
+      if (rank % 2 === 1 && target) return null; // fighter
+      const spawn = sim.map.ball!.spawn;
+      // Between goals: wait on our side of the kickoff spot.
+      if (!ball.inPlay) return { move: { x: spawn[0] + (me.team === 0 ? -6 : 6), z: spawn[2] }, arrive: 3, hold: false, aim: null, shoot: false };
+      const b = ball.ball;
+      const goal = sim.map.ball!.goals.find((g) => g.team !== me.team)!;
+      const gx = (goal.min[0] + goal.max[0]) / 2;
+      const gz = (goal.min[2] + goal.max[2]) / 2;
+      let dx = gx - b.x;
+      let dz = gz - b.z;
+      const dl = Math.hypot(dx, dz) || 1;
+      dx /= dl;
+      dz /= dl;
+      const back = b.r + 2.5 + (me.weapon.kind === 'hitscan' ? 8 : me.weapon.kind === 'projectile' ? 4 : 0);
+      const spot = { x: b.x - dx * back, z: b.z - dz * back };
+      // Only shoot when we're roughly behind the ball, so it goes the right way.
+      const tx = b.x - s.px;
+      const tz = b.z - s.pz;
+      const tl = Math.hypot(tx, tz) || 1;
+      const lined = (tx * dx + tz * dz) / tl > 0.55;
+      return { move: spot, arrive: 1.5, hold: false, aim: { x: b.x, y: b.y, z: b.z }, shoot: lined };
+    }
+    const pumps = sim.map.pumps;
+    if (sim.pumpGame && pumps) {
+      const contest = rank % 4 === 3;
+      const mine = pumps.filter((p) => (contest ? p.team !== me.team : p.team === me.team));
+      if (!mine.length) return null;
+      const pick = mine[rank % mine.length];
+      const on = Math.hypot(s.px - pick.x, s.pz - pick.z) < pick.r * 0.6;
+      // Shoot enemies close to our pump; otherwise just stand there.
+      const threat = target && Math.hypot(target.state.px - pick.x, target.state.pz - pick.z) < 14;
+      return { move: { x: pick.x, z: pick.z }, arrive: pick.r * 0.4, hold: on, aim: null, shoot: !!threat };
+    }
+    return null;
+  }
+
   private pickTarget(sim: GameSim, me: SimPlayer): number {
     let best = -1;
     let bestScore = Infinity;
@@ -329,7 +414,7 @@ export class BotBrain {
       if (id !== me.id && brain.targetId >= 0) chased.set(brain.targetId, (chased.get(brain.targetId) ?? 0) + 1);
     }
     for (const o of sim.players.values()) {
-      if (o.id === me.id || o.state.mode === MODE_DEAD) continue;
+      if (o.id === me.id || o.state.mode === MODE_DEAD || !sim.isEnemy(me.id, o.id)) continue;
       const d = Math.hypot(o.state.px - me.state.px, o.state.py - me.state.py, o.state.pz - me.state.pz);
       const score = d * (1 + (chased.get(o.id) ?? 0) * 0.8) + this.rng() * 8;
       if (score < bestScore) {
@@ -341,12 +426,13 @@ export class BotBrain {
   }
 }
 
-/** Unit vector (x, z) from a point toward the closest edge of the main deck (the largest solid). */
-function nearestEdgeDir(sim: GameSim, x: number, z: number): { x: number; z: number } {
+/** Unit vector (x, z) toward the closest edge of the deck we're standing on (or the largest one). */
+function nearestEdgeDir(sim: GameSim, x: number, z: number, groundId = -1): { x: number; z: number } {
+  const area = (so: { minX: number; maxX: number; minZ: number; maxZ: number }) => (so.maxX - so.minX) * (so.maxZ - so.minZ);
   let deck = sim.world.solids[0];
-  for (const so of sim.world.solids) {
-    if ((so.maxX - so.minX) * (so.maxZ - so.minZ) > (deck.maxX - deck.minX) * (deck.maxZ - deck.minZ)) deck = so;
-  }
+  for (const so of sim.world.solids) if (area(so) > area(deck)) deck = so;
+  const under = groundId >= 0 ? sim.world.solids[groundId] : undefined;
+  if (under && area(under) > 60) deck = under;
   const d = [
     { x: 1, z: 0, dist: deck.maxX - x },
     { x: -1, z: 0, dist: x - deck.minX },

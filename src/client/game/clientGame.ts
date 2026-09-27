@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { BALANCE } from '../../shared/balance';
-import { PLAYER_COLORS } from '../../shared/colors';
+import { PLAYER_COLORS, TEAM_COLORS } from '../../shared/colors';
+import { MODE_INFO, type ModeId, isTeamMode } from '../../shared/game/modes';
 import type { GameEvent } from '../../shared/game/events';
 import { type InputFrame, emptyInput, quantizeInput } from '../../shared/input';
 import { getMap } from '../../shared/maps';
@@ -33,6 +34,7 @@ import {
   FLAG_PIN,
   FLAG_PROTECTED,
   FLAG_STREAM,
+  type ModeState,
   type PublicPlayer,
   type RoomInfo,
   type RosterEntry,
@@ -52,12 +54,14 @@ import { type Action, type InputManager, codeLabel } from '../input/input';
 import type { Connection } from '../net/connection';
 import { Effects, LandingCircles, type Projectile3D } from '../render/effects';
 import { MapView } from '../render/mapView';
+import { BeachBall } from '../render/beachBall';
 import type { Renderer } from '../render/renderer';
 import { TubeMan, defaultPose, type TubeManPose } from '../render/tubeMan';
 import { ViewModel } from '../render/viewModel';
 import type { Settings } from '../settings';
 import { esc, hexColor } from '../ui/dom';
 import type { Hud, Nametag } from '../ui/hud';
+import type { TeamView } from '../ui/menus';
 import { ServerClock } from './clock';
 
 interface HistoryEntry {
@@ -69,6 +73,7 @@ interface HistoryEntry {
 interface SnapEntry {
   tick: number;
   players: Map<number, PublicPlayer>;
+  mode: ModeState | null;
 }
 
 interface RemoteView {
@@ -148,6 +153,9 @@ export class ClientGame {
   private chaos: ChaosEvent[] = [];
   private readonly envTmp: Environment = { ...NORMAL_ENV };
   crownId = -1;
+  /** Latest per-mode state from the server (team scores, ball, pumps). */
+  modeState: ModeState | null = null;
+  private ball: BeachBall | null = null;
   /** Whoever last knocked you out. */
   nemesisId = -1;
   private debrisTimer = 0;
@@ -242,6 +250,54 @@ export class ClientGame {
     this.r.scene.add(this.mapView.root);
     this.r.setTheme(this.map.theme);
     this.ctx = this.makeCtx(this.ctx.features);
+    this.entities.clear();
+    this.setupModeProps();
+  }
+
+  private setupModeProps(): void {
+    if (this.ball) {
+      this.r.scene.remove(this.ball.root);
+      this.ball.dispose();
+      this.ball = null;
+    }
+    if (this.map.ball) {
+      this.ball = new BeachBall(this.map.ball.radius);
+      this.ball.update(this.map.ball.spawn[0], this.map.ball.spawn[1], this.map.ball.spawn[2], 0, 0, true, 0, 1);
+      this.r.scene.add(this.ball.root);
+    }
+    this.mapView.setTeamColors(this.teamColors);
+    this.modeState = null;
+  }
+
+  get mode(): ModeId {
+    return this.room?.settings.mode ?? 'knockout';
+  }
+
+  get teamMode(): boolean {
+    return isTeamMode(this.mode);
+  }
+
+  /** Red/blue, or orange/blue with the colorblind-friendly option. */
+  get teamColors(): number[] {
+    return this.settings.colorblindTeams ? TEAM_COLORS.colorblind : TEAM_COLORS.standard;
+  }
+
+  teamOf(id: number): number {
+    return this.roster.get(id)?.team ?? -1;
+  }
+
+  /** A teammate (shots pass through them; no aim assist or stomp hints). */
+  isAlly(id: number): boolean {
+    if (!this.teamMode || id === this.youId) return false;
+    const t = this.teamOf(id);
+    return t >= 0 && t === this.teamOf(this.youId);
+  }
+
+  /** Re-applies team colors after the colorblind setting changes. */
+  refreshTeamColors(): void {
+    this.mapView.setTeamColors(this.teamColors);
+    for (const rv of this.remotes.values()) rv.color = -1; // forces a recolor on the next frame
+    this.viewModel.setColor(this.colorOf(this.youId));
   }
 
   // --- Lifecycle ---------------------------------------------------------------------------
@@ -250,6 +306,7 @@ export class ClientGame {
     this.youId = msg.you;
     this.room = msg.room;
     this.setMap(msg.room.mapId);
+    this.setupModeProps();
     this.applyWeapon(this.loadout);
     this.ctx = this.makeCtx(msg.room.features);
     this.hud.showAbilities(msg.room.features);
@@ -281,6 +338,8 @@ export class ClientGame {
     for (const [k] of this.localShots) this.effects.removeProjectile(k);
     this.localShots.clear();
     this.roster.clear();
+    this.modeState = null;
+    this.hud.setTeamBar(null);
     this.viewModel.root.visible = false;
     this.hud.show(false);
     this.audio.setCharge(0);
@@ -302,8 +361,7 @@ export class ClientGame {
             this.remotes.delete(id);
           }
         }
-        const me = next.get(this.youId);
-        if (me) this.viewModel.setColor(PLAYER_COLORS[me.color]?.hex ?? 0xffffff);
+        if (next.has(this.youId)) this.viewModel.setColor(this.colorOf(this.youId));
         this.onRosterChange?.();
         break;
       }
@@ -317,17 +375,27 @@ export class ClientGame {
         this.world.collapseStart = msg.phase === 'playing' ? msg.endsAtTick * DT - BALANCE.final.seconds : Infinity;
         if (msg.phase === 'playing') this.announcer.say('Go!', 2);
         if (msg.phase === 'results' && msg.result) {
-          const w = msg.result.standings[0];
-          this.announcer.say(w ? `Time's up! ${w.id === this.youId ? 'You win!' : `${w.name} wins!`}` : "Time's up!", 3);
+          const teams = msg.result.teams;
+          if (teams) {
+            const mine = this.teamOf(this.youId);
+            const names = this.teamNames();
+            this.announcer.say(teams.winner < 0 ? "It's a draw!" : teams.winner === mine ? 'Your team wins!' : `${names[teams.winner]} team wins!`, 3);
+          } else {
+            const w = msg.result.standings[0];
+            this.announcer.say(w ? `Time's up! ${w.id === this.youId ? 'You win!' : `${w.name} wins!`}` : "Time's up!", 3);
+          }
         }
         this.onMatchChange?.(this.match);
         break;
-      case 'room':
+      case 'room': {
+        const modeChanged = msg.room.settings.mode !== this.room?.settings.mode;
         this.room = msg.room;
         if (msg.room.mapId !== this.map.id) this.setMap(msg.room.mapId);
+        else if (modeChanged) this.setupModeProps();
         this.ctx = this.makeCtx(msg.room.features);
         this.onRoomChange?.(msg.room);
         break;
+      }
       case 'ev':
         this.onEvents(msg.list);
         break;
@@ -358,7 +426,8 @@ export class ClientGame {
     this.clock.observe(snap.tick, now);
     const players = new Map<number, PublicPlayer>();
     for (const p of snap.players) players.set(p.id, p);
-    this.snaps.push({ tick: snap.tick, players });
+    this.snaps.push({ tick: snap.tick, players, mode: snap.mode });
+    this.modeState = snap.mode;
     while (this.snaps.length > 2 && this.snaps[1].tick < this.renderTick - 30) this.snaps.shift();
     if (this.snaps.length > 90) this.snaps.shift();
 
@@ -491,8 +560,31 @@ export class ClientGame {
   }
 
   private colorOf(id: number): number {
-    const c = this.roster.get(id)?.color ?? 0;
-    return PLAYER_COLORS[c]?.hex ?? 0xffffff;
+    const entry = this.roster.get(id);
+    if (this.teamMode && entry && entry.team >= 0) return this.teamColors[entry.team];
+    return PLAYER_COLORS[entry?.color ?? 0]?.hex ?? 0xffffff;
+  }
+
+  /** Team info for the scoreboard and results (null outside team modes). */
+  teamView(): TeamView | null {
+    if (!this.teamMode) return null;
+    const ms = this.modeState;
+    const pump = !!ms?.pump;
+    return {
+      colors: this.teamColors,
+      names: this.teamNames(),
+      scores: pump ? ms!.pump!.fill : (ms?.teamScores ?? [0, 0]),
+      youTeam: this.teamOf(this.youId),
+      percent: pump,
+    };
+  }
+
+  teamNames(): string[] {
+    return this.settings.colorblindTeams ? ['ORANGE', 'BLUE'] : ['RED', 'BLUE'];
+  }
+
+  private teamHex(team: number): string {
+    return `#${(this.teamColors[team] ?? 0xffffff).toString(16).padStart(6, '0')}`;
   }
 
   private handleEvent(e: GameEvent, immediate: boolean): void {
@@ -666,6 +758,45 @@ export class ClientGame {
         } else if (prev === you) {
           this.hud.toast('You lost the crown!', 2000);
         }
+        break;
+      }
+      case 'goal': {
+        const mine = this.teamOf(you);
+        const names = this.teamNames();
+        const scorer = e.scorer >= 0 ? this.nameOf(e.scorer) : '';
+        const own = e.scorer >= 0 && this.teamOf(e.scorer) !== e.team;
+        this.hud.callout(
+          e.team === mine ? 'GOAL!' : 'THEY SCORED!',
+          own ? `Own goal by ${scorer}! Point to ${names[e.team]}.` : scorer ? `${e.scorer === you ? 'You' : scorer} scored for ${names[e.team]}!` : `Point to ${names[e.team]}!`,
+          2.6,
+          this.teamHex(e.team),
+        );
+        fx.confettiBurst(e.x, e.y + 1, e.z, 140, [this.teamColors[e.team], 0xffffff, 0xffd60a]);
+        fx.shockwave(e.x, e.y, e.z, 8, 0.6, this.teamColors[e.team]);
+        a.goalHorn();
+        this.announcer.say(e.team === mine ? 'Goooal!' : 'They scored!', 3);
+        if (e.scorer === you && !own) this.hud.popup(tmpV.set(e.x, e.y + 2, e.z), 'GOAL!', '#ffd60a', 2, 1.5);
+        break;
+      }
+      case 'ballOut':
+        this.hud.popup(tmpV.set(e.x, Math.max(e.y, 0) + 3, e.z), 'OUT!', '#ffffff', 1.6, 1.2);
+        fx.airPuff(e.x, e.y, e.z, 16, 6, 0.4);
+        a.pop([e.x, e.y, e.z]);
+        break;
+      case 'ballReset':
+        if (this.map.ball) {
+          const sp = this.map.ball.spawn;
+          fx.confettiBurst(sp[0], sp[1], sp[2], 30);
+          a.boing([sp[0], sp[1], sp[2]], true);
+        }
+        break;
+      case 'pumpFull': {
+        const mine = this.teamOf(you);
+        const names = this.teamNames();
+        this.hud.callout(`${names[e.team]} GIANT IS FULL!`, e.team === mine ? 'Your team wins!' : 'Their tube man towers over you...', 3, this.teamHex(e.team));
+        a.goalHorn();
+        const g = this.map.giants?.find((x) => x.team === e.team);
+        if (g) fx.confettiBurst(g.x, g.y + 10, g.z, 200, [this.teamColors[e.team], 0xffffff]);
         break;
       }
       case 'final':
@@ -1085,7 +1216,7 @@ export class ClientGame {
     let best = wh ? wh.dist : range;
     for (const rv of this.remotes.values()) {
       const c = rv.cur;
-      if (!c || c.mode === MODE_DEAD) continue;
+      if (!c || c.mode === MODE_DEAD || this.isAlly(rv.id)) continue;
       const tmp = this.scratch;
       tmp.px = c.px;
       tmp.py = c.py;
@@ -1127,6 +1258,7 @@ export class ClientGame {
     while (this.pending.length && this.pending[0].tick <= this.renderTick) this.handleEvent(this.pending.shift()!, false);
     this.world.setTime(this.predTick() * DT);
     this.updateRemotes(dt);
+    this.updateMode(dt);
     this.updateShots(dt);
     if (this.replay.active) {
       for (const rv of this.remotes.values()) {
@@ -1233,13 +1365,63 @@ export class ClientGame {
     }
   }
 
+  private tagTeam(id: number): { color: number; ally: boolean } | undefined {
+    const t = this.teamOf(id);
+    if (!this.teamMode || t < 0) return undefined;
+    return { color: this.teamColors[t], ally: t === this.teamOf(this.youId) };
+  }
+
+  /** Ball interpolation, pump visuals, and the team score strip. */
+  private updateMode(dt: number): void {
+    const rt = this.renderTick;
+    if (this.ball) {
+      let a: SnapEntry | null = null;
+      let b: SnapEntry | null = null;
+      for (let i = this.snaps.length - 1; i >= 0; i--) {
+        if (this.snaps[i].tick <= rt) {
+          a = this.snaps[i];
+          b = this.snaps[i + 1] ?? null;
+          break;
+        }
+      }
+      a ??= this.snaps[0] ?? null;
+      const ba = a?.mode?.ball;
+      if (ba) {
+        const bb = b?.mode?.ball;
+        const k = bb && b ? Math.max(0, Math.min(1, (rt - a!.tick) / (b.tick - a!.tick))) : 0;
+        const jump = bb && Math.hypot(bb.x - ba.x, bb.y - ba.y, bb.z - ba.z) > 8;
+        const lerp = (x: number, y: number) => (bb && !jump ? x + (y - x) * k : x);
+        const x = lerp(ba.x, bb?.x ?? 0);
+        const y = lerp(ba.y, bb?.y ?? 0);
+        const z = lerp(ba.z, bb?.z ?? 0);
+        const ground = this.world.groundBelow(x, y, z, 60);
+        this.ball.update(x, y, z, lerp(ba.vx, bb?.vx ?? 0), lerp(ba.vz, bb?.vz ?? 0), ba.inPlay, ground, dt);
+      }
+    }
+    const ms = this.modeState;
+    if (ms?.pump) this.mapView.setPumpState(ms.pump.states, ms.pump.fill);
+    if (this.teamMode && ms?.teamScores && this.match.phase !== 'waiting') {
+      const pump = !!ms.pump;
+      this.hud.setTeamBar({
+        colors: this.teamColors,
+        names: this.teamNames(),
+        scores: pump ? ms.pump!.fill : ms.teamScores,
+        bars: pump,
+        youTeam: this.teamOf(this.youId),
+        target: this.mode === 'ball' ? BALANCE.modes.ball.goalTarget : undefined,
+      });
+    } else {
+      this.hud.setTeamBar(null);
+    }
+  }
+
   private createRemote(id: number): RemoteView {
     const entry = this.roster.get(id);
-    const color = PLAYER_COLORS[entry?.color ?? 0]?.hex ?? 0xffffff;
+    const color = this.colorOf(id);
     const patterns = ['solid', 'stripes', 'dots', 'zigzag', 'stars', 'checker'] as const;
     const man = new TubeMan(color, { physical: this.r.profile.physical, seed: id * 13.7, pattern: patterns[id % patterns.length] });
     this.r.scene.add(man.group);
-    const tag = this.hud.createNametag(entry?.name ?? '...', entry?.bot ?? false);
+    const tag = this.hud.createNametag(entry?.name ?? '...', entry?.bot ?? false, this.tagTeam(id));
     return { id, man, pose: defaultPose(), tag, color, name: entry?.name ?? '...', bot: entry?.bot ?? false, cur: null, lastTagText: '' };
   }
 
@@ -1252,12 +1434,13 @@ export class ClientGame {
   private poseRemote(rv: RemoteView, dt: number): void {
     const c = rv.cur!;
     const entry = this.roster.get(rv.id);
-    if (entry && (entry.name !== rv.name || PLAYER_COLORS[entry.color]?.hex !== rv.color)) {
+    if (entry && (entry.name !== rv.name || this.colorOf(rv.id) !== rv.color)) {
       rv.name = entry.name;
-      rv.color = PLAYER_COLORS[entry.color]?.hex ?? rv.color;
+      rv.color = this.colorOf(rv.id);
       rv.man.setColor(rv.color);
       rv.tag.el.remove();
-      rv.tag = this.hud.createNametag(entry.name, entry.bot);
+      rv.tag = this.hud.createNametag(entry.name, entry.bot, this.tagTeam(rv.id));
+      rv.lastTagText = '';
     }
     const alive = c.mode !== MODE_DEAD;
     rv.man.setVisible(alive);
@@ -1463,7 +1646,12 @@ export class ClientGame {
     let sub = '';
     if (this.match.phase === 'waiting') sub = 'Waiting for another player...';
     else if (this.match.phase === 'results') sub = 'Match over!';
-    else if (me) {
+    else if (me && this.mode === 'duel') {
+      const rival = [...this.roster.values()].find((r) => r.id !== me.id);
+      sub = rival ? `You ${me.kos} – ${rival.kos} ${rival.name}${rival.bot ? ' (warm-up bot)' : ''} · first to ${BALANCE.modes.duel.target}` : 'Waiting for a rival...';
+    } else if (me && this.teamMode) {
+      sub = `${MODE_INFO[this.mode].name} · you: ${me.kos} KO${me.kos === 1 ? '' : 's'}`;
+    } else if (me) {
       const sorted = [...this.roster.values()].sort((a, b) => b.score - a.score);
       const rank = sorted.findIndex((r) => r.id === me.id) + 1;
       sub = `#${rank} of ${sorted.length} · ${me.score} KO${me.score === 1 ? '' : 's'}`;
@@ -1526,7 +1714,7 @@ export class ClientGame {
     let best: { yaw: number; pitch: number; ang: number; tol: number } | null = null;
     for (const rv of this.remotes.values()) {
       const c = rv.cur;
-      if (!c || c.mode === MODE_DEAD || (c.flags & FLAG_PROTECTED) !== 0) continue;
+      if (!c || c.mode === MODE_DEAD || (c.flags & FLAG_PROTECTED) !== 0 || this.isAlly(rv.id)) continue;
       const s = inflationScale(c.inflation);
       const vx = c.px - eye.x;
       const vy = c.py + BALANCE.player.height * s * 0.55 - eye.y;
@@ -1574,7 +1762,7 @@ export class ClientGame {
     if (f.ledge) {
       for (const rv of this.remotes.values()) {
         const c = rv.cur;
-        if (c?.mode === MODE_HANG && p.onGround && Math.hypot(c.px - p.px, c.pz - p.pz) < 2.2 && Math.abs(c.py - p.py) < 3) return `${this.key('grab')} to STOMP their hands!`;
+        if (c?.mode === MODE_HANG && !this.isAlly(rv.id) && p.onGround && Math.hypot(c.px - p.px, c.pz - p.pz) < 2.2 && Math.abs(c.py - p.py) < 3) return `${this.key('grab')} to STOMP their hands!`;
       }
     }
     return '';

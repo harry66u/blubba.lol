@@ -600,7 +600,14 @@ export function moveBody(p: PlayerState, world: World, dt: number, out: StepResu
     if (tmpSweep.hit >= 0) {
       if (dy < 0) {
         const impact = -p.vy;
-        if (launched && impact > P.landingBounceMinSpeed) {
+        const floor = world.solid(tmpSweep.hit);
+        const rubber = floor ? floor.bounce : 0;
+        if (rubber > 0 && impact > 5) {
+          // Bouncy castle floor: every real landing springs you back up.
+          p.vy = Math.max(impact * rubber, 6);
+          out.bounced = true;
+          if (!launched) p.jumpsUsed = Math.min(p.jumpsUsed, 1);
+        } else if (launched && impact > P.landingBounceMinSpeed) {
           p.vy = impact * P.landingBounce;
           out.bounced = true;
         } else {

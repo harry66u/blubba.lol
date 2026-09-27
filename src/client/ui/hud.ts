@@ -39,6 +39,17 @@ export interface HudState {
   pin: number;
 }
 
+/** Team score strip under the clock (team modes only). */
+export interface TeamBar {
+  colors: number[];
+  names: string[];
+  /** Goals, knockouts, or pump fill 0..1 (shown as bars when `bars` is set). */
+  scores: [number, number];
+  bars: boolean;
+  youTeam: number;
+  target?: number;
+}
+
 export interface Nametag {
   el: HTMLElement;
   pct: HTMLElement;
@@ -75,6 +86,8 @@ export class Hud {
   private readonly pinBadge: HTMLElement;
   private readonly eventBanner: HTMLElement;
   private readonly clock: HTMLElement;
+  private readonly teamBar: HTMLElement;
+  private readonly teamSides: { box: HTMLElement; score: HTMLElement; fill: HTMLElement; name: HTMLElement }[] = [];
   private readonly sub: HTMLElement;
   private readonly killfeed: HTMLElement;
   readonly nametags: HTMLElement;
@@ -165,7 +178,16 @@ export class Hud {
 
     this.clock = el('div', { class: 'clock', text: '4:00' });
     this.sub = el('div', { class: 'sub' });
-    const timer = el('div', { class: 'timer' }, this.clock, this.sub, this.eventBanner);
+    this.teamBar = el('div', { class: 'team-bar hidden' });
+    for (let t = 0; t < 2; t++) {
+      const score = el('div', { class: 'score', text: '0' });
+      const fill = el('div', { class: 'fill' });
+      const name = el('div', { class: 'name' });
+      const box = el('div', { class: `side side${t}` }, name, score, el('div', { class: 'meter' }, fill));
+      this.teamSides.push({ box, score, fill, name });
+    }
+    this.teamBar.append(this.teamSides[0].box, this.teamSides[1].box);
+    const timer = el('div', { class: 'timer' }, this.teamBar, this.clock, this.sub, this.eventBanner);
 
     this.killfeed = el('div', { class: 'killfeed' });
     this.nametags = el('div', { class: 'nametags' });
@@ -253,6 +275,24 @@ export class Hud {
       this.calloutTimer -= dt;
       if (this.calloutTimer <= 0) clear(this.calloutBox);
     }
+  }
+
+  /** Shows team scores (or pump fill bars); null hides the strip. */
+  setTeamBar(t: TeamBar | null): void {
+    this.teamBar.classList.toggle('hidden', !t);
+    if (!t) return;
+    const key = `${t.colors.join()}|${t.names.join()}|${t.bars ? t.scores.map((x) => Math.round(x * 200)).join() : t.scores.join()}|${t.youTeam}|${t.target ?? ''}`;
+    this.setIf('teamBar', key, () => {
+      this.teamBar.classList.toggle('bars', t.bars);
+      this.teamSides.forEach((side, i) => {
+        const c = `#${t.colors[i].toString(16).padStart(6, '0')}`;
+        side.box.style.setProperty('--team', c);
+        side.box.classList.toggle('you', t.youTeam === i);
+        side.name.textContent = t.youTeam === i ? `${t.names[i]} (YOU)` : t.names[i];
+        side.score.textContent = t.bars ? `${Math.floor(t.scores[i] * 100)}%` : String(t.scores[i]);
+        side.fill.style.width = `${Math.round(Math.min(1, t.bars ? t.scores[i] : t.target ? t.scores[i] / t.target : 0) * 100)}%`;
+      });
+    });
   }
 
   setEvent(text: string): void {
@@ -378,10 +418,12 @@ export class Hud {
     }
   }
 
-  createNametag(name: string, bot: boolean): Nametag {
+  /** `team` is a CSS color for team modes: allies get a colored name and a marker. */
+  createNametag(name: string, bot: boolean, team?: { color: number; ally: boolean }): Nametag {
     const pct = el('div', { class: 'pct', text: '0%' });
-    const nm = el('div', { class: 'nm' }, name, bot ? el('span', { class: 'bot', text: 'BOT' }) : null);
-    const tag = el('div', { class: 'nametag' }, pct, nm);
+    const nm = el('div', { class: 'nm' }, team?.ally ? '▼ ' : '', name, bot ? el('span', { class: 'bot', text: 'BOT' }) : null);
+    const tag = el('div', { class: `nametag${team ? (team.ally ? ' ally' : ' enemy') : ''}` }, pct, nm);
+    if (team) tag.style.setProperty('--team', `#${team.color.toString(16).padStart(6, '0')}`);
     this.nametags.append(tag);
     return { el: tag, pct, name: nm };
   }

@@ -27,6 +27,8 @@ export interface Solid {
   dZ: number;
   /** Collapse order for the final 30 seconds (-1 = never collapses, 0 = crumbles inward). */
   collapse: number;
+  /** Rubbery restitution (0 = normal floor). */
+  bounce: number;
 }
 
 export interface RayHit {
@@ -94,6 +96,7 @@ export class World {
         dY: 0,
         dZ: 0,
         collapse: def.collapse ?? -1,
+        bounce: def.bounce ?? 0,
       };
       this.solids.push(s);
     });
@@ -393,7 +396,7 @@ export class World {
       const n = this.solids.length;
       this.solids.push({
         id: n, minX: 0, minY: -9999, minZ: 0, maxX: 0, maxY: -9999, maxZ: 0, ledge: false, enabled: false, mover: null,
-        baseMinX: 0, baseMinY: 0, baseMinZ: 0, baseMaxX: 0, baseMaxY: 0, baseMaxZ: 0, dX: 0, dY: 0, dZ: 0, collapse: -1,
+        baseMinX: 0, baseMinY: 0, baseMinZ: 0, baseMaxX: 0, baseMaxY: 0, baseMaxZ: 0, dX: 0, dY: 0, dZ: 0, collapse: -1, bounce: 0,
       });
     }
     const s = this.solids[id];

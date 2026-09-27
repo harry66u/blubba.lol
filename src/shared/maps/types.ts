@@ -10,6 +10,8 @@ export type SolidKind =
   | 'crate'
   | 'platform' // moving platform / flatbed
   | 'bouncy' // soft inflatable surface
+  | 'goal' // goal frame in the Ball arena
+  | 'pillar'
   | 'hidden'; // collision only, drawn by a decor entry instead
 
 export interface MoverDef {
@@ -33,6 +35,8 @@ export interface SolidDef {
   mover?: MoverDef;
   /** Order in which the piece falls away during the final 30 seconds (higher = earlier). */
   collapse?: number;
+  /** Rubbery surface: landing on it faster than a walk bounces you back up (restitution). */
+  bounce?: number;
 }
 
 export interface BouncePadDef {
@@ -50,7 +54,7 @@ export interface BouncePadDef {
 
 /** Client-only scenery. */
 export interface DecorDef {
-  type: 'car' | 'tubeMan' | 'sign' | 'pole' | 'balloons' | 'bunting' | 'cone' | 'tires' | 'lines' | 'flag' | 'palm';
+  type: 'car' | 'tubeMan' | 'sign' | 'pole' | 'balloons' | 'bunting' | 'cone' | 'tires' | 'lines' | 'flag' | 'palm' | 'net' | 'turret' | 'umbrella';
   x: number;
   y: number;
   z: number;
@@ -92,4 +96,19 @@ export interface MapDef {
   theme: MapTheme;
   /** Spots where soda cans (and the rare pin) appear. */
   pickups: [number, number, number][];
+  /** Spawn points per team (x, y, z) for team modes; falls back to `spawns`. */
+  teamSpawns?: [[number, number, number][], [number, number, number][]];
+  /** Ball mode: where the ball starts and each team's goal volume (the ball entering it scores for the other team). */
+  ball?: {
+    spawn: Vec3Tuple;
+    radius: number;
+    goals: { team: 0 | 1; min: Vec3Tuple; max: Vec3Tuple }[];
+    /** Ball-only glass fence around the pitch (players pass through; goal mouths stay open). */
+    fence?: { minX: number; maxX: number; minZ: number; maxZ: number; height: number };
+  };
+  /** Pump mode: pumps each team stands on, and where their giant tube man stands. */
+  pumps?: { team: 0 | 1; x: number; y: number; z: number; r: number }[];
+  giants?: { team: 0 | 1; x: number; y: number; z: number }[];
+  /** Maps made for a specific mode say so; others work for the knockout modes. */
+  modes?: string[];
 }

@@ -5,7 +5,7 @@ import type { DynamicSolidInfo, MatchPhase, MatchResult, ModeId, Pickup } from '
 import type { Loadout } from './loadout';
 import type { ChaosEvent } from './game/chaos';
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 // --- Binary message ids -------------------------------------------------------------------
 export const MSG_INPUTS = 1;
@@ -14,7 +14,9 @@ export const MSG_SNAPSHOT = 2;
 // --- JSON messages ------------------------------------------------------------------------
 
 export type JoinRequest =
-  | { kind: 'quick' }
+  | { kind: 'quick'; mode?: ModeId }
+  /** Private 1v1 room whose code is shared as a challenge link. */
+  | { kind: 'challenge' }
   | { kind: 'create'; settings?: Partial<RoomSettings> }
   | { kind: 'code'; code: string };
 
@@ -47,6 +49,8 @@ export interface RosterEntry {
   name: string;
   color: number;
   bot: boolean;
+  /** 0/1 in team modes, -1 otherwise. */
+  team: number;
   score: number;
   kos: number;
   deaths: number;
@@ -60,6 +64,8 @@ export interface RoomInfo {
   mapId: string;
   settings: RoomSettings;
   features: Features;
+  /** A private 1v1 made from a challenge link. */
+  challenge: boolean;
 }
 
 export type ServerMessage =
@@ -144,12 +150,20 @@ export interface PublicPlayer {
   weapon: number;
 }
 
+/** Per-mode state that changes every tick (team scores, the ball, pump fill). */
+export interface ModeState {
+  teamScores: [number, number] | null;
+  ball: { x: number; y: number; z: number; vx: number; vy: number; vz: number; inPlay: boolean } | null;
+  pump: { fill: [number, number]; states: number[] } | null;
+}
+
 export interface Snapshot {
   tick: number;
   ackSeq: number;
   selfId: number;
   self: PlayerState | null;
   players: PublicPlayer[];
+  mode: ModeState | null;
 }
 
 const PUBLIC_BYTES = 1 + 12 + 6 + 2 + 2 + 2 + 1 + 2 + 1 + 1 + 1 + 1 + 1 + 1;
@@ -183,9 +197,10 @@ export function encodeSnapshot(
   selfId: number,
   self: PlayerState | null,
   players: { id: number; state: PlayerState; weapon: number; streaming: boolean; crowned: boolean }[],
+  mode: ModeState | null = null,
 ): ArrayBuffer {
   const selfBytes = self ? PLAYER_FIELDS.length * 4 : 0;
-  const buf = new ArrayBuffer(1 + 4 + 4 + 1 + 1 + selfBytes + 1 + players.length * PUBLIC_BYTES);
+  const buf = new ArrayBuffer(1 + 4 + 4 + 1 + 1 + selfBytes + 1 + players.length * PUBLIC_BYTES + modeBytes(mode));
   const v = new DataView(buf);
   let o = 0;
   v.setUint8(o, MSG_SNAPSHOT);
@@ -242,7 +257,76 @@ export function encodeSnapshot(
     v.setUint8(o, weapon & 255);
     o += 1;
   }
+  if (mode) writeMode(v, o, mode);
   return buf;
+}
+
+const MS_TEAMS = 1;
+const MS_BALL = 2;
+const MS_PUMP = 4;
+
+function modeBytes(m: ModeState | null): number {
+  if (!m) return 0;
+  return 1 + (m.teamScores ? 4 : 0) + (m.ball ? 19 : 0) + (m.pump ? 5 + m.pump.states.length : 0);
+}
+
+function writeMode(v: DataView, o: number, m: ModeState): void {
+  v.setUint8(o, (m.teamScores ? MS_TEAMS : 0) | (m.ball ? MS_BALL : 0) | (m.pump ? MS_PUMP : 0));
+  o += 1;
+  if (m.teamScores) {
+    v.setUint16(o, Math.max(0, Math.min(65535, m.teamScores[0])));
+    v.setUint16(o + 2, Math.max(0, Math.min(65535, m.teamScores[1])));
+    o += 4;
+  }
+  if (m.ball) {
+    const b = m.ball;
+    v.setFloat32(o, b.x);
+    v.setFloat32(o + 4, b.y);
+    v.setFloat32(o + 8, b.z);
+    v.setInt16(o + 12, clampI16(b.vx * 50));
+    v.setInt16(o + 14, clampI16(b.vy * 50));
+    v.setInt16(o + 16, clampI16(b.vz * 50));
+    v.setUint8(o + 18, b.inPlay ? 1 : 0);
+    o += 19;
+  }
+  if (m.pump) {
+    v.setUint16(o, Math.round(Math.max(0, Math.min(1, m.pump.fill[0])) * 65535));
+    v.setUint16(o + 2, Math.round(Math.max(0, Math.min(1, m.pump.fill[1])) * 65535));
+    v.setUint8(o + 4, m.pump.states.length);
+    o += 5;
+    for (const st of m.pump.states) v.setUint8(o++, st);
+  }
+}
+
+function readMode(v: DataView, o: number): ModeState {
+  const bits = v.getUint8(o);
+  o += 1;
+  const m: ModeState = { teamScores: null, ball: null, pump: null };
+  if (bits & MS_TEAMS) {
+    m.teamScores = [v.getUint16(o), v.getUint16(o + 2)];
+    o += 4;
+  }
+  if (bits & MS_BALL) {
+    m.ball = {
+      x: v.getFloat32(o),
+      y: v.getFloat32(o + 4),
+      z: v.getFloat32(o + 8),
+      vx: v.getInt16(o + 12) / 50,
+      vy: v.getInt16(o + 14) / 50,
+      vz: v.getInt16(o + 16) / 50,
+      inPlay: v.getUint8(o + 18) === 1,
+    };
+    o += 19;
+  }
+  if (bits & MS_PUMP) {
+    const fill: [number, number] = [v.getUint16(o) / 65535, v.getUint16(o + 2) / 65535];
+    const n = v.getUint8(o + 4);
+    o += 5;
+    const states: number[] = [];
+    for (let i = 0; i < n; i++) states.push(v.getUint8(o++));
+    m.pump = { fill, states };
+  }
+  return m;
 }
 
 export function decodeSnapshot(v: DataView): Snapshot {
@@ -290,7 +374,8 @@ export function decodeSnapshot(v: DataView): Snapshot {
     o += PUBLIC_BYTES;
     players.push(p);
   }
-  return { tick, ackSeq, selfId, self, players };
+  const mode = o < v.byteLength ? readMode(v, o) : null;
+  return { tick, ackSeq, selfId, self, players, mode };
 }
 
 export function isAlive(p: PublicPlayer): boolean {

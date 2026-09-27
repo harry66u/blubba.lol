@@ -138,4 +138,48 @@ describe('server', () => {
     expect(w.name).not.toMatch(/fuck/i);
     d.ws.close();
   });
+
+  it('quick play for a team mode fills a 4v4 with bots on the right map', async () => {
+    const c = new TestClient();
+    await c.open();
+    c.send({ type: 'hello', v: PROTOCOL_VERSION, name: 'Baller', guestId: 'b1', join: { kind: 'quick', mode: 'ball' } });
+    const w = await c.waitFor('welcome');
+    expect(w.room.settings.mode).toBe('ball');
+    expect(w.room.mapId).toBe('ballArena');
+    await new Promise((r) => setTimeout(r, 150));
+    const roster = [...c.msgs].reverse().find((m): m is Extract<ServerMessage, { type: 'roster' }> => m.type === 'roster')!;
+    expect(roster.players.length).toBe(8);
+    expect(roster.players.filter((p) => p.team === 0).length).toBe(4);
+    const snap = c.snaps[c.snaps.length - 1];
+    expect(snap.mode?.ball).toBeTruthy();
+    expect(snap.mode?.teamScores).toEqual([0, 0]);
+    c.ws.close();
+  });
+
+  it('challenge links make a private 1v1 that the first visitor joins', async () => {
+    const a = new TestClient();
+    await a.open();
+    a.send({ type: 'hello', v: PROTOCOL_VERSION, name: 'Challenger', guestId: 'c1', join: { kind: 'challenge' } });
+    const aw = await a.waitFor('welcome');
+    expect(aw.room.challenge).toBe(true);
+    expect(aw.room.isPrivate).toBe(true);
+    expect(aw.room.settings.mode).toBe('duel');
+    // A sparring bot keeps the challenger busy until the rival shows up.
+    const r1 = await a.waitFor('roster');
+    expect(r1.players.filter((p) => p.bot).length).toBe(1);
+    const b = new TestClient();
+    await b.open();
+    b.send({ type: 'hello', v: PROTOCOL_VERSION, name: 'Rival', guestId: 'c2', join: { kind: 'code', code: aw.room.code } });
+    await b.waitFor('welcome');
+    await new Promise((r) => setTimeout(r, 150));
+    const roster = [...b.msgs].reverse().find((m): m is Extract<ServerMessage, { type: 'roster' }> => m.type === 'roster')!;
+    expect(roster.players.length).toBe(2);
+    expect(roster.players.some((p) => p.bot)).toBe(false);
+    const c = new TestClient();
+    await c.open();
+    c.send({ type: 'hello', v: PROTOCOL_VERSION, name: 'Third', guestId: 'c3', join: { kind: 'code', code: aw.room.code } });
+    expect((await c.waitFor('error')).code).toBe('full');
+    a.ws.close();
+    b.ws.close();
+  });
 });

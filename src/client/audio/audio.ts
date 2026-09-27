@@ -734,6 +734,42 @@ export class Audio {
     osc.stop(t + 0.25);
   }
 
+  /** Stadium horn plus a crowd roar (noise swell) for goals and giant tube men filling up. */
+  goalHorn(): void {
+    const out = this.out(null, 0.35);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const lp = ctx.createBiquadFilter();
+    lp.frequency.value = 1800;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.6, t + 0.04);
+    g.gain.setValueAtTime(0.6, t + 1.1);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.5);
+    for (const f of [175, 220, 262]) {
+      const osc = ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(f, t);
+      osc.frequency.setValueAtTime(f * 1.12, t + 0.55);
+      osc.connect(lp);
+      osc.start(t);
+      osc.stop(t + 1.55);
+    }
+    lp.connect(g).connect(out);
+    // Crowd: band-passed noise that swells and fades.
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 900;
+    bp.Q.value = 0.6;
+    const cg = ctx.createGain();
+    cg.gain.setValueAtTime(0.0001, t);
+    cg.gain.exponentialRampToValueAtTime(0.35, t + 0.4);
+    cg.gain.exponentialRampToValueAtTime(0.0001, t + 2.4);
+    this.noise(bp, t, 2.5);
+    bp.connect(cg).connect(out);
+  }
+
   /** Two-tone alert for random events and the final countdown. */
   siren(): void {
     const out = this.out(null, 0.25);

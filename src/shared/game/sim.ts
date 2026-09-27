@@ -26,10 +26,12 @@ import {
 import { World } from '../world';
 import { DEFAULT_LOADOUT, type Loadout, MOD_IDS, UTILITY_IDS, type UtilityId, WEAPON_IDS, computeWeaponStats, sanitizeLoadout, utilityCooldown } from '../loadout';
 import { BOT_NAMES, BotBrain } from './bot';
+import type { ModeState } from '../protocol';
+import { type BallEvent, BallGame, type ModeId, PumpGame, isTeamMode } from './modes';
 import { CHAOS_KINDS, type ChaosEvent, type ChaosKind, type Environment, NORMAL_ENV, chaosDuration, envAt } from './chaos';
 import type { GameEvent } from './events';
 
-export type ModeId = 'knockout';
+export type { ModeId } from './modes';
 export type MatchPhase = 'waiting' | 'playing' | 'results';
 
 export interface MatchStats {
@@ -68,6 +70,8 @@ export interface SimPlayer {
   launchBy: number;
   launchStartTick: number;
   joinedAt: number;
+  /** Team (0 or 1) in team modes, -1 in free-for-all. */
+  team: number;
   /** Air combo tracking: who is juggling this player and how many hits so far. */
   comboBy: number;
   comboCount: number;
@@ -184,6 +188,9 @@ export interface MatchAward {
 
 export interface MatchResult {
   winnerId: number;
+  mode: ModeId;
+  /** Team modes: final team scores (goals, knockouts, or pump fill %) and the winning team (-1 = draw). */
+  teams: { scores: [number, number]; winner: number } | null;
   standings: { id: number; name: string; score: number; stats: MatchStats; isBot: boolean }[];
   longestLaunch: { id: number; distance: number } | null;
   awards: MatchAward[];
@@ -237,8 +244,13 @@ export class GameSim {
   /** 0 = off, 0.5 = rare, 1 = normal, 2 = frequent (private room hosts pick). */
   eventMult = 1;
   crownId = -1;
+  /** Team scores (team knockouts or goals). */
+  teamScores: [number, number] = [0, 0];
+  readonly ballGame: BallGame | null;
+  readonly pumpGame: PumpGame | null;
   private finalAnnounced = false;
   private firstKo = false;
+  private pendingEnd = false;
   private readonly env: Environment = { ...NORMAL_ENV };
   /** Rolling recording of the last few seconds (for the longest-launch replay). */
   private replayBuf: number[][] = [];
@@ -256,6 +268,9 @@ export class GameSim {
     this.features = { ...ALL_FEATURES, ...opts.features };
     this.ctx = { world: this.world, dt: this.dt, weapon: computeWeaponStats('airCannon', []), features: this.features };
     this.map.pickups.forEach(([x, y, z], i) => this.pickups.push({ id: i, kind: 'soda', x, y, z, active: true, respawnAt: 0 }));
+    this.ballGame = this.mode === 'ball' && this.map.ball ? new BallGame(this.map, this.world) : null;
+    this.pumpGame = this.mode === 'pump' && this.map.pumps ? new PumpGame(this.map) : null;
+    if (this.mode === 'duel') this.durationSec = opts.durationSec ?? BALANCE.modes.duel.durationSec;
     this.scheduleNextPin();
     const n = this.map.spawns.length;
     this.homePoint = {
@@ -268,7 +283,7 @@ export class GameSim {
 
   // --- Players -----------------------------------------------------------------------------
 
-  addPlayer(name: string, opts: { isBot?: boolean; color?: number; id?: number; loadout?: Loadout } = {}): SimPlayer {
+  addPlayer(name: string, opts: { isBot?: boolean; color?: number; id?: number; loadout?: Loadout; team?: number } = {}): SimPlayer {
     const id = opts.id ?? this.freeId();
     const state = createPlayerState();
     state.mode = MODE_DEAD;
@@ -292,6 +307,7 @@ export class GameSim {
       launchBy: -1,
       launchStartTick: 0,
       joinedAt: this.time,
+      team: -1,
       comboBy: -1,
       comboCount: 0,
       comboTime: -999,
@@ -310,6 +326,7 @@ export class GameSim {
       savedInflation: -1,
     };
     p.weapon = computeWeaponStats(p.loadout.weapon, p.loadout.mods);
+    if (this.teams) p.team = opts.team ?? this.smallerTeam();
     this.players.set(id, p);
     this.respawn(p);
     this.updatePhase();
@@ -337,6 +354,7 @@ export class GameSim {
     for (const other of this.players.values()) {
       if (other.lastAttacker === id) other.lastAttacker = -1;
     }
+    this.balanceTeams();
     this.updatePhase();
   }
 
@@ -372,6 +390,54 @@ export class GameSim {
 
   private emitLoadout(p: SimPlayer): void {
     this.events.push({ t: 'loadout', tick: this.tick, id: p.id, weapon: p.loadout.weapon, mods: [...p.loadout.mods], utils: [...p.loadout.utils] });
+  }
+
+  get teams(): boolean {
+    return isTeamMode(this.mode);
+  }
+
+  private smallerTeam(): number {
+    let a = 0;
+    let b = 0;
+    for (const p of this.players.values()) {
+      if (p.team === 0) a++;
+      else if (p.team === 1) b++;
+    }
+    return a < b ? 0 : b < a ? 1 : Math.random() < 0.5 ? 0 : 1;
+  }
+
+  /** Team scores for the snapshot (pump mode reports fill instead). */
+  modeState(): ModeState | null {
+    if (!this.teams) return null;
+    const b = this.ballGame?.ball;
+    return {
+      teamScores: [...this.teamScores],
+      ball: b ? { x: b.x, y: b.y, z: b.z, vx: b.vx, vy: b.vy, vz: b.vz, inPlay: this.ballGame!.inPlay } : null,
+      pump: this.pumpGame ? { fill: [...this.pumpGame.fill], states: [...this.pumpGame.states] } : null,
+    };
+  }
+
+  /** Moves bots (then the newest humans) between teams until they're even. */
+  balanceTeams(): void {
+    if (!this.teams) return;
+    for (let guard = 0; guard < 10; guard++) {
+      const t0 = [...this.players.values()].filter((p) => p.team === 0);
+      const t1 = [...this.players.values()].filter((p) => p.team === 1);
+      if (Math.abs(t0.length - t1.length) <= 1) return;
+      const big = t0.length > t1.length ? t0 : t1;
+      const mover = big.find((p) => p.isBot) ?? big.sort((a, b) => b.joinedAt - a.joinedAt)[0];
+      mover.team = 1 - mover.team;
+      if (mover.state.mode !== MODE_DEAD) this.respawn(mover);
+    }
+  }
+
+  /** True if `a` may hit/push `b` (no friendly fire in team modes). */
+  isEnemy(a: number, b: number): boolean {
+    if (a === b) return false;
+    if (!this.teams) return true;
+    const pa = this.players.get(a);
+    const pb = this.players.get(b);
+    return !pa || !pb || pa.team !== pb.team;
   }
 
   humanCount(): number {
@@ -424,6 +490,7 @@ export class GameSim {
     this.chainReactions();
     this.stepProjectiles();
     this.stepVacuums();
+    this.stepModes();
     this.stepPickups();
     this.expireDynamics();
     this.recordHistory();
@@ -611,7 +678,7 @@ export class GameSim {
         pr.z += pr.vz * sdt;
         // Direct hits on players.
         for (const p of this.players.values()) {
-          if (p.id === pr.owner || p.state.mode === MODE_DEAD) continue;
+          if (p.id === pr.owner || p.state.mode === MODE_DEAD || !this.isEnemy(pr.owner, p.id)) continue;
           const hit = capsuleSphere(p.state, pr.x, pr.y, pr.z, pr.radius);
           if (hit) {
             this.directHit(pr, p, hit);
@@ -620,6 +687,19 @@ export class GameSim {
           }
         }
         if (done) break;
+        const ball = this.ballGame;
+        if (ball && ball.inPlay) {
+          const b = ball.ball;
+          const d = Math.hypot(pr.x - b.x, pr.y - b.y, pr.z - b.z);
+          if (d < pr.radius + b.r) {
+            const sp = Math.hypot(pr.vx, pr.vy, pr.vz) || 1;
+            const k = BALANCE.modes.ball.shotImpulse * pr.power * pr.knockback;
+            ball.impulse((pr.vx / sp) * k, (pr.vy / sp) * k + 2, (pr.vz / sp) * k, pr.owner);
+            this.explode(pr, pr.x, pr.y, pr.z, -1);
+            done = true;
+            break;
+          }
+        }
         // World: use a smaller core radius so big air blobs can skim floors.
         if (this.world.sphereHit(pr.x, pr.y, pr.z, pr.radius * 0.45) >= 0) {
           this.explode(pr, pr.x, pr.y, pr.z, -1);
@@ -659,6 +739,7 @@ export class GameSim {
     const K = BALANCE.knockback;
     const R = pr.blastRadius;
     this.events.push({ t: 'boom', tick: this.tick, id: pr.id, x, y, z, r: R, power: pr.power, owner: pr.owner });
+    this.pushBall(x, y, z, R, BALANCE.modes.ball.splashImpulse * pr.power * pr.knockback, pr.owner);
     for (const p of this.players.values()) {
       if (p.id === skipId || p.state.mode === MODE_DEAD) continue;
       const s = p.state;
@@ -720,6 +801,7 @@ export class GameSim {
     const K = BALANCE.knockback;
     const s = target.state;
     if (s.mode === MODE_DEAD) return;
+    if (attackerId >= 0 && attackerId !== target.id && !this.isEnemy(attackerId, target.id)) return;
     if (s.spawnProt > 0) {
       this.events.push({ t: 'shield', tick: this.tick, target: target.id, x: info.x, y: info.y, z: info.z });
       return;
@@ -894,8 +976,21 @@ export class GameSim {
     const ez = s.pz;
     p.stats.shots++;
     this.events.push({ t: 'honk', tick: this.tick, id: p.id, x: ex, y: ey, z: ez, dx, dy, dz, power, range: w.range, cone: w.cone });
+    const ball = this.ballGame;
+    if (ball && ball.inPlay) {
+      const b = ball.ball;
+      const bx = b.x - ex;
+      const by = b.y - ey;
+      const bz = b.z - ez;
+      const bd = Math.hypot(bx, by, bz) || 1;
+      const ang = Math.acos(Math.max(-1, Math.min(1, (bx * dx + by * dy + bz * dz) / bd))) - Math.atan2(b.r, bd);
+      if (bd - b.r < w.range && ang < w.cone) {
+        const k = BALANCE.modes.ball.shotImpulse * power * w.knockback * (1 - 0.5 * Math.min(1, bd / w.range));
+        ball.impulse((dx * 0.6 + (bx / bd) * 0.4) * k, (dy * 0.6 + (by / bd) * 0.4) * k + 2, (dz * 0.6 + (bz / bd) * 0.4) * k, p.id);
+      }
+    }
     for (const o of this.players.values()) {
-      if (o === p || o.state.mode === MODE_DEAD) continue;
+      if (o === p || o.state.mode === MODE_DEAD || !this.isEnemy(p.id, o.id)) continue;
       const t = o.state;
       const r = playerRadius(t);
       const h = playerHeight(t);
@@ -936,7 +1031,7 @@ export class GameSim {
     const scratch = this.scratchState;
     let bestPast: { px: number; py: number; pz: number; inflation: number } | null = null;
     for (const o of this.players.values()) {
-      if (o === p || o.state.mode === MODE_DEAD) continue;
+      if (o === p || o.state.mode === MODE_DEAD || !this.isEnemy(p.id, o.id)) continue;
       const past = this.stateAt(o, rewind);
       if (past.mode === MODE_DEAD) continue;
       copyPlayerState(scratch, o.state);
@@ -954,6 +1049,13 @@ export class GameSim {
     const wh = this.world.raycast(ex, ey, ez, dx, dy, dz, w.range);
     let endT = wh ? wh.dist : w.range;
     p.stats.shots++;
+    const ballT = this.ballGame?.ray(ex, ey, ez, dx, dy, dz, endT) ?? null;
+    if (ballT !== null && ballT < endT && ballT < bestT) {
+      const k = BALANCE.modes.ball.shotImpulse * power * w.knockback;
+      this.ballGame!.impulse(dx * k, dy * k + 2, dz * k, p.id);
+      best = null;
+      endT = ballT;
+    }
     if (best && bestPast && bestT < endT) {
       endT = bestT;
       const t = best.state;
@@ -987,8 +1089,21 @@ export class GameSim {
     const ex = s.px;
     const ey = s.py + eyeHeight(s);
     const ez = s.pz;
+    const ball = this.ballGame;
+    if (ball && ball.inPlay) {
+      const b = ball.ball;
+      const bx = b.x - ex;
+      const by = b.y - ey;
+      const bz = b.z - ez;
+      const bd = Math.hypot(bx, by, bz) || 1;
+      const ang = Math.acos(Math.max(-1, Math.min(1, (bx * d0.x + by * d0.y + bz * d0.z) / bd))) - Math.atan2(b.r, bd);
+      if (bd - b.r < w.range && ang < w.cone) {
+        const a = BALANCE.modes.ball.streamAccel * strength * (1 - 0.6 * Math.min(1, bd / w.range)) * this.dt;
+        ball.impulse(d0.x * a, d0.y * a + a * 0.2, d0.z * a, p.id);
+      }
+    }
     for (const o of this.players.values()) {
-      if (o === p) continue;
+      if (o === p || !this.isEnemy(p.id, o.id)) continue;
       const t = o.state;
       if (t.mode === MODE_DEAD || t.mode === MODE_HELD || t.spawnProt > 0) continue;
       const r = playerRadius(t);
@@ -1111,7 +1226,7 @@ export class GameSim {
     // Grenades go off on contact with a player.
     if (grenade) {
       for (const p of this.players.values()) {
-        if (p.id === pr.owner || p.state.mode === MODE_DEAD) continue;
+        if (p.id === pr.owner || p.state.mode === MODE_DEAD || !this.isEnemy(pr.owner, p.id)) continue;
         if (capsuleSphere(p.state, pr.x, pr.y, pr.z, pr.radius)) {
           this.detonate(pr);
           return true;
@@ -1174,8 +1289,23 @@ export class GameSim {
     this.blastAt(pr.x, pr.y, pr.z, G.radius, G.knockback, G.inflation, pr.owner);
   }
 
+  /** Pushes the ball away from a blast center. */
+  private pushBall(x: number, y: number, z: number, radius: number, impulse: number, by: number): void {
+    const ball = this.ballGame;
+    if (!ball || !ball.inPlay) return;
+    const b = ball.ball;
+    const dx = b.x - x;
+    const dy = b.y - y;
+    const dz = b.z - z;
+    const d = Math.hypot(dx, dy, dz);
+    if (d > radius + b.r || d < 1e-3) return;
+    const f = 1 - Math.max(0, d - b.r) / radius;
+    ball.impulse((dx / d) * impulse * f, ((dy / d) * 0.7 + 0.3) * impulse * f, (dz / d) * impulse * f, by);
+  }
+
   /** Outward blast used by the Air Grenade: full power at the center, 30% at the edge. */
   private blastAt(x: number, y: number, z: number, radius: number, knockback: number, inflation: number, owner: number): void {
+    this.pushBall(x, y, z, radius, BALANCE.modes.ball.splashImpulse * 1.3, owner);
     for (const p of this.players.values()) {
       const s = p.state;
       if (s.mode === MODE_DEAD) continue;
@@ -1207,7 +1337,7 @@ export class GameSim {
       }
       for (const p of this.players.values()) {
         const s = p.state;
-        if (p.id === f.owner || s.mode !== MODE_NORMAL || s.spawnProt > 0) continue;
+        if (p.id === f.owner || s.mode !== MODE_NORMAL || s.spawnProt > 0 || (f.owner >= 0 && !this.isEnemy(f.owner, p.id))) continue;
         const cy = s.py + playerHeight(s) * 0.5;
         let dx = f.x - s.px;
         let dy = f.y - cy;
@@ -1371,6 +1501,41 @@ export class GameSim {
     };
   }
 
+  // --- Modes -----------------------------------------------------------------------------
+
+  private stepModes(): void {
+    if (this.phase !== 'playing') return;
+    const ball = this.ballGame;
+    if (ball) {
+      const ev = ball.step(this.dt, this.time, this.players.values());
+      if (ev) this.onBallEvent(ev);
+    }
+    if (this.pumpGame) {
+      const list = [...this.players.values()].map((p) => ({ team: p.team, state: p.state }));
+      const winner = this.pumpGame.step(this.dt, list);
+      if (winner !== null) {
+        this.events.push({ t: 'pumpFull', tick: this.tick, team: winner });
+        this.pendingEnd = true;
+      }
+    }
+  }
+
+  private onBallEvent(ev: BallEvent): void {
+    const b = this.ballGame!.ball;
+    if (ev.kind === 'goal') {
+      this.teamScores[ev.team]++;
+      const scorer = this.players.get(ev.scorer);
+      // Own goals don't count toward a player's goals.
+      if (scorer && scorer.team === ev.team) scorer.score++;
+      this.events.push({ t: 'goal', tick: this.tick, team: ev.team, scorer: ev.scorer, x: b.x, y: b.y, z: b.z });
+      if (this.teamScores[ev.team] >= BALANCE.modes.ball.goalTarget) this.pendingEnd = true;
+    } else if (ev.kind === 'out') {
+      this.events.push({ t: 'ballOut', tick: this.tick, x: b.x, y: b.y, z: b.z });
+    } else {
+      this.events.push({ t: 'ballReset', tick: this.tick });
+    }
+  }
+
   // --- Player interactions -----------------------------------------------------------------
 
   /** Grab key: stomp a hanging player's hands, or grab someone in front of you. */
@@ -1386,7 +1551,7 @@ export class GameSim {
     let best: SimPlayer | null = null;
     let bestD = Infinity;
     for (const o of this.players.values()) {
-      if (o === p) continue;
+      if (o === p || !this.isEnemy(p.id, o.id)) continue;
       const t = o.state;
       if (t.mode !== MODE_NORMAL && t.mode !== MODE_HANG) continue;
       if (t.spawnProt > 0 || t.heldBy >= 0) continue;
@@ -1563,7 +1728,7 @@ export class GameSim {
     const L = BALANCE.ledge;
     if (s.mode !== MODE_NORMAL || !s.onGround) return false;
     for (const o of this.players.values()) {
-      if (o === p) continue;
+      if (o === p || !this.isEnemy(p.id, o.id)) continue;
       const h = o.state;
       if (h.mode !== MODE_HANG) continue;
       if (Math.abs(s.py - h.hangY) > 0.6) continue;
@@ -1599,7 +1764,7 @@ export class GameSim {
     let target: SimPlayer | null = null;
     let bestT = G.range;
     for (const o of this.players.values()) {
-      if (o === p) continue;
+      if (o === p || !this.isEnemy(p.id, o.id)) continue;
       const t = o.state;
       if (t.mode === MODE_DEAD || t.mode === MODE_HELD || t.spawnProt > 0) continue;
       const hit = rayCapsule(ex, ey, ez, d.x, d.y, d.z, t, playerRadius(t) + G.aimForgiveness);
@@ -1731,6 +1896,8 @@ export class GameSim {
         this.firstKo = true;
         tags.push('first');
       }
+      if (this.mode === 'ball' || this.mode === 'pump') points = 0;
+      if (this.mode === 'teamKnockout' && killer.team >= 0) this.teamScores[killer.team as 0 | 1] += points;
       killer.score += points;
       killer.stats.kos++;
       killer.streak++;
@@ -1760,6 +1927,7 @@ export class GameSim {
     s.charging = 0;
     s.charge = 0;
     p.respawnAt = this.time + BALANCE.match.respawnDelay;
+    if (this.mode === 'duel' && killer && killer.stats.kos >= BALANCE.modes.duel.target && this.phase === 'playing') this.pendingEnd = true;
     p.lastAttacker = -1;
     p.launchBy = -1;
     p.chainBy = -1;
@@ -1930,9 +2098,12 @@ export class GameSim {
   }
 
   private pickSpawn(forId: number): [number, number, number, number] {
-    let best = this.map.spawns[0];
+    const me = this.players.get(forId);
+    const teamSpawns = me && me.team >= 0 ? this.map.teamSpawns?.[me.team] : undefined;
+    const spawns: [number, number, number, number][] = teamSpawns ? teamSpawns.map(([x, y, z]) => [x, y, z, 0]) : this.map.spawns;
+    let best = spawns[0];
     let bestScore = -Infinity;
-    for (const sp of this.map.spawns) {
+    for (const sp of spawns) {
       let minD = 1e9;
       for (const o of this.players.values()) {
         if (o.id === forId || o.state.mode === MODE_DEAD) continue;
@@ -1974,6 +2145,11 @@ export class GameSim {
     this.firstKo = false;
     this.bestReplay = null;
     this.replayPostRoll = 0;
+    this.teamScores = [0, 0];
+    this.ballGame?.reset();
+    this.pumpGame?.reset();
+    this.pendingEnd = false;
+    this.balanceTeams();
     for (const p of this.players.values()) {
       p.score = 0;
       p.stats = newStats();
@@ -1989,7 +2165,8 @@ export class GameSim {
   }
 
   private stepMatch(): void {
-    if (this.phase === 'playing' && this.time >= this.phaseEndsAt) {
+    if (this.phase === 'playing' && (this.time >= this.phaseEndsAt || this.pendingEnd)) {
+      this.pendingEnd = false;
       this.endMatch();
     } else if (this.phase === 'results' && this.time >= this.phaseEndsAt) {
       this.world.collapseStart = Infinity;
@@ -2023,7 +2200,13 @@ export class GameSim {
     best('mostChain', (s) => s.chainKos);
     best('bestCombo', (s) => (s.bestCombo >= 2 ? s.bestCombo : 0));
     best('mostPopped', (s) => s.timesPopped);
-    this.lastResult = { winnerId: standings[0]?.id ?? -1, standings, longestLaunch: longest, awards, replay: this.bestReplay };
+    let teams: MatchResult['teams'] = null;
+    if (this.teams) {
+      const scores: [number, number] = this.pumpGame ? [Math.round(this.pumpGame.fill[0] * 100), Math.round(this.pumpGame.fill[1] * 100)] : [...this.teamScores];
+      teams = { scores, winner: scores[0] > scores[1] ? 0 : scores[1] > scores[0] ? 1 : -1 };
+    }
+    const winnerId = teams ? (standings.find((s) => this.players.get(s.id)?.team === teams!.winner)?.id ?? -1) : (standings[0]?.id ?? -1);
+    this.lastResult = { winnerId, mode: this.mode, teams, standings, longestLaunch: longest, awards, replay: this.bestReplay };
     this.phase = 'results';
     this.phaseEndsAt = this.time + BALANCE.match.resultsSec;
     this.onPhaseChange?.();

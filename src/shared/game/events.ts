@@ -50,6 +50,10 @@ export type GameEvent =
   | { t: 'chain'; tick: number; id: number; target: number; by: number; x: number; y: number; z: number }
   | { t: 'crown'; tick: number; id: number }
   | { t: 'final'; tick: number }
+  | { t: 'goal'; tick: number; team: 0 | 1; scorer: number; x: number; y: number; z: number }
+  | { t: 'ballOut'; tick: number; x: number; y: number; z: number }
+  | { t: 'ballReset'; tick: number }
+  | { t: 'pumpFull'; tick: number; team: 0 | 1 }
   | { t: 'loadout'; tick: number; id: number; weapon: string; mods: string[]; utils: string[] }
   | { t: 'pickup'; tick: number; id: number; kind: 'soda' | 'pin'; x: number; y: number; z: number; active: boolean; by: number };
 

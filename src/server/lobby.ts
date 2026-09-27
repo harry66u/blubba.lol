@@ -1,5 +1,6 @@
 import type { WebSocket } from 'ws';
 import { BALANCE } from '../shared/balance';
+import { MODE_IDS, type ModeId } from '../shared/game/modes';
 import { checkName, randomGuestName } from '../shared/names';
 import { type ClientMessage, type JoinRequest, PROTOCOL_VERSION, type ServerMessage } from '../shared/protocol';
 import { type Conn, Room } from './room';
@@ -75,15 +76,18 @@ export class Lobby {
     throw new Error('no free room codes');
   }
 
-  private findPublicRoom(): Room {
+  /**
+   * Quick play for a mode. The busiest room with space wins so people end up playing together;
+   * for 1v1 that means the room where someone is already waiting (sparring with a bot).
+   */
+  findPublicRoom(mode: ModeId = 'knockout'): Room {
     let best: Room | null = null;
     for (const r of this.rooms.values()) {
-      if (r.isPrivate || !r.canJoin()) continue;
-      // Fill the busiest room first so people end up playing together.
+      if (r.isPrivate || r.mode !== mode || !r.canJoin()) continue;
       if (!best || r.humanCount > best.humanCount) best = r;
     }
     if (best) return best;
-    const room = new Room(this.newCode(), false);
+    const room = new Room(this.newCode(), false, { mode });
     this.rooms.set(room.code, room);
     return room;
   }
@@ -127,12 +131,18 @@ export class Lobby {
       room = this.rooms.get(normalizeCode(String(join.code ?? '')));
       if (!room) return fail('not_found', "That room doesn't exist anymore. Check the code or start a new room.");
       if (room.kicked.has(guestId)) return fail('kicked', 'The host removed you from this room.');
-      if (!room.canJoin()) return fail('full', 'That room is full (10 players).');
+      if (!room.canJoin()) return fail('full', room.mode === 'duel' ? 'That 1v1 already has two players.' : 'That room is full (10 players).');
     } else if (join.kind === 'create') {
       room = new Room(this.newCode(), true, join.settings ?? {});
       this.rooms.set(room.code, room);
+    } else if (join.kind === 'challenge') {
+      // A private 1v1: the code goes out as a link and the first person to open it is your opponent.
+      room = new Room(this.newCode(), true, { mode: 'duel' });
+      room.challenge = true;
+      this.rooms.set(room.code, room);
     } else {
-      room = this.findPublicRoom();
+      const mode = typeof join.mode === 'string' && (MODE_IDS as readonly string[]).includes(join.mode) ? join.mode : 'knockout';
+      room = this.findPublicRoom(mode);
     }
     const conn = room.join(ws, name, guestId, msg.loadout);
     if (!conn) return fail('full', 'That room is full (10 players).');

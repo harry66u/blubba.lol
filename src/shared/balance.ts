@@ -352,6 +352,32 @@ export const BALANCE = {
 
   revenge: { bonus: 1 },
 
+  modes: {
+    /** Public team rooms are topped up with bots to this many players (4v4). */
+    teamFill: 8,
+    duel: { target: 5, durationSec: 180 },
+    ball: {
+      gravity: 14,
+      drag: 0.25,
+      bounce: 0.72,
+      /** Speed cap so the ball stays readable. */
+      maxSpeed: 42,
+      /** Impulse (m/s) from a full-power direct shot. */
+      shotImpulse: 16,
+      splashImpulse: 12,
+      streamAccel: 34,
+      bodyPush: 4,
+      resetDelay: 3,
+      goalTarget: 7,
+    },
+    pump: {
+      /** Fill per second for one teammate standing on an uncontested pump. */
+      rate: 0.0045,
+      /** Each extra teammate on the same pump adds this fraction of the base rate. */
+      extraPerPlayer: 0.35,
+    },
+  },
+
   multiKo: { window: 4 },
 
   combo: {

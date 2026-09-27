@@ -2,7 +2,8 @@ import type { WebSocket } from 'ws';
 import { BALANCE } from '../shared/balance';
 import { GameSim } from '../shared/game/sim';
 import { emptyInput } from '../shared/input';
-import { getMap } from '../shared/maps';
+import { KNOCKOUT_MAPS, MAPS, getMap, mapForMode } from '../shared/maps';
+import { MODE_IDS, type ModeId } from '../shared/game/modes';
 import { type Loadout, weaponIndex } from '../shared/loadout';
 import { MODE_DEAD } from '../shared/player';
 import {
@@ -48,13 +49,31 @@ export class Room {
   private lastRosterAt = 0;
   private pendingEvents: ServerMessage[] = [];
 
+  /** Public rooms rotate through the knockout maps between matches. */
+  private rotation = 0;
+  /** Challenge rooms: the code is shared as a 1v1 link. */
+  challenge = false;
+
   constructor(
     readonly code: string,
     readonly isPrivate: boolean,
     settings: Partial<RoomSettings> = {},
   ) {
-    this.settings = { ...DEFAULT_SETTINGS, ...sanitizeSettings(settings) };
+    const clean = sanitizeSettings(settings);
+    // 1v1s are shorter unless the host picked a length.
+    if (clean.mode === 'duel' && clean.durationSec === undefined) clean.durationSec = BALANCE.modes.duel.durationSec;
+    this.settings = fitMap({ ...DEFAULT_SETTINGS, ...clean });
+    this.rotation = Math.max(0, KNOCKOUT_MAPS.indexOf(this.settings.mapId));
     this.sim = this.makeSim();
+  }
+
+  get mode(): ModeId {
+    return this.settings.mode;
+  }
+
+  /** Most humans this room takes (a 1v1 room holds two). */
+  get capacity(): number {
+    return this.mode === 'duel' ? 2 : BALANCE.match.maxPlayers;
   }
 
   private makeSim(): GameSim {
@@ -87,11 +106,12 @@ export class Room {
       mapId: this.settings.mapId,
       settings: this.settings,
       features: { ...this.sim.features },
+      challenge: this.challenge,
     };
   }
 
   canJoin(): boolean {
-    return this.humanCount < BALANCE.match.maxPlayers;
+    return this.humanCount < this.capacity;
   }
 
   join(ws: WebSocket, name: string, guestId: string, loadout?: Loadout): Conn | null {
@@ -107,6 +127,8 @@ export class Room {
     this.send(conn, { type: 'entities', ...this.sim.entitySnapshot() });
     this.rosterDirty = true;
     this.balanceBots();
+    // A real opponent arrived for a 1v1 that was warming up against a bot: start fresh.
+    if (this.mode === 'duel' && this.humanCount === 2) this.sim.startMatch();
     this.broadcastJson({ type: 'room', room: this.info() });
     return conn;
   }
@@ -126,9 +148,22 @@ export class Room {
     this.balanceBots();
   }
 
+  /** How many bots this room wants right now. */
+  private wantedBots(): number {
+    if (!this.settings.bots) return 0;
+    const humans = this.humanCount;
+    // 1v1: a sparring bot keeps you busy until a real opponent shows up.
+    if (this.mode === 'duel') return humans === 1 ? 1 : 0;
+    // Team modes fill out to 4v4; everything else keeps a few bots around.
+    const fill = MODE_INFO_TEAMS.has(this.mode) ? BALANCE.modes.teamFill : BALANCE.match.publicBotFill;
+    const want = Math.max(0, fill - humans);
+    // Nine humans in a team mode get one bot for an even 5v5.
+    return MODE_INFO_TEAMS.has(this.mode) && (humans + want) % 2 === 1 ? want + 1 : want;
+  }
+
   /** Public rooms keep a few bots around so there is always someone to blast. */
   balanceBots(): void {
-    const want = this.settings.bots ? Math.max(0, BALANCE.match.publicBotFill - this.humanCount) : 0;
+    const want = this.wantedBots();
     let bots = this.sim.bots.size;
     while (bots < want && this.playerCount < BALANCE.match.maxPlayers) {
       // A spread of skill so new players can win fights and good players still get a challenge.
@@ -140,6 +175,7 @@ export class Room {
       this.removeOneBot();
       bots--;
     }
+    this.sim.balanceTeams();
     this.rosterDirty = true;
   }
 
@@ -202,22 +238,11 @@ export class Room {
   }
 
   private applySettings(raw: Partial<RoomSettings>): void {
-    const next = { ...this.settings, ...sanitizeSettings(raw) };
+    const next = fitMap({ ...this.settings, ...sanitizeSettings(raw) });
     const needNewSim = next.mapId !== this.settings.mapId || next.mode !== this.settings.mode;
     this.settings = next;
-    if (needNewSim) {
-      // Rebuild the match on the new map, carrying everyone over.
-      const old = this.sim;
-      const fresh = this.makeSim();
-      (this as { sim: GameSim }).sim = fresh;
-      for (const p of old.players.values()) {
-        if (p.isBot) continue;
-        const np = fresh.addPlayer(p.name, { id: p.id, color: p.color, loadout: p.loadout });
-        // Carry press counters so the client's next input isn't read as a burst of presses.
-        for (const k of ['cJump', 'cDash', 'cBrace', 'cGrab', 'cGrapple', 'cReload', 'cU1', 'cU2', 'cTaunt'] as const) np.state[k] = p.state[k];
-        np.lastSeq = p.lastSeq;
-      }
-    } else {
+    if (needNewSim) this.rebuild();
+    else {
       this.sim.durationSec = next.durationSec;
       this.sim.eventMult = EVENT_MULT[next.events];
     }
@@ -226,8 +251,40 @@ export class Room {
     this.sim.startMatch();
   }
 
+  /** Swaps in a fresh match on the current map and mode, carrying the humans over. */
+  private rebuild(): void {
+    const old = this.sim;
+    const fresh = this.makeSim();
+    // Keep the clock running so clients' tick estimates stay valid.
+    fresh.tick = old.tick;
+    fresh.time = old.time;
+    (this as { sim: GameSim }).sim = fresh;
+    for (const p of old.players.values()) {
+      if (p.isBot) continue;
+      const np = fresh.addPlayer(p.name, { id: p.id, color: p.color, loadout: p.loadout });
+      // Carry press counters so the client's next input isn't read as a burst of presses.
+      for (const k of ['cJump', 'cDash', 'cBrace', 'cGrab', 'cGrapple', 'cReload', 'cU1', 'cU2', 'cTaunt'] as const) np.state[k] = p.state[k];
+      np.lastSeq = p.lastSeq;
+    }
+    this.broadcastJson({ type: 'entities', ...fresh.entitySnapshot() });
+  }
+
+  /** Public knockout rooms move to the next map when the results screen ends. */
+  private rotateMap(): void {
+    this.rotation = (this.rotation + 1) % KNOCKOUT_MAPS.length;
+    this.settings = { ...this.settings, mapId: KNOCKOUT_MAPS[this.rotation] };
+    this.rebuild();
+    this.balanceBots();
+    this.broadcastJson({ type: 'room', room: this.info() });
+    this.rosterDirty = true;
+  }
+
   /** Called once per server tick. */
   tick(): void {
+    const s = this.sim;
+    if (!this.isPrivate && mapForMode(this.mode) === null && s.phase === 'results' && s.time + s.dt >= s.phaseEndsAt && this.humanCount > 0) {
+      this.rotateMap();
+    }
     this.sim.step();
     const events = this.sim.drainEvents();
     if (events.length) {
@@ -248,13 +305,14 @@ export class Room {
       this.lastRosterAt = now;
     }
     const crown = this.sim.crownId;
+    const modeState = this.sim.modeState();
     const all = [...this.sim.players.values()].map((p) => ({ id: p.id, state: p.state, weapon: weaponIndex(p.loadout.weapon), streaming: p.streaming, crowned: p.id === crown }));
     for (const conn of this.conns.values()) {
       conn.inputMsgs = Math.max(0, conn.inputMsgs - Math.round(BALANCE.tickRate / BALANCE.snapshotRate) * 1.25);
       const me = this.sim.players.get(conn.playerId);
       if (!me) continue;
       const others = all.filter((p) => p.id !== conn.playerId);
-      const buf = encodeSnapshot(this.sim.tick, me.lastSeq, me.id, me.state, others);
+      const buf = encodeSnapshot(this.sim.tick, me.lastSeq, me.id, me.state, others, modeState);
       if (conn.ws.readyState === conn.ws.OPEN && conn.ws.bufferedAmount < 256 * 1024) conn.ws.send(buf);
     }
   }
@@ -265,6 +323,7 @@ export class Room {
       name: p.name,
       color: p.color,
       bot: p.isBot,
+      team: p.team,
       score: p.score,
       kos: p.stats.kos,
       deaths: p.stats.deaths,
@@ -298,10 +357,20 @@ export class Room {
   }
 }
 
+const MODE_INFO_TEAMS = new Set<ModeId>(['teamKnockout', 'ball', 'pump']);
+
+/** Ball and Pump have their own arenas; the knockout modes can't use those. */
+export function fitMap(s: RoomSettings): RoomSettings {
+  const forced = mapForMode(s.mode);
+  if (forced) return { ...s, mapId: forced };
+  if (!KNOCKOUT_MAPS.includes(s.mapId)) return { ...s, mapId: KNOCKOUT_MAPS[0] };
+  return s;
+}
+
 export function sanitizeSettings(raw: Partial<RoomSettings>): Partial<RoomSettings> {
   const out: Partial<RoomSettings> = {};
-  if (raw.mode === 'knockout') out.mode = raw.mode;
-  if (typeof raw.mapId === 'string' && ['dealership'].includes(raw.mapId)) out.mapId = raw.mapId;
+  if (typeof raw.mode === 'string' && (MODE_IDS as readonly string[]).includes(raw.mode)) out.mode = raw.mode;
+  if (typeof raw.mapId === 'string' && Object.hasOwn(MAPS, raw.mapId)) out.mapId = raw.mapId;
   if (typeof raw.durationSec === 'number' && Number.isFinite(raw.durationSec)) {
     out.durationSec = Math.round(Math.max(BALANCE.match.minDurationSec, Math.min(BALANCE.match.maxDurationSec, raw.durationSec)) / 30) * 30;
   }

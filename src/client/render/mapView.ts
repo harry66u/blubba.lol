@@ -14,6 +14,8 @@ const KIND_COLORS: Record<SolidKind, number> = {
   crate: 0xc99a62,
   platform: 0xe9dfc6,
   bouncy: 0xff9fd0,
+  goal: 0xf4f7ff,
+  pillar: 0xc9c3b8,
   hidden: 0xffffff,
 };
 
@@ -22,8 +24,10 @@ function hash(n: number): number {
   return s - Math.floor(s);
 }
 
-/** Canvas texture for a deck top: painted parking lines and hazard edges. */
-function deckTexture(w: number, d: number, kind: SolidKind): THREE.CanvasTexture {
+type DeckStyle = 'parking' | 'field' | 'quilt' | 'plain';
+
+/** Canvas texture for a deck top: painted parking lines (or a pitch, or quilting) and hazard edges. */
+function deckTexture(w: number, d: number, color: number, style: DeckStyle): THREE.CanvasTexture {
   const ppm = 24; // pixels per meter
   const cw = Math.min(2048, Math.round(w * ppm));
   const ch = Math.min(2048, Math.round(d * ppm));
@@ -31,7 +35,7 @@ function deckTexture(w: number, d: number, kind: SolidKind): THREE.CanvasTexture
   c.width = cw;
   c.height = ch;
   const g = c.getContext('2d')!;
-  const base = new THREE.Color(KIND_COLORS[kind]);
+  const base = new THREE.Color(color);
   g.fillStyle = `#${base.getHexString()}`;
   g.fillRect(0, 0, cw, ch);
   // Subtle speckle so big surfaces don't look flat.
@@ -42,7 +46,46 @@ function deckTexture(w: number, d: number, kind: SolidKind): THREE.CanvasTexture
   }
   const sx = cw / w;
   const sz = ch / d;
-  if (kind === 'lot') {
+  if (style === 'field') {
+    // Mowed stripes, halfway line, center circle and goal boxes.
+    for (let x = 0; x < w; x += 4) {
+      if (Math.floor(x / 4) % 2 === 0) continue;
+      g.fillStyle = 'rgba(0,0,0,0.05)';
+      g.fillRect(x * sx, 0, 4 * sx, ch);
+    }
+    g.strokeStyle = 'rgba(255,255,255,0.9)';
+    g.lineWidth = 0.22 * sx;
+    g.strokeRect(1.2 * sx, 1.2 * sz, (w - 2.4) * sx, (d - 2.4) * sz);
+    g.beginPath();
+    g.moveTo((w / 2) * sx, 1.2 * sz);
+    g.lineTo((w / 2) * sx, (d - 1.2) * sz);
+    g.stroke();
+    g.beginPath();
+    g.arc((w / 2) * sx, (d / 2) * sz, 5 * sx, 0, Math.PI * 2);
+    g.stroke();
+    for (const side of [0, 1]) {
+      const x0 = side === 0 ? 1.2 : w - 1.2 - 6;
+      g.strokeRect(x0 * sx, (d / 2 - 8) * sz, 6 * sx, 16 * sz);
+    }
+  } else if (style === 'quilt') {
+    // Puffy inflatable quilting.
+    g.strokeStyle = 'rgba(255,255,255,0.55)';
+    g.lineWidth = 0.12 * sx;
+    for (let x = 2; x < w; x += 2) {
+      g.beginPath();
+      g.moveTo(x * sx, 0);
+      g.lineTo(x * sx, ch);
+      g.stroke();
+    }
+    for (let z = 2; z < d; z += 2) {
+      g.beginPath();
+      g.moveTo(0, z * sz);
+      g.lineTo(cw, z * sz);
+      g.stroke();
+    }
+    g.fillStyle = 'rgba(0,0,0,0.05)';
+    for (let x = 0; x < w; x += 2) for (let z = 0; z < d; z += 2) if ((x + z) % 4 === 0) g.fillRect(x * sx, z * sz, 2 * sx, 2 * sz);
+  } else if (style === 'parking') {
     g.strokeStyle = 'rgba(255,255,255,0.85)';
     g.lineWidth = 0.14 * sx;
     // Parking stalls along the north and south edges.
@@ -75,6 +118,11 @@ function deckTexture(w: number, d: number, kind: SolidKind): THREE.CanvasTexture
     }
   }
   // Bright hazard stripes around the edge so drops are easy to read.
+  if (style === 'quilt') {
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
   const edge = 0.55;
   const stripe = 1.0;
   for (const side of [0, 1, 2, 3]) {
@@ -134,6 +182,9 @@ export class MapView {
   private readonly solidMeshes = new Map<number, THREE.Object3D>();
   private readonly deckTops: THREE.MeshStandardMaterial[] = [];
   private fan: THREE.Group | null = null;
+  private readonly pumpPads: { ring: THREE.Mesh; core: THREE.Mesh; team: 0 | 1; plunger: THREE.Object3D }[] = [];
+  private readonly giants: { man: TubeMan; pose: TubeManPose; team: 0 | 1; fill: number; shown: number }[] = [];
+  private teamColors: number[] = [0xff3b5c, 0x2ec5ff];
   private fanBlades: THREE.Object3D | null = null;
   private time = 0;
 
@@ -144,6 +195,7 @@ export class MapView {
     this.buildSolids();
     this.buildDecor();
     this.buildPads();
+    this.buildModeProps();
     this.buildClouds();
     this.root.add(this.clouds);
   }
@@ -160,19 +212,24 @@ export class MapView {
     };
     const underMat = new THREE.MeshStandardMaterial({ color: 0x9b8fb8, roughness: 0.9, flatShading: true });
     const dirtMat = new THREE.MeshStandardMaterial({ color: 0x8a7aa8, roughness: 0.95 });
-    const mats = new Map<SolidKind, THREE.Material>();
-    const matFor = (kind: SolidKind) => {
-      let m = mats.get(kind);
+    const mats = new Map<string, THREE.Material>();
+    const matFor = (kind: SolidKind, color = KIND_COLORS[kind]) => {
+      const key = `${kind}|${color}`;
+      let m = mats.get(key);
       if (!m) {
         if (kind === 'glass') {
-          m = new THREE.MeshPhysicalMaterial({ color: KIND_COLORS.glass, roughness: 0.05, transmission: 0, transparent: true, opacity: 0.55, metalness: 0.1 });
+          m = new THREE.MeshPhysicalMaterial({ color, roughness: 0.05, transmission: 0, transparent: true, opacity: 0.55, metalness: 0.1 });
+        } else if (kind === 'bouncy') {
+          // Glossy vinyl.
+          m = new THREE.MeshStandardMaterial({ color, roughness: 0.28, metalness: 0.02 });
         } else {
-          m = new THREE.MeshStandardMaterial({ color: KIND_COLORS[kind], roughness: kind === 'crate' ? 0.8 : 0.7 });
+          m = new THREE.MeshStandardMaterial({ color, roughness: kind === 'crate' ? 0.8 : 0.7 });
         }
-        mats.set(kind, m);
+        mats.set(key, m);
       }
       return m;
     };
+    const style: DeckStyle = this.map.ball ? 'field' : this.map.pumps ? 'plain' : 'parking';
 
     this.map.solids.forEach((def, id) => {
       if (def.kind === 'hidden') return;
@@ -184,13 +241,31 @@ export class MapView {
       const cz = (def.min[2] + def.max[2]) / 2;
       const radius = Math.min(0.18, Math.min(w, h, d) * 0.2);
       const isDeck = def.kind === 'lot' || def.kind === 'island';
+      const color = def.color ?? KIND_COLORS[def.kind];
       const group = new THREE.Group();
 
-      if (isDeck) {
+      if (def.kind === 'bouncy') {
+        // Puffy inflatable: big rounded corners; wide surfaces get quilting on top.
+        const puff = Math.min(0.6, Math.min(w, h, d) * 0.35);
+        const mesh = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 3, puff), matFor('bouncy', color));
+        mesh.position.set(cx, cy, cz);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        group.add(mesh);
+        if (w * d > 40) {
+          const topMat = new THREE.MeshStandardMaterial({ map: deckTexture(w, d, color, 'quilt'), roughness: 0.3 });
+          this.deckTops.push(topMat);
+          const top = new THREE.Mesh(new THREE.PlaneGeometry(w - puff * 2, d - puff * 2), topMat);
+          top.rotation.x = -Math.PI / 2;
+          top.position.set(cx, def.max[1] + 0.01, cz);
+          top.receiveShadow = true;
+          group.add(top);
+        }
+      } else if (isDeck) {
         // Top slab with painted texture, then a chunky floating-rock underside.
-        const topMat = new THREE.MeshStandardMaterial({ map: deckTexture(w, d, def.kind), roughness: 0.85 });
+        const topMat = new THREE.MeshStandardMaterial({ map: deckTexture(w, d, color, def.kind === 'lot' ? style : 'plain'), roughness: 0.85 });
         this.deckTops.push(topMat);
-        const slab = new THREE.Mesh(new RoundedBoxGeometry(w, 0.6, d, 2, 0.12), matFor(def.kind));
+        const slab = new THREE.Mesh(new RoundedBoxGeometry(w, 0.6, d, 2, 0.12), matFor(def.kind, color));
         slab.position.set(cx, def.max[1] - 0.3, cz);
         slab.receiveShadow = true;
         slab.castShadow = true;
@@ -225,7 +300,7 @@ export class MapView {
         under.position.set(cx, def.min[1] - depth / 2 + 0.05, cz);
         group.add(under);
       } else {
-        const mesh = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 2, radius), matFor(def.kind));
+        const mesh = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 2, radius), matFor(def.kind, color));
         mesh.position.set(cx, cy, cz);
         mesh.castShadow = def.kind !== 'glass';
         mesh.receiveShadow = true;
@@ -452,9 +527,151 @@ export class MapView {
         this.balloons.push(g);
         return g;
       }
+      case 'net': {
+        // Goal net: a translucent mesh box with a colored rim, in the defending team's color.
+        const g = new THREE.Group();
+        const netMat = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.35 });
+        const net = new THREE.Mesh(new THREE.BoxGeometry(4.4, 5, 11, 6, 7, 14), netMat);
+        net.position.y = 2.5;
+        const rimMat = new THREE.MeshStandardMaterial({ color: d.color ?? 0xffffff, roughness: 0.3, emissive: d.color ?? 0xffffff, emissiveIntensity: 0.25 });
+        const back = Math.sign(d.x) * 2.3;
+        for (const z of [-5.6, 5.6]) {
+          const post = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 5.4, 12), rimMat);
+          post.position.set(-back, 2.7, z);
+          post.castShadow = true;
+          g.add(post);
+        }
+        const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 11.6, 12), rimMat);
+        bar.rotation.x = Math.PI / 2;
+        bar.position.set(-back, 5.4, 0);
+        g.add(net, bar);
+        g.position.set(d.x, d.y, d.z);
+        return g;
+      }
+      case 'umbrella': {
+        const g = new THREE.Group();
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 3.4, 8), new THREE.MeshStandardMaterial({ color: 0xf4f1ea }));
+        pole.position.y = 1.7;
+        const canopy = new THREE.Mesh(
+          new THREE.ConeGeometry(2.4, 0.9, 12, 1, true),
+          new THREE.MeshStandardMaterial({ color: d.color ?? 0xff6fa8, side: THREE.DoubleSide, roughness: 0.5, flatShading: true }),
+        );
+        canopy.position.y = 3.5;
+        canopy.castShadow = true;
+        g.add(pole, canopy);
+        g.position.set(d.x, d.y, d.z);
+        return g;
+      }
       default:
         return null;
     }
+  }
+
+  /** Ball fence, pump pads and the giant tube men for Pump. */
+  private buildModeProps(): void {
+    const f = this.map.ball?.fence;
+    if (f) {
+      const glass = new THREE.MeshStandardMaterial({ color: 0xcff3ff, transparent: true, opacity: 0.12, roughness: 0.1, side: THREE.DoubleSide, depthWrite: false });
+      const rail = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
+      const panel = (x0: number, z0: number, x1: number, z1: number, y0: number, y1: number) => {
+        const len = Math.hypot(x1 - x0, z1 - z0);
+        if (len < 0.1) return;
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(len, y1 - y0), glass);
+        m.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+        m.rotation.y = Math.atan2(-(z1 - z0), x1 - x0);
+        const top = new THREE.Mesh(new THREE.BoxGeometry(len, 0.2, 0.2), rail);
+        top.position.set(m.position.x, y1, m.position.z);
+        top.rotation.y = m.rotation.y;
+        this.root.add(m, top);
+        // Posts every few meters so it reads as a fence, not a wire.
+        const n = Math.max(1, Math.round(len / 8));
+        for (let i = 0; i <= n; i++) {
+          const t = i / n;
+          const post = new THREE.Mesh(new THREE.BoxGeometry(0.18, y1 - y0, 0.18), rail);
+          post.position.set(x0 + (x1 - x0) * t, (y0 + y1) / 2, z0 + (z1 - z0) * t);
+          post.castShadow = true;
+          this.root.add(post);
+        }
+      };
+      const H = f.height;
+      panel(f.minX, f.minZ, f.maxX, f.minZ, 1.1, H);
+      panel(f.minX, f.maxZ, f.maxX, f.maxZ, 1.1, H);
+      // End fences above the goal mouth and either side of it.
+      const mouth = this.map.ball!.goals[0];
+      for (const x of [f.minX, f.maxX]) {
+        panel(x, f.minZ, x, mouth.min[2], 3, H);
+        panel(x, mouth.max[2], x, f.maxZ, 3, H);
+        panel(x, mouth.min[2], x, mouth.max[2], 6, H);
+      }
+    }
+    for (const pump of this.map.pumps ?? []) {
+      const g = new THREE.Group();
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(pump.r, pump.r * 1.05, 0.12, 36), new THREE.MeshStandardMaterial({ color: 0x3a3a48, roughness: 0.6 }));
+      base.position.y = 0.06;
+      base.receiveShadow = true;
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(pump.r - 0.15, 0.13, 8, 40),
+        new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.4, roughness: 0.3 }),
+      );
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = 0.14;
+      const core = new THREE.Mesh(new THREE.CylinderGeometry(pump.r * 0.55, pump.r * 0.55, 0.05, 28), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.2, transparent: true, opacity: 0.8 }));
+      core.position.y = 0.14;
+      // A bicycle-style pump barrel at the edge with a plunger that bobs while pumping.
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, 1.4, 14), new THREE.MeshStandardMaterial({ color: 0xe8ecf5, metalness: 0.4, roughness: 0.3 }));
+      barrel.position.set(pump.r + 0.4, 0.7, 0);
+      const plunger = new THREE.Group();
+      const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.9, 8), new THREE.MeshStandardMaterial({ color: 0x9aa3b8, metalness: 0.6 }));
+      rod.position.y = 0.45;
+      const handle = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.8, 4, 8), new THREE.MeshStandardMaterial({ color: 0x2b2d42 }));
+      handle.rotation.z = Math.PI / 2;
+      handle.position.y = 0.9;
+      plunger.add(rod, handle);
+      plunger.position.set(pump.r + 0.4, 1.3, 0);
+      barrel.castShadow = true;
+      g.add(base, ring, core, barrel, plunger);
+      g.position.set(pump.x, pump.y, pump.z);
+      g.rotation.y = pump.x < 0 ? Math.PI : 0;
+      this.root.add(g);
+      this.pumpPads.push({ ring, core, team: pump.team, plunger });
+    }
+    for (const gdef of this.map.giants ?? []) {
+      const man = new TubeMan(0xffffff, { seed: gdef.x });
+      man.group.position.set(gdef.x, gdef.y, gdef.z);
+      const pose = defaultPose();
+      pose.yaw = Math.atan2(-gdef.x, 0) + Math.PI;
+      this.root.add(man.group);
+      this.giants.push({ man, pose, team: gdef.team, fill: 0, shown: 0 });
+    }
+    this.applyTeamColors();
+  }
+
+  /** Team colors for pumps and giants (standard or colorblind-friendly). */
+  setTeamColors(colors: number[]): void {
+    this.teamColors = colors;
+    this.applyTeamColors();
+  }
+
+  private applyTeamColors(): void {
+    for (const p of this.pumpPads) {
+      const c = this.teamColors[p.team];
+      (p.ring.material as THREE.MeshStandardMaterial).color.setHex(c);
+      (p.ring.material as THREE.MeshStandardMaterial).emissive.setHex(c);
+      (p.core.material as THREE.MeshStandardMaterial).color.setHex(c);
+    }
+    for (const g of this.giants) g.man.setColor(this.teamColors[g.team]);
+  }
+
+  /** Pump mode state: which pumps are working (1) or contested (2), and each giant's fill. */
+  setPumpState(states: number[], fill: [number, number]): void {
+    this.pumpPads.forEach((p, i) => {
+      const st = states[i] ?? 0;
+      const core = p.core.material as THREE.MeshStandardMaterial;
+      core.emissiveIntensity = st === 1 ? 0.9 : st === 2 ? 0.5 : 0.15;
+      core.emissive.setHex(st === 2 ? 0xffd60a : this.teamColors[p.team]);
+      p.plunger.userData.active = st === 1;
+    });
+    for (const g of this.giants) g.fill = fill[g.team];
   }
 
   private makeBalloons(d: DecorDef): THREE.Object3D {
@@ -512,6 +729,20 @@ export class MapView {
       t.pose.time = time + t.man.group.position.x;
       t.pose.dt = dt;
       t.man.update(t.pose);
+    }
+    for (const p of this.pumpPads) {
+      const on = p.plunger.userData.active === true;
+      p.plunger.position.y = on ? 1.0 + Math.abs(Math.sin(this.time * 7)) * 0.45 : 1.3;
+    }
+    for (const g of this.giants) {
+      // Giants grow from a limp heap to a towering, flailing tube man as their team pumps.
+      g.shown += (g.fill - g.shown) * Math.min(1, dt * 3);
+      g.man.group.scale.setScalar(1.2 + g.shown * 3.6);
+      g.pose.time = time;
+      g.pose.dt = dt;
+      g.pose.inflation = Math.min(1, g.shown * 1.2);
+      g.pose.launched = g.shown < 0.08; // limp and floppy when empty
+      g.man.update(g.pose);
     }
     for (const p of this.pads) {
       const top = p.userData.top as THREE.Mesh;
@@ -585,6 +816,7 @@ export class MapView {
       }
     });
     for (const t of this.tubeMen) t.man.dispose();
+    for (const g of this.giants) g.man.dispose();
   }
 }
 

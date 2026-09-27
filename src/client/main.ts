@@ -1,3 +1,5 @@
+import { BALANCE } from '../shared/balance';
+import type { ModeId } from '../shared/game/modes';
 import { randomGuestName } from '../shared/names';
 import type { JoinRequest, ServerMessage } from '../shared/protocol';
 import { Audio } from './audio/audio';
@@ -57,9 +59,30 @@ let padPlay = false;
 
 // --- Routing ----------------------------------------------------------------------------------
 
-function roomCodeFromPath(): string | null {
-  const m = location.pathname.match(/^\/r\/([A-Za-z0-9]{4,6})\/?$/);
-  return m ? m[1].toUpperCase() : null;
+/** Room links look like /r/CODE; 1v1 challenge links look like /c/CODE. */
+function roomCodeFromPath(): { code: string; challenge: boolean } | null {
+  const m = location.pathname.match(/^\/([rc])\/([A-Za-z0-9]{4,6})\/?$/);
+  return m ? { code: m[2].toUpperCase(), challenge: m[1] === 'c' } : null;
+}
+
+const MODE_KEY = 'bubba.mode.v1';
+function loadMode(): ModeId {
+  try {
+    const m = window.localStorage.getItem(MODE_KEY);
+    if (m === 'knockout' || m === 'teamKnockout' || m === 'ball' || m === 'pump' || m === 'duel') return m;
+  } catch {
+    // Storage blocked: default mode.
+  }
+  return 'knockout';
+}
+let lastMode = loadMode();
+function rememberMode(m: ModeId): void {
+  lastMode = m;
+  try {
+    window.localStorage.setItem(MODE_KEY, m);
+  } catch {
+    // Not remembered; fine.
+  }
 }
 
 function setPath(path: string): void {
@@ -76,17 +99,19 @@ function showMenu(notice?: string): void {
   menuLayer.append(
     buildMainMenu(identity.name, {
       onLoadout: () => setOverlay('loadout'),
-      onPlay: (name) => startJoin(name, { kind: 'quick' }),
+      onPlay: (name, mode) => startJoin(name, { kind: 'quick', mode }),
+      onChallenge: (name) => startJoin(name, { kind: 'challenge' }),
+      onModeChange: rememberMode,
       onCreate: (name) => startJoin(name, { kind: 'create' }),
       onJoinCode: (name, code) => startJoin(name, { kind: 'code', code }),
       onSettings: () => setOverlay('settings'),
       onHowTo: () => setOverlay('howto'),
       onNameChange: rememberName,
-    }, notice),
+    }, notice, lastMode),
   );
 }
 
-function showRoomJoin(code: string, notice?: string): void {
+function showRoomJoin(code: string, notice?: string, challenge = false): void {
   screen = 'room-join';
   clear(menuLayer);
   menuLayer.append(
@@ -94,7 +119,7 @@ function showRoomJoin(code: string, notice?: string): void {
       onJoin: (name) => startJoin(name, { kind: 'code', code }),
       onBack: () => showMenu(),
       onNameChange: rememberName,
-    }, notice),
+    }, notice, challenge),
   );
 }
 
@@ -211,7 +236,7 @@ function setOverlay(next: typeof overlay): void {
     case 'results':
       if (game.match.result) {
         const secondsLeft = Math.max(0, (game.match.endsAtTick - game.clock.tickAt(performance.now())) / 60);
-        overlayLayer.append(buildResults(game.match.result, game.roster, game.youId, secondsLeft));
+        overlayLayer.append(buildResults(game.match.result, game.roster, game.youId, secondsLeft, game.teamView()));
       }
       break;
     default:
@@ -228,6 +253,7 @@ function applySettings(s: Settings): void {
   const q = qualityFor(s);
   if (q !== renderer.quality) renderer.setQuality(q);
   fpsEl.classList.toggle('hidden', !s.showFps);
+  game.refreshTeamColors();
 }
 
 function resume(): void {
@@ -271,10 +297,14 @@ function leaveMatch(): void {
   net.warm().catch(() => undefined);
 }
 
+function inviteLink(): string {
+  return `${location.origin}/${game.room?.challenge ? 'c' : 'r'}/${game.room?.code ?? ''}`;
+}
+
 function copyInvite(): void {
   if (!game.room) return;
-  const link = `${location.origin}/r/${game.room.code}`;
-  const done = () => hud.toast('Invite link copied! Paste it to your friends.');
+  const link = inviteLink();
+  const done = () => hud.toast(game.room?.challenge ? 'Challenge link copied! Send it to your rival.' : 'Invite link copied! Paste it to your friends.');
   if (navigator.clipboard?.writeText) navigator.clipboard.writeText(link).then(done, () => prompt('Copy this link:', link));
   else prompt('Copy this link:', link);
 }
@@ -284,7 +314,14 @@ function renderScoreboard(): void {
   if (!scoreboardOpen || screen !== 'playing') return;
   const isHost = !!game.room?.isPrivate && game.room.hostId === game.youId;
   scoreLayer.append(
-    buildScoreboard([...game.roster.values()], game.youId, game.room?.hostId ?? -1, !!game.room?.isPrivate, isHost && !input.locked ? (id) => net.send({ type: 'host', action: 'kick', id }) : null),
+    buildScoreboard(
+      [...game.roster.values()],
+      game.youId,
+      game.room?.hostId ?? -1,
+      !!game.room?.isPrivate,
+      isHost && !input.locked ? (id) => net.send({ type: 'host', action: 'kick', id }) : null,
+      game.teamView(),
+    ),
   );
 }
 
@@ -316,21 +353,30 @@ net.handlers = {
       screen = 'playing';
       clear(menuLayer);
       game.enter(msg);
-      if (msg.room.isPrivate) setPath(`/r/${msg.room.code}`);
+      if (msg.room.isPrivate) setPath(`/${msg.room.challenge ? 'c' : 'r'}/${msg.room.code}`);
       else setPath('/');
       if (msg.name !== identity.name) rememberName(msg.name);
       setOverlay(input.locked ? 'none' : 'click');
       if (msg.room.isPrivate && pendingJoin?.kind === 'create') {
         hud.callout('ROOM ' + msg.room.code, 'Press Esc to copy the invite link', 4);
+      } else if (pendingJoin?.kind === 'challenge') {
+        // The click that created the challenge usually still counts as a user gesture for the clipboard.
+        const link = inviteLink();
+        const shown = () => hud.callout('1v1 CHALLENGE', 'Link copied! Send it to a friend. Warm up on the bot until they join.', 5);
+        const manual = () => hud.callout('1v1 CHALLENGE', `Press Esc to copy your challenge link (${msg.room.code})`, 5);
+        if (navigator.clipboard?.writeText) navigator.clipboard.writeText(link).then(shown, manual);
+        else manual();
+      } else if (msg.room.challenge) {
+        hud.callout('1v1!', `First to ${BALANCE.modes.duel.target} knockouts. Good luck!`, 3);
       }
       return;
     }
     if (msg.type === 'error') {
       if (msg.code === 'kicked' || screen !== 'playing') {
-        const code = roomCodeFromPath();
+        const link = roomCodeFromPath();
         game.leave();
         input.exitLock();
-        if (msg.code === 'not_found' && code) showRoomJoin(code, msg.message);
+        if (msg.code === 'not_found' && link) showRoomJoin(link.code, msg.message, link.challenge);
         else showMenu(msg.message);
         return;
       }
@@ -418,8 +464,8 @@ requestAnimationFrame(loop);
 
 applySettings(settings);
 net.warm().catch(() => undefined);
-const code = roomCodeFromPath();
-if (code) showRoomJoin(code);
+const link = roomCodeFromPath();
+if (link) showRoomJoin(link.code, undefined, link.challenge);
 else showMenu();
 
 // Fade out the HTML splash now that the game is ready.

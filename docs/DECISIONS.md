@@ -95,6 +95,31 @@ The spec leaves the tech stack and many details open. This file records what was
   line is also shown as on-screen text.
 - **Grapple** targets players first (with a 0.5 m aim forgiveness for trackpads), then surfaces.
 
+## Modes (Phase 7)
+
+- **Team sizes:** public team rooms fill to 8 players (4v4) with bots; a ninth human gets a
+  bot partner for an even 5v5. Humans are only moved between teams when bots can't even things
+  out, and a moved player respawns on their new side.
+- **Team Knockout scoring** uses the same knockout points as Knockout (crown, final-30, revenge
+  multipliers included), summed per team.
+- **Ball:** knockouts score no points (goals do), but they still matter for space. First to 7
+  goals ends the match early; otherwise most goals at the buzzer. Own goals count for the other
+  team and give the scorer nothing. The ball resets to the center 3 s after a goal or leaving the
+  arena. The ball never pushes players, so it never affects movement prediction.
+- **Pump:** fill rate is 0.45%/s per pump with one teammate, +35% per extra teammate on the same
+  pump; any enemy on a pump stops it entirely ("contested"). Two pumps each, one at home and one
+  on the middle island, so holding the middle is how you win. First to 100% or fullest at the end.
+- **1v1:** first to 5 knockouts or best score after 3 minutes. Challenge links are private 1v1
+  rooms at `/c/CODE` (normal private rooms stay at `/r/CODE`). The challenger spars with a bot
+  until someone opens the link; when the second human arrives the bot leaves and the match
+  restarts from 0-0. The 1v1 queue is public 1v1 rooms: the next person to queue joins whoever
+  is waiting.
+- **Map rotation:** public knockout-style rooms move to the next of the three knockout maps when
+  the results screen ends. The server keeps its tick counter across the swap so client clocks
+  and prediction don't glitch.
+- **Colorblind-friendly team colors** swap red/blue for orange/blue (Settings → Graphics); the
+  pumps, giants, name tags, score strip and scoreboard all follow the setting.
+
 ## Sound-off versions of every audio joke
 
 | Sound | Visual |

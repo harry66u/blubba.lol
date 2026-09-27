@@ -1,5 +1,8 @@
+import { BALANCE } from '../../shared/balance';
 import { PLAYER_COLORS } from '../../shared/colors';
+import { MODE_IDS, MODE_INFO, type ModeId } from '../../shared/game/modes';
 import type { MatchResult } from '../../shared/game/sim';
+import { KNOCKOUT_MAPS, MAPS, mapForMode } from '../../shared/maps';
 import { checkName, randomGuestName } from '../../shared/names';
 import type { EventFrequency, RoomInfo, RosterEntry } from '../../shared/protocol';
 import { ACTION_LABELS, type Action, DEFAULT_BINDINGS, codeLabel } from '../input/input';
@@ -8,7 +11,9 @@ import { clear, el, hexColor } from './dom';
 
 export interface MenuCallbacks {
   onLoadout: () => void;
-  onPlay: (name: string) => void;
+  onPlay: (name: string, mode: ModeId) => void;
+  onChallenge: (name: string) => void;
+  onModeChange: (mode: ModeId) => void;
   onCreate: (name: string) => void;
   onJoinCode: (name: string, code: string) => void;
   onSettings: () => void;
@@ -41,7 +46,17 @@ function logo(): HTMLElement {
   return el('div', { class: 'logo' }, ...'BUBBA'.split('').map((ch) => el('span', { text: ch })));
 }
 
-export function buildMainMenu(name: string, cb: MenuCallbacks, notice?: string): HTMLElement {
+/** Colors and names for team scoreboards and results. */
+export interface TeamView {
+  colors: number[];
+  names: string[];
+  scores: [number, number];
+  youTeam: number;
+  /** Pump: scores are fill fractions. */
+  percent: boolean;
+}
+
+export function buildMainMenu(name: string, cb: MenuCallbacks, notice?: string, initialMode: ModeId = 'knockout'): HTMLElement {
   const err = el('div', { class: 'error-text', text: notice ?? '' });
   const nameInput = nameField(name, cb.onNameChange, err);
   const dice = el('button', {
@@ -56,13 +71,46 @@ export function buildMainMenu(name: string, cb: MenuCallbacks, notice?: string):
       },
     },
   });
+  let mode: ModeId = initialMode;
+  const blurb = el('div', { class: 'mode-blurb' });
+  const picker = el('div', { class: 'mode-picker', attrs: { role: 'radiogroup', 'aria-label': 'Game mode' } });
   const play = el('button', {
     class: 'btn big',
     text: 'PLAY',
     on: {
       click: () => {
         const n = validName(nameInput, err);
-        if (n) cb.onPlay(n);
+        if (n) cb.onPlay(n, mode);
+      },
+    },
+  });
+  const pick = (m: ModeId) => {
+    mode = m;
+    for (const b of picker.querySelectorAll('button')) b.classList.toggle('on', b.dataset.mode === m);
+    blurb.textContent = MODE_INFO[m].blurb;
+  };
+  for (const m of MODE_IDS) {
+    const b = el('button', {
+      text: MODE_INFO[m].name,
+      attrs: { 'data-mode': m, role: 'radio', title: MODE_INFO[m].blurb },
+      on: {
+        click: () => {
+          pick(m);
+          cb.onModeChange(m);
+        },
+      },
+    });
+    picker.append(b);
+  }
+  pick(mode);
+  const challenge = el('button', {
+    class: 'btn blue',
+    text: '1v1 CHALLENGE',
+    attrs: { title: 'Get a link: the first person to open it plays you 1v1.' },
+    on: {
+      click: () => {
+        const n = validName(nameInput, err);
+        if (n) cb.onChallenge(n);
       },
     },
   });
@@ -92,7 +140,7 @@ export function buildMainMenu(name: string, cb: MenuCallbacks, notice?: string):
   });
   const create = el('button', {
     class: 'btn yellow',
-    text: 'CREATE PRIVATE ROOM',
+    text: 'PRIVATE ROOM',
     on: {
       click: () => {
         const n = validName(nameInput, err);
@@ -105,8 +153,10 @@ export function buildMainMenu(name: string, cb: MenuCallbacks, notice?: string):
     { class: 'panel menu-card interactive' },
     el('div', { class: 'label', text: 'Your name' }),
     el('div', { class: 'row' }, nameInput, dice),
+    picker,
+    blurb,
     play,
-    create,
+    el('div', { class: 'row split' }, create, challenge),
     el('div', { class: 'row' }, el('div', { class: 'grow', style: 'font-size:16px', text: 'Got a code?' }), codeInput, joinBtn),
     err,
   );
@@ -120,12 +170,18 @@ export function buildMainMenu(name: string, cb: MenuCallbacks, notice?: string):
   return el('div', { class: 'menu' }, logo(), el('div', { class: 'tagline', text: 'Blast your friends off the map!' }), card, footer);
 }
 
-export function buildRoomJoin(code: string, name: string, cb: { onJoin: (name: string) => void; onBack: () => void; onNameChange: (n: string) => void }, notice?: string): HTMLElement {
+export function buildRoomJoin(
+  code: string,
+  name: string,
+  cb: { onJoin: (name: string) => void; onBack: () => void; onNameChange: (n: string) => void },
+  notice?: string,
+  challenge = false,
+): HTMLElement {
   const err = el('div', { class: 'error-text', text: notice ?? '' });
   const nameInput = nameField(name, cb.onNameChange, err);
   const join = el('button', {
     class: 'btn big green',
-    text: 'JOIN',
+    text: challenge ? 'ACCEPT CHALLENGE' : 'JOIN',
     on: {
       click: () => {
         const n = validName(nameInput, err);
@@ -139,7 +195,7 @@ export function buildRoomJoin(code: string, name: string, cb: { onJoin: (name: s
   const card = el(
     'div',
     { class: 'panel menu-card interactive' },
-    el('div', { class: 'room-banner', html: `You're invited to room <b>${code}</b>` }),
+    el('div', { class: 'room-banner', html: challenge ? `⚔️ You've been challenged to a <b>1v1</b>! First to ${BALANCE.modes.duel.target} knockouts.` : `You're invited to room <b>${code}</b>` }),
     el('div', { class: 'label', text: 'Your name' }),
     nameInput,
     join,
@@ -165,7 +221,7 @@ export interface PauseCallbacks {
   onSettings: () => void;
   onHowTo: () => void;
   onCopyLink: () => void;
-  onHost: (action: 'restart' | { durationSec?: number; bots?: boolean; events?: EventFrequency }) => void;
+  onHost: (action: 'restart' | { durationSec?: number; bots?: boolean; events?: EventFrequency; mode?: ModeId; mapId?: string }) => void;
 }
 
 export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCallbacks): HTMLElement {
@@ -177,11 +233,28 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
       el(
         'div',
         { class: 'row' },
-        el('div', { class: 'grow room-banner', html: `Room code <b>${room.code}</b>` }),
-        el('button', { class: 'btn small blue', text: 'Copy invite link', on: { click: cb.onCopyLink } }),
+        el('div', { class: 'grow room-banner', html: room.challenge ? `1v1 challenge <b>${room.code}</b>` : `Room code <b>${room.code}</b>` }),
+        el('button', { class: 'btn small blue', text: room.challenge ? 'Copy challenge link' : 'Copy invite link', on: { click: cb.onCopyLink } }),
       ),
     );
     if (isHost) {
+      const selectStyle = 'font-size:16px;padding:6px';
+      const mode = el('select', { class: 'field', style: selectStyle, attrs: { 'aria-label': 'Mode' } });
+      for (const m of MODE_IDS) {
+        const o = el('option', { text: MODE_INFO[m].name, attrs: { value: m } });
+        if (m === room.settings.mode) o.selected = true;
+        mode.append(o);
+      }
+      mode.addEventListener('change', () => cb.onHost({ mode: mode.value as ModeId }));
+      const map = el('select', { class: 'field', style: selectStyle, attrs: { 'aria-label': 'Map' } });
+      const forced = mapForMode(room.settings.mode);
+      for (const id of forced ? [forced] : KNOCKOUT_MAPS) {
+        const o = el('option', { text: MAPS[id].name, attrs: { value: id } });
+        if (id === room.settings.mapId) o.selected = true;
+        map.append(o);
+      }
+      map.disabled = !!forced;
+      map.addEventListener('change', () => cb.onHost({ mapId: map.value }));
       const time = el('select', { class: 'field', style: 'font-size:16px;padding:6px' });
       for (const s of [180, 210, 240, 270, 300]) {
         const o = el('option', { text: `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`, attrs: { value: String(s) } });
@@ -206,13 +279,14 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
       events.addEventListener('change', () => cb.onHost({ events: events.value as EventFrequency }));
       panel.append(
         el('div', { class: 'label', text: 'Host controls' }),
+        el('div', { class: 'row' }, el('span', { text: 'Mode' }), mode, el('span', { text: 'Map' }), map),
         el('div', { class: 'row' }, el('span', { text: 'Match length' }), time, el('label', { class: 'row', style: 'font-size:16px' }, bots, 'Bots')),
         el('div', { class: 'row' }, el('span', { text: 'Random events' }), events),
         el('button', { class: 'btn small yellow', text: 'Restart match', on: { click: () => cb.onHost('restart') } }),
       );
     }
   } else {
-    panel.append(el('div', { class: 'room-banner', text: 'Public match' }));
+    panel.append(el('div', { class: 'room-banner', text: `Public match · ${MODE_INFO[room?.settings.mode ?? 'knockout'].name} · ${MAPS[room?.mapId ?? 'dealership']?.name ?? ''}` }));
   }
   panel.append(
     el(
@@ -228,8 +302,30 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
   return el('div', { class: 'overlay interactive' }, panel);
 }
 
-export function buildScoreboard(roster: RosterEntry[], youId: number, hostId: number, isPrivate: boolean, onKick: ((id: number) => void) | null): HTMLElement {
-  const rows = [...roster].sort((a, b) => b.score - a.score || b.kos - a.kos || a.deaths - b.deaths);
+export function buildScoreboard(
+  roster: RosterEntry[],
+  youId: number,
+  hostId: number,
+  isPrivate: boolean,
+  onKick: ((id: number) => void) | null,
+  teams: TeamView | null = null,
+): HTMLElement {
+  const sorted = [...roster].sort((a, b) => b.score - a.score || b.kos - a.kos || a.deaths - b.deaths);
+  const panel = el('div', { class: 'panel' });
+  if (!teams) {
+    panel.append(scoreTable(sorted, youId, hostId, isPrivate, onKick, null));
+  } else {
+    for (const t of [0, 1]) {
+      const score = teams.percent ? `${Math.floor(teams.scores[t] * 100)}%` : String(teams.scores[t]);
+      const head = el('div', { class: 'team-head' }, el('span', { text: `${teams.names[t]}${teams.youTeam === t ? ' (YOU)' : ''}` }), el('span', { text: score }));
+      head.style.setProperty('--team', hexColor(teams.colors[t]));
+      panel.append(head, scoreTable(sorted.filter((r) => r.team === t), youId, hostId, isPrivate, onKick, teams.colors[t]));
+    }
+  }
+  return el('div', { class: `scoreboard${onKick ? ' interactive' : ''}` }, panel);
+}
+
+function scoreTable(rows: RosterEntry[], youId: number, hostId: number, isPrivate: boolean, onKick: ((id: number) => void) | null, teamColor: number | null): HTMLElement {
   const table = el('table');
   table.append(el('tr', {}, el('th', { text: '#' }), el('th', { text: 'Player' }), el('th', { text: 'Score' }), el('th', { text: 'KOs' }), el('th', { text: 'Popped' }), el('th', { text: 'Ping' }), onKick ? el('th') : null));
   rows.forEach((r, i) => {
@@ -240,7 +336,7 @@ export function buildScoreboard(roster: RosterEntry[], youId: number, hostId: nu
       el(
         'td',
         {},
-        el('span', { class: 'swatch', style: { background: hexColor(PLAYER_COLORS[r.color]?.hex ?? 0xffffff) } }),
+        el('span', { class: 'swatch', style: { background: hexColor(teamColor ?? PLAYER_COLORS[r.color]?.hex ?? 0xffffff) } }),
         r.name,
         r.bot ? el('span', { class: 'key', style: 'margin-left:6px;font-size:10px;min-width:0', text: 'BOT' }) : null,
         r.id === hostId && isPrivate ? el('span', { style: 'margin-left:6px', text: '👑', attrs: { title: 'Host' } }) : null,
@@ -253,7 +349,7 @@ export function buildScoreboard(roster: RosterEntry[], youId: number, hostId: nu
     );
     table.append(tr);
   });
-  return el('div', { class: `scoreboard${onKick ? ' interactive' : ''}` }, el('div', { class: 'panel' }, table));
+  return table;
 }
 
 export function buildReplayBanner(victim: string, by: string, distance: number, ko: boolean, onSkip: () => void): HTMLElement {
@@ -273,7 +369,7 @@ export function buildReplayBanner(victim: string, by: string, distance: number, 
   );
 }
 
-export function buildResults(result: MatchResult, roster: Map<number, RosterEntry>, youId: number, secondsLeft: number): HTMLElement {
+export function buildResults(result: MatchResult, roster: Map<number, RosterEntry>, youId: number, secondsLeft: number, teams: TeamView | null = null): HTMLElement {
   const top = result.standings.slice(0, 3);
   const order = [top[1], top[0], top[2]];
   const heights = [110, 150, 80];
@@ -284,7 +380,8 @@ export function buildResults(result: MatchResult, roster: Map<number, RosterEntr
       podium.append(el('div', { class: 'step' }));
       return;
     }
-    const color = hexColor(PLAYER_COLORS[roster.get(s.id)?.color ?? 0]?.hex ?? 0xffffff);
+    const team = roster.get(s.id)?.team ?? -1;
+    const color = hexColor(teams && team >= 0 ? teams.colors[team] : (PLAYER_COLORS[roster.get(s.id)?.color ?? 0]?.hex ?? 0xffffff));
     podium.append(
       el(
         'div',
@@ -298,7 +395,21 @@ export function buildResults(result: MatchResult, roster: Map<number, RosterEntr
   });
   const me = result.standings.find((s) => s.id === youId);
   const winner = result.standings[0];
-  const title = winner?.id === youId ? 'YOU WIN!' : `${winner?.name ?? 'Nobody'} wins!`;
+  let title = winner?.id === youId ? 'YOU WIN!' : `${winner?.name ?? 'Nobody'} wins!`;
+  let teamLine: HTMLElement | null = null;
+  const tr = result.teams;
+  if (tr && teams) {
+    const w = tr.winner;
+    title = w < 0 ? "IT'S A DRAW!" : w === teams.youTeam ? 'YOUR TEAM WINS!' : `${teams.names[w]} TEAM WINS!`;
+    const fmt = (v: number) => (result.mode === 'pump' ? `${v}%` : String(v));
+    teamLine = el(
+      'div',
+      { class: 'team-result', style: 'text-align:center' },
+      el('span', { text: `${teams.names[0]} ${fmt(tr.scores[0])}`, style: { color: hexColor(teams.colors[0]) } }),
+      el('span', { text: '  –  ' }),
+      el('span', { text: `${fmt(tr.scores[1])} ${teams.names[1]}`, style: { color: hexColor(teams.colors[1]) } }),
+    );
+  }
   const stats = el('div', { class: 'stat-grid' });
   const addStat = (k: string, v: string) => stats.append(el('div', { class: 'stat' }, el('div', { class: 'v', text: v }), el('div', { class: 'k', text: k })));
   if (me) {
@@ -326,6 +437,7 @@ export function buildResults(result: MatchResult, roster: Map<number, RosterEntr
       'div',
       { class: 'panel', style: 'min-width:520px' },
       el('h2', { text: title, style: 'text-align:center' }),
+      teamLine,
       podium,
       awards,
       stats,

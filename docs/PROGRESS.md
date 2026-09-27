@@ -103,3 +103,41 @@ Phases follow spec §14. Each phase is committed separately and playable on its 
 - On-screen hints switch between key names and controller button names automatically.
 - Settings: separate trackpad, mouse, and controller sensitivity; invert Y; aim assist; FOV;
   graphics presets (Auto/High/Medium/Low); volume sliders and mute; colorblind team colors.
+
+## Phase 7: Modes and maps ✅
+
+- **Modes** (pick one on the main menu before PLAY, or as host in a private room):
+  - **Knockout**: free-for-all, most knockout points wins.
+  - **Team Knockout**: two teams, team knockout points win.
+  - **Ball**: blast a giant beach ball into the other team's goal. First to 7 goals, or most
+    goals at the end. Every weapon moves the ball: cannon shots and blasts knock it, the Air
+    Horn and Pump Rifle smack it, the Leaf Blower dribbles it, grenades bump it, and running into
+    it pushes it. A glass fence keeps it on the pitch (players pass through it).
+  - **Pump**: stand on your team's two pumps to inflate your giant tube man (more teammates on a
+    pump fill faster). Any enemy on a pump stops it; knock them off. First full giant wins, or
+    the fuller one at the end.
+  - **1v1**: first to 5 knockouts in 3 minutes. From the 1v1 queue on the main menu or a
+    challenge link.
+- **Teams**: automatic balancing (bots move first), no friendly fire from anything (shots,
+  blasts, grabs, stomps, grapples, vacuum), team colors on bodies and name tags (▼ marks
+  teammates), red/blue or colorblind-friendly orange/blue, team score strip under the clock,
+  scoreboard grouped by team, team result on the podium screen. Public team rooms fill to 4v4
+  with bots (5v5 with enough people).
+- **1v1 challenge links**: "1v1 CHALLENGE" makes a private 1v1 room and copies a `/c/CODE` link.
+  You warm up against a bot until the link is opened; the visitor clicks ACCEPT CHALLENGE, the bot
+  leaves, and a fresh 1v1 starts. Rematches start automatically after the results screen.
+- **1v1 queue**: quick play in 1v1 joins whoever is waiting (they're sparring with a bot) or
+  starts a new wait.
+- **Maps**: Sky Motors (dealership), **Top Floor** (rooftop parking garage at sunset with a
+  lower deck, ramps, pillars, and a car lift), **Bounce Castle** (a giant inflatable castle: every
+  landing bounces you, trampoline islands outside the gaps), **Beach Blast** (Ball pitch with
+  goals, nets, and umbrellas), and **Pump Station** (two bases, a contested middle island, and
+  giant tube men on pedestals that grow as their team pumps).
+- Public knockout rooms rotate maps between matches. Hosts pick mode, map, length, bots, and
+  event frequency; Ball and Pump always use their own arenas.
+- Bots play every mode: half of each Ball team plays the ball (gets behind it and shoots toward
+  the goal), the rest fight; in Pump most bots hold their own pumps and one contests the enemy's.
+- `scripts/mode-soak.ts` plays a bot match of every mode and map and prints how it went;
+  `scripts/smoke-modes.mjs` and `scripts/smoke-host.mjs` check the modes, challenge links, and
+  host controls in a real browser.
+
