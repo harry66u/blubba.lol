@@ -110,17 +110,20 @@ export class Audio {
     void this.loadRecorded();
   }
 
-  /** Optional real recordings: sounds/manifest.json maps a kind to a list of files. */
+  /**
+   * Optional real recordings: src/client/public/sounds/manifest.json maps a kind to a list of
+   * files in that folder, e.g. { "fart": ["fart1.ogg", "fart2.ogg"], "fartLong": ["long.ogg"] }.
+   */
   private async loadRecorded(): Promise<void> {
     try {
-      const res = await fetch('sounds/manifest.json', { cache: 'no-cache' });
+      const res = await fetch('/sounds/manifest.json', { cache: 'no-cache' });
       if (!res.ok) return;
       const manifest = (await res.json()) as Partial<Record<SampleKind, string[]>>;
       for (const [kind, files] of Object.entries(manifest) as [SampleKind, string[]][]) {
         const bufs: AudioBuffer[] = [];
         for (const f of files ?? []) {
           try {
-            const data = await (await fetch(`sounds/${f}`)).arrayBuffer();
+            const data = await (await fetch(`/sounds/${f}`)).arrayBuffer();
             bufs.push(await this.ctx!.decodeAudioData(data));
           } catch {
             // Skip files that fail to load.
