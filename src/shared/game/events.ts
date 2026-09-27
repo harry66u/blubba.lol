@@ -1,0 +1,32 @@
+/** Discrete things that happen in a match. Sent to clients as JSON and used for effects. */
+export type GameEvent =
+  | { t: 'shot'; tick: number; id: number; owner: number; w: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; r: number; power: number; cs?: number }
+  | { t: 'boom'; tick: number; id: number; x: number; y: number; z: number; r: number; power: number; owner: number }
+  | { t: 'fizzle'; tick: number; id: number; x: number; y: number; z: number }
+  | {
+      t: 'hit';
+      tick: number;
+      target: number;
+      attacker: number;
+      x: number;
+      y: number;
+      z: number;
+      dx: number;
+      dy: number;
+      dz: number;
+      speed: number;
+      direct: boolean;
+      low: boolean;
+      braced: boolean;
+      infl: number;
+    }
+  | { t: 'shield'; tick: number; target: number; x: number; y: number; z: number }
+  | { t: 'blastjump'; tick: number; id: number }
+  | { t: 'ko'; tick: number; victim: number; killer: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; points: number; tags: string[] }
+  | { t: 'spawn'; tick: number; id: number; x: number; y: number; z: number }
+  | { t: 'move'; tick: number; id: number; kind: 'jump' | 'djump' | 'dash' | 'slide' | 'land' | 'pad' | 'ledge' | 'climb' | 'wall' | 'bounce' | 'tech'; x: number; y: number; z: number; v?: number; long?: boolean }
+  | { t: 'brace'; tick: number; id: number }
+  | { t: 'taunt'; tick: number; id: number; n: number }
+  | { t: 'reload'; tick: number; id: number };
+
+export type GameEventType = GameEvent['t'];

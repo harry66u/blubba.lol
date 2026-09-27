@@ -1,0 +1,285 @@
+import * as THREE from 'three';
+import { BALANCE } from '../../shared/balance';
+import { clear, el, formatTime } from './dom';
+
+interface WorldPopup {
+  el: HTMLElement;
+  pos: THREE.Vector3;
+  life: number;
+  max: number;
+  vy: number;
+  scale: number;
+}
+
+export interface HudState {
+  inflation: number;
+  ammo: number;
+  maxAmmo: number;
+  reloadFrac: number;
+  charge: number;
+  dashCharges: number;
+  dashRechargeFrac: number;
+  braceReady: number;
+  timeLeft: number;
+  phase: string;
+  sub: string;
+  alive: boolean;
+  weaponName: string;
+}
+
+export interface Nametag {
+  el: HTMLElement;
+  pct: HTMLElement;
+  name: HTMLElement;
+}
+
+/** In-match heads-up display. Per-frame values are written straight to DOM nodes. */
+export class Hud {
+  readonly root: HTMLElement;
+  private readonly crosshair: HTMLElement;
+  private readonly chargeArc: SVGCircleElement;
+  private readonly hitmarker: HTMLElement;
+  private readonly pct: HTMLElement;
+  private readonly balloon: HTMLElement;
+  private readonly ammoPips: HTMLElement;
+  private readonly reloadBar: HTMLElement;
+  private readonly reloadFill: HTMLElement;
+  private readonly weaponName: HTMLElement;
+  private readonly dashPips: HTMLElement;
+  private readonly braceWrap: HTMLElement;
+  private readonly braceFill: HTMLElement;
+  private readonly clock: HTMLElement;
+  private readonly sub: HTMLElement;
+  private readonly killfeed: HTMLElement;
+  readonly nametags: HTMLElement;
+  private readonly popups: HTMLElement;
+  private readonly calloutBox: HTMLElement;
+  private readonly respawnBox: HTMLElement;
+  private readonly note: HTMLElement;
+  private readonly damage: HTMLElement;
+  readonly ping: HTMLElement;
+  private readonly worldPopups: WorldPopup[] = [];
+  private calloutTimer = 0;
+  private last: Partial<Record<string, string | number>> = {};
+  private tmp = new THREE.Vector3();
+
+  constructor() {
+    this.root = el('div', { class: 'hud hidden' });
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 64 64');
+    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    bg.setAttribute('cx', '32');
+    bg.setAttribute('cy', '32');
+    bg.setAttribute('r', '20');
+    bg.setAttribute('fill', 'none');
+    bg.setAttribute('stroke', 'rgba(255,255,255,0.45)');
+    bg.setAttribute('stroke-width', '3');
+    this.chargeArc = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    this.chargeArc.setAttribute('cx', '32');
+    this.chargeArc.setAttribute('cy', '32');
+    this.chargeArc.setAttribute('r', '20');
+    this.chargeArc.setAttribute('fill', 'none');
+    this.chargeArc.setAttribute('stroke', '#ffd60a');
+    this.chargeArc.setAttribute('stroke-width', '5');
+    this.chargeArc.setAttribute('stroke-linecap', 'round');
+    this.chargeArc.setAttribute('transform', 'rotate(-90 32 32)');
+    const circ = 2 * Math.PI * 20;
+    this.chargeArc.setAttribute('stroke-dasharray', `${circ}`);
+    this.chargeArc.setAttribute('stroke-dashoffset', `${circ}`);
+    svg.append(bg, this.chargeArc);
+    this.crosshair = el('div', { class: 'crosshair' }, el('div', { class: 'dot' }));
+    this.crosshair.prepend(svg as unknown as HTMLElement);
+    this.hitmarker = el('div', {
+      class: 'hitmarker',
+      html: '<svg viewBox="0 0 40 40"><g stroke="#fff" stroke-width="4" stroke-linecap="round"><line x1="6" y1="6" x2="14" y2="14"/><line x1="34" y1="6" x2="26" y2="14"/><line x1="6" y1="34" x2="14" y2="26"/><line x1="34" y1="34" x2="26" y2="26"/></g></svg>',
+    });
+
+    this.pct = el('div', { class: 'pct', html: '0<small>%</small>' });
+    this.balloon = el('div', { class: 'balloon' });
+    const inflation = el('div', { class: 'inflation' }, this.balloon, el('div', {}, el('div', { class: 'lbl', text: 'INFLATION' }), this.pct));
+
+    this.ammoPips = el('div', { class: 'pips' });
+    this.reloadFill = el('div');
+    this.reloadBar = el('div', { class: 'reload-bar hidden' }, this.reloadFill);
+    this.weaponName = el('div', { class: 'weapon-name', text: 'AIR CANNON' });
+    const ammo = el('div', { class: 'ammo' }, this.weaponName, this.ammoPips, this.reloadBar);
+
+    this.dashPips = el('div', { class: 'pips' });
+    this.braceFill = el('div', { class: 'fill' });
+    this.braceWrap = el('div', { class: 'group hidden' }, el('div', { class: 'pips' }, el('div', { class: 'pip' }, this.braceFill)), el('div', { text: 'BRACE' }));
+    const movement = el('div', { class: 'movement' }, el('div', { class: 'group' }, this.dashPips, el('div', { text: 'DASH' })), this.braceWrap);
+
+    this.clock = el('div', { class: 'clock', text: '4:00' });
+    this.sub = el('div', { class: 'sub' });
+    const timer = el('div', { class: 'timer' }, this.clock, this.sub);
+
+    this.killfeed = el('div', { class: 'killfeed' });
+    this.nametags = el('div', { class: 'nametags' });
+    this.popups = el('div', { class: 'popups' });
+    this.calloutBox = el('div', { class: 'callout' });
+    this.respawnBox = el('div', { class: 'respawn hidden' });
+    this.note = el('div', { class: 'center-note' });
+    this.damage = el('div', { class: 'damage-dir' });
+    this.ping = el('div', { class: 'ping' });
+
+    this.root.append(this.nametags, this.popups, this.damage, this.crosshair, this.hitmarker, inflation, movement, ammo, timer, this.killfeed, this.calloutBox, this.respawnBox, this.note, this.ping);
+  }
+
+  show(v: boolean): void {
+    this.root.classList.toggle('hidden', !v);
+  }
+
+  private setIf(key: string, value: string | number, apply: () => void): void {
+    if (this.last[key] === value) return;
+    this.last[key] = value;
+    apply();
+  }
+
+  update(s: HudState, dt: number): void {
+    const pct = Math.round(s.inflation * 100);
+    this.setIf('pct', pct, () => {
+      this.pct.innerHTML = `${pct}<small>%</small>`;
+      const hue = 120 - Math.min(1, s.inflation) * 120;
+      this.pct.style.color = pct === 0 ? '#ffffff' : `hsl(${hue}, 95%, ${pct >= 100 ? 60 : 70}%)`;
+      this.balloon.style.transform = `scale(${0.8 + s.inflation * 0.7})`;
+      this.balloon.style.background = `radial-gradient(circle at 35% 30%, #fff 0 8%, transparent 9%), hsl(${hue}, 90%, 60%)`;
+    });
+    this.setIf('ammo', `${s.ammo}/${s.maxAmmo}`, () => {
+      clear(this.ammoPips);
+      for (let i = 0; i < s.maxAmmo; i++) this.ammoPips.append(el('div', { class: `pip${i < s.ammo ? '' : ' empty'}` }));
+    });
+    this.reloadBar.classList.toggle('hidden', s.reloadFrac <= 0);
+    if (s.reloadFrac > 0) this.reloadFill.style.width = `${Math.round(s.reloadFrac * 100)}%`;
+    this.setIf('weapon', s.weaponName, () => (this.weaponName.textContent = s.weaponName));
+    const dashKey = `${s.dashCharges}|${Math.round(s.dashRechargeFrac * 20)}`;
+    this.setIf('dash', dashKey, () => {
+      clear(this.dashPips);
+      for (let i = 0; i < BALANCE.dash.charges; i++) {
+        const full = i < s.dashCharges;
+        const fill = el('div', { class: 'fill', style: { height: full ? '100%' : i === s.dashCharges ? `${Math.round(s.dashRechargeFrac * 100)}%` : '0%' } });
+        this.dashPips.append(el('div', { class: 'pip' }, fill));
+      }
+    });
+    this.braceFill.style.height = `${Math.round(s.braceReady * 100)}%`;
+    const circ = 2 * Math.PI * 20;
+    this.chargeArc.setAttribute('stroke-dashoffset', `${circ * (1 - s.charge)}`);
+    this.chargeArc.setAttribute('stroke', s.charge >= 1 ? '#ff3b8a' : '#ffd60a');
+    this.crosshair.style.transform = `scale(${1 + s.charge * 0.15})`;
+    const clockText = s.phase === 'waiting' ? '--:--' : formatTime(s.timeLeft);
+    this.setIf('clock', clockText, () => (this.clock.textContent = clockText));
+    this.clock.classList.toggle('urgent', s.phase === 'playing' && s.timeLeft <= 30);
+    this.setIf('sub', s.sub, () => (this.sub.textContent = s.sub));
+    this.crosshair.classList.toggle('hidden', !s.alive);
+
+    if (this.calloutTimer > 0) {
+      this.calloutTimer -= dt;
+      if (this.calloutTimer <= 0) clear(this.calloutBox);
+    }
+  }
+
+  showBrace(v: boolean): void {
+    this.braceWrap.classList.toggle('hidden', !v);
+  }
+
+  hitMarker(): void {
+    this.hitmarker.classList.remove('show');
+    void this.hitmarker.offsetWidth;
+    this.hitmarker.classList.add('show');
+    this.crosshair.classList.add('hit');
+    window.setTimeout(() => this.crosshair.classList.remove('hit'), 90);
+  }
+
+  addKill(html: string, me: boolean): void {
+    const item = el('div', { class: `item${me ? ' me' : ''}`, html });
+    this.killfeed.prepend(item);
+    while (this.killfeed.children.length > 5) this.killfeed.lastElementChild?.remove();
+    window.setTimeout(() => item.remove(), 6000);
+  }
+
+  callout(main: string, sub = '', seconds = 2.2, color?: string): void {
+    clear(this.calloutBox);
+    const m = el('div', { class: 'main', text: main });
+    if (color) m.style.color = color;
+    this.calloutBox.append(m);
+    if (sub) this.calloutBox.append(el('div', { class: 'sub', text: sub }));
+    this.calloutTimer = seconds;
+  }
+
+  setRespawn(big: string | null, small = ''): void {
+    this.respawnBox.classList.toggle('hidden', !big);
+    if (big) {
+      const key = `${big}|${small}`;
+      this.setIf('respawn', key, () => {
+        clear(this.respawnBox);
+        this.respawnBox.append(el('div', { class: 'big', text: big }), el('div', { class: 'small', text: small }));
+      });
+    }
+  }
+
+  setNote(text: string): void {
+    this.setIf('note', text, () => (this.note.textContent = text));
+  }
+
+  /** Shows a red arc pointing toward where a hit came from (angle 0 = straight ahead). */
+  damageFrom(angle: number): void {
+    const arc = el('div', { class: 'arc' });
+    this.damage.append(arc);
+    this.damage.style.transform = '';
+    arc.style.transformOrigin = '50% 130px';
+    arc.style.transform = `rotate(${angle}rad)`;
+    arc.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 900, easing: 'ease-out' }).onfinish = () => arc.remove();
+  }
+
+  toast(text: string, ms = 2500): void {
+    const t = el('div', { class: 'toast', text });
+    this.root.append(t);
+    window.setTimeout(() => t.remove(), ms);
+  }
+
+  // --- World-space popups (comic sound-effect text) -----------------------------------------
+
+  popup(pos: THREE.Vector3, text: string, color = '#ffffff', scale = 1, life = 1): void {
+    const e = el('div', { class: 'popup', text });
+    e.style.color = color;
+    this.popups.append(e);
+    this.worldPopups.push({ el: e, pos: pos.clone(), life, max: life, vy: 1.4, scale });
+    if (this.worldPopups.length > 30) {
+      const old = this.worldPopups.shift();
+      old?.el.remove();
+    }
+  }
+
+  updatePopups(camera: THREE.Camera, dt: number): void {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    for (let i = this.worldPopups.length - 1; i >= 0; i--) {
+      const p = this.worldPopups[i];
+      p.life -= dt;
+      p.pos.y += p.vy * dt;
+      if (p.life <= 0) {
+        p.el.remove();
+        this.worldPopups.splice(i, 1);
+        continue;
+      }
+      const v = this.tmp.copy(p.pos).project(camera);
+      if (v.z > 1) {
+        p.el.style.opacity = '0';
+        continue;
+      }
+      const t = 1 - p.life / p.max;
+      const pop = t < 0.15 ? 0.4 + (t / 0.15) * 0.8 : 1.2 - Math.min(0.2, (t - 0.15) * 0.5);
+      const x = (v.x * 0.5 + 0.5) * w;
+      const y = (-v.y * 0.5 + 0.5) * h;
+      p.el.style.opacity = String(Math.min(1, p.life / (p.max * 0.35)));
+      p.el.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px) scale(${pop * p.scale}) rotate(${Math.sin(p.max * 7) * 8}deg)`;
+    }
+  }
+
+  createNametag(name: string, bot: boolean): Nametag {
+    const pct = el('div', { class: 'pct', text: '0%' });
+    const nm = el('div', { class: 'nm' }, name, bot ? el('span', { class: 'bot', text: 'BOT' }) : null);
+    const tag = el('div', { class: 'nametag' }, pct, nm);
+    this.nametags.append(tag);
+    return { el: tag, pct, name: nm };
+  }
+}
