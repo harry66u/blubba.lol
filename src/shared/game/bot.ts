@@ -77,6 +77,8 @@ export class BotBrain {
   private escapeAt = -1;
   /** How long we've been off the stage (bots react late, like people do). */
   private offStageTime = 0;
+  /** What this bot will try while recovering, decided once per trip off the stage. */
+  private recovery = { grapple: false, wall: false, steer: 1, dash: false };
   private bracedFor = new Set<number>();
 
   private press(key: 'jump' | 'dash' | 'brace' | 'grab' | 'grapple' | 'util1' | 'util2'): void {
@@ -129,8 +131,17 @@ export class BotBrain {
       if (rnd() < 0.05) this.press('jump');
       return { ...f };
     }
+    if (offStage && this.offStageTime === 0) {
+      // Like people, bots don't always remember every way back: pick a plan once per launch.
+      this.recovery = {
+        grapple: rnd() < 0.15 + this.skill * 0.5,
+        wall: rnd() < 0.2 + this.skill * 0.5,
+        steer: 0.35 + this.skill * 0.65,
+        dash: rnd() < 0.4 + this.skill * 0.5,
+      };
+    }
     this.offStageTime = offStage ? this.offStageTime + sim.dt : 0;
-    const reaction = 0.55 - this.skill * 0.35;
+    const reaction = 0.7 - this.skill * 0.4;
     if (offStage && this.offStageTime < reaction) {
       // Still flailing in surprise.
       f.buttons = 0;
@@ -143,20 +154,20 @@ export class BotBrain {
       this.aimYaw = yawHome;
       f.yaw = yawHome;
       f.pitch = 0;
-      f.moveZ = 1;
+      f.moveZ = this.recovery.steer;
       f.buttons = 0;
       const recoverSkill = 0.4 + this.skill * 0.6;
       const wallSlot = me.loadout.utils.indexOf('inflatableWall');
       const wallCool = wallSlot === 0 ? s.u1Cool : s.u2Cool;
-      if (wallSlot >= 0 && wallCool <= 0 && s.vy < -4 && rnd() < 0.04 * recoverSkill) {
+      if (this.recovery.wall && wallSlot >= 0 && wallCool <= 0 && s.vy < -4 && rnd() < 0.04 * recoverSkill) {
         this.press(wallSlot === 0 ? 'util1' : 'util2');
-      } else if (sim.features.grapple && s.grappleCool <= 0 && rnd() < 0.02 * recoverSkill) {
+      } else if (this.recovery.grapple && sim.features.grapple && s.grappleCool <= 0 && rnd() < 0.02 * recoverSkill) {
         // Aim at the near edge of the main deck and zip back.
         const dy = home.y + 0.5 - (s.py + eyeHeight(s));
         f.pitch = Math.atan2(dy, Math.hypot(home.x - s.px, home.z - s.pz));
         this.press('grapple');
-      } else if (s.vy < -3 && s.jumpsUsed < 2 && s.launchTimer <= 0 && rnd() < 0.12 * recoverSkill) this.press('jump');
-      else if (s.vy < -5 && s.dashCharges > 0 && rnd() < 0.08 * recoverSkill) this.press('dash');
+      } else if (s.vy < -3 && s.jumpsUsed < 2 && s.launchTimer <= 0 && rnd() < 0.05 * recoverSkill) this.press('jump');
+      else if (this.recovery.dash && s.vy < -5 && s.dashCharges > 0 && rnd() < 0.05 * recoverSkill) this.press('dash');
       if (rnd() < 0.08 * this.skill) this.press('grab'); // try to catch a ledge
       return { ...f };
     }

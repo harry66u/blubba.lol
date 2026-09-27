@@ -73,11 +73,13 @@ export const BALANCE = {
   },
 
   knockback: {
-    /** Launch speed = power * (base + growth * inflation) / mass. */
-    base: 6.2,
-    growth: 9.2,
+    /** Launch speed = power * (base + growth * inflation^growthExp) / mass. */
+    base: 7.6,
+    growth: 16,
+    /** >1 keeps early hits modest and makes high inflation ramp up sharply (tuned with scripts/knockback-sweep.ts). */
+    growthExp: 3,
     /** Near misses (splash) launch this much weaker than direct hits. */
-    splashMult: 0.55,
+    splashMult: 0.65,
     /** Splash power at the very edge of the blast radius relative to the center. */
     splashEdge: 0.3,
     /** How much the projectile's travel direction bends the launch (0 = impact point only). */
@@ -90,7 +92,7 @@ export const BALANCE = {
     hitstunMin: 0.15,
     hitstunMax: 1.0,
     /** Air steering while launched (DI). */
-    launchSteerAccel: 10,
+    launchSteerAccel: 7,
     launchDrag: 0.55,
     wallBounce: 0.55,
     wallBounceMinSpeed: 8,
@@ -125,7 +127,7 @@ export const BALANCE = {
       projGravity: 0,
       blastRadius: 2.6,
       /** Inflation added by a full-power direct hit. */
-      inflation: 0.14,
+      inflation: 0.15,
       knockback: 1.0,
       range: 0,
       cone: 0,

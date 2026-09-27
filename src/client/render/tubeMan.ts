@@ -386,7 +386,17 @@ export class TubeMan {
       else if (this.tauntStyle === 'noodle') flop = env;
       else if (this.tauntStyle === 'wave') wave = env;
     }
+    // Danger (0..1) from 60% inflation up: more wobble, a straining tremble, a red warning pulse.
+    const danger = Math.max(0, Math.min(1, (p.inflation - 0.6) / 0.4));
     this.rig.scale.setScalar(s);
+    if (danger > 0) {
+      // Straining at the seams: a fast shiver that gets harder near max.
+      const shiver = danger * danger * 0.035 * s;
+      this.rig.position.set(Math.sin(t * 47 + this.seed) * shiver, 0, Math.cos(t * 53 + this.seed) * shiver);
+      this.rig.scale.set(s * (1 + Math.sin(t * 31) * 0.02 * danger), s, s * (1 + Math.cos(t * 29) * 0.02 * danger));
+    } else {
+      this.rig.position.set(0, 0, 0);
+    }
     this.group.rotation.y = p.yaw + Math.PI + tauntSpin;
 
     // Velocity in the character's local frame (+z forward, +x left).
@@ -430,7 +440,7 @@ export class TubeMan {
     // --- Body spine. ---
     const lenScale = 1 + this.squash;
     const radScale = 1 / Math.sqrt(Math.max(0.6, lenScale));
-    const wobbleAmp = (p.bracing ? 0.02 : 0.09 + Math.min(0.12, Math.hypot(lvx, lvz) * 0.01)) + flop * 0.25;
+    const wobbleAmp = (p.bracing ? 0.02 : 0.09 + Math.min(0.12, Math.hypot(lvx, lvz) * 0.01)) + flop * 0.25 + p.inflation * p.inflation * 0.12;
     const spine = this.body.spine;
     const radii = this.body.radii;
     const n = BODY_RINGS;
@@ -590,6 +600,11 @@ export class TubeMan {
     if (p.nemesis) {
       glow += 0.45 + Math.sin(t * 8) * 0.25;
       this.bodyMat.emissive.setHex(0xff2040);
+    } else if (danger > 0) {
+      // Warning pulse that speeds up as they get close to popping.
+      const pulse = 0.5 + 0.5 * Math.sin(t * (5 + danger * 9));
+      glow += danger * (0.25 + 0.45 * pulse);
+      this.bodyMat.emissive.setHex(0xff2a2a);
     } else {
       this.bodyMat.emissive.copy(this.color);
     }

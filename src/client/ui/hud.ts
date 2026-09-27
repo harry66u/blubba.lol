@@ -252,6 +252,12 @@ export class Hud {
 
   update(s: HudState, dt: number): void {
     const pct = Math.round(s.inflation * 100);
+    // Near max inflation: the number pulses and the screen edges glow red.
+    const danger = s.alive ? Math.max(0, Math.min(1, (s.inflation - 0.6) / 0.4)) : 0;
+    this.setIf('danger', Math.round(danger * 4), () => {
+      this.root.classList.toggle('danger', danger > 0);
+      this.root.style.setProperty('--danger', danger.toFixed(2));
+    });
     this.setIf('pct', pct, () => {
       this.pct.innerHTML = `${pct}<small>%</small>`;
       const hue = 120 - Math.min(1, s.inflation) * 120;

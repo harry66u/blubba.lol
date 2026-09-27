@@ -1577,6 +1577,7 @@ export class ClientGame {
       rv.tag.pct.textContent = text;
       const hue = 120 - Math.min(1, c.inflation) * 120;
       rv.tag.pct.style.color = pct === 0 ? '#ffffff' : `hsl(${hue}, 95%, 68%)`;
+      rv.tag.el.classList.toggle('danger', c.inflation >= 0.75);
     }
   }
 

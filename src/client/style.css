@@ -1907,3 +1907,54 @@ body {
   max-height: 96vh;
   overflow: auto;
 }
+
+/* --- Inflation danger ------------------------------------------------------------------- */
+.hud.danger .inflation .pct {
+  animation: danger-pulse calc(0.9s - var(--danger) * 0.5s) ease-in-out infinite;
+}
+.hud.danger .inflation .balloon {
+  animation: danger-strain 0.12s linear infinite;
+}
+.hud.danger::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 calc(60px + var(--danger) * 90px) calc(var(--danger) * 30px) rgba(255, 40, 60, calc(0.25 + var(--danger) * 0.3));
+  animation: danger-edge calc(0.9s - var(--danger) * 0.5s) ease-in-out infinite;
+}
+@keyframes danger-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.12);
+  }
+}
+@keyframes danger-strain {
+  0% {
+    translate: 0 0;
+  }
+  25% {
+    translate: 1px -1px;
+  }
+  50% {
+    translate: -1px 1px;
+  }
+  75% {
+    translate: 1px 1px;
+  }
+}
+@keyframes danger-edge {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.nametag.danger .pct {
+  animation: danger-pulse 0.5s ease-in-out infinite;
+}

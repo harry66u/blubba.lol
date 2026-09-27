@@ -847,7 +847,7 @@ export class GameSim {
     }
     s.inflation = Math.min(BALANCE.inflation.max, s.inflation + inflationAdd * (braced ? Br.inflationMult : 1));
     const mass = inflationMass(s.inflation);
-    const speed = (power * (K.base + K.growth * s.inflation)) / mass * (braced ? Br.knockbackMult : 1);
+    const speed = (power * (K.base + K.growth * Math.pow(s.inflation, K.growthExp))) / mass * (braced ? Br.knockbackMult : 1);
 
     // Normalize and guarantee some lift so targets leave the ground.
     let l = Math.hypot(dx, dy, dz) || 1;
