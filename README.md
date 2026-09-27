@@ -22,6 +22,9 @@ Open http://localhost:8080, pick a mode (Knockout, Team Knockout, Ball, Pump, 1v
 `http://host/r/ABCDE`). **1v1 challenge** copies a `http://host/c/ABCDE` link: whoever opens it
 plays you one-on-one.
 
+Controls are listed under **How to play** in the menu and every ability shows its key on the
+HUD. Press **V** to switch between first and third person (the choice is remembered).
+
 Progress (XP, levels, coins, unlocks, stats) is saved for guests automatically. An optional
 account (name + password, no email) keeps it across computers, unlocks **Ranked 1v1**, and lets
 you spend coins in the **Locker** (cosmetics only). Accounts and progress live in SQLite; set
@@ -47,6 +50,10 @@ npx tsx scripts/mode-soak.ts                    # a bot match of every mode and 
 node scripts/smoke-modes.mjs                    # every mode + the challenge-link flow in a browser
 BUBBA_DEBUG=1 npm start & node scripts/smoke-host.mjs   # host controls and the team results screen
 BUBBA_DEBUG=1 npm start & node scripts/smoke-accounts.mjs  # sign-up, store, rewards, chat, ranked
+node scripts/smoke-controls.mjs                 # control hints, tooltips, third-person camera
+npx tsx scripts/knockback-sweep.ts              # launch distance per hit and hits-to-knockout
+npx tsx scripts/chaos-report.ts                 # how often events, chains, crown, revenge happen
+QUALITY=medium node scripts/lookdev.mjs         # screenshot of the ?lookdev tube man lineup
 npx tsx scripts/reports.ts                      # latest player reports (for moderators)
 ```
 
@@ -83,8 +90,21 @@ src/
   and receive 30 Hz binary snapshots.
 - **Client prediction + reconciliation** for your own movement and weapon, so controls feel instant
   on school Wi-Fi; everyone else is interpolated about 70-120 ms in the past.
-- **No asset downloads.** All geometry is procedural and all sounds are synthesized with Web Audio,
-  so the whole game is one ~230 KB (gzipped) script. The server precompresses it with Brotli.
+- **No asset downloads.** All geometry is procedural and all sounds are generated in the browser
+  (body sounds from physical models, rendered once into sample variants), so the whole game is
+  one small script. The server precompresses it with Brotli.
+
+## Custom sounds
+
+To use real recordings instead of the generated body sounds, put audio files (OGG, MP3, WAV or
+M4A) in `src/client/public/sounds/` with a `manifest.json` listing them per sound, then rebuild:
+
+```json
+{ "fart": ["fart1.ogg", "fart2.ogg"], "fartLong": ["fart-long.ogg"], "burp": ["burp.ogg"],
+  "groan": ["oof.ogg"], "squeal": ["deflate.ogg"], "squeak": ["squeak.ogg"], "impact": ["hit.ogg"] }
+```
+
+Any sound left out keeps its generated version. Each play picks a random file and pitch.
 
 ## Deploying
 

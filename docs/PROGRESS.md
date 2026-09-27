@@ -45,7 +45,7 @@ Phases follow spec §14. Each phase is committed separately and playable on its 
   - **Pump Rifle**: long-range, lag-compensated hitscan with a tiny hitbox and extra inflation.
 - Mods (up to two, each a trade-off): Wide Nozzle, Big Tank, Charge Valve, Quick Valve, Long
   Barrel. Charge/Quick Valve and Wide Nozzle/Long Barrel are mutually exclusive.
-- Utilities (pick two, C and V): Bounce Pad, Air Grenade, Inflatable Wall (becomes a raft under
+- Utilities (pick two, C and G; V until the fix pass): Bounce Pad, Air Grenade, Inflatable Wall (becomes a raft under
   you when thrown while falling), Vacuum Grenade.
 - Pickups: Soda Cans refill dash charges (with a burp); a rare Pin pops anyone at 100% inflation.
 - Loadout screen from the main menu and pause menu; changes apply on your next respawn.
@@ -178,4 +178,53 @@ Phases follow spec §14. Each phase is committed separately and playable on its 
   file (default `data/bubba.db`; the Docker image uses a `/data` volume).
 - `scripts/smoke-accounts.mjs` runs the whole flow in a real browser: guest locker, sign-up,
   buying, match rewards, quick chat, and a ranked match that ends in a forfeit.
+
+## Fix pass (BUBBA_FIX_SPEC.md) ✅
+
+Worked through the fix spec's §8 order. Each step is its own commit.
+
+1. **Knockback and inflation (§4).** Launch speed now grows with inflation *cubed*
+   (`base 7.6 + growth 16 × inflation³`), so the first hits stay modest and launches ramp up
+   sharply past ~60%. From rest, full-charge Air Cannon hits travel about 2.4, 3.0, 4.4, 7.4,
+   14, 29 and 67 m. A fresh player at the middle of Sky Motors goes off on about the 5th clean
+   hit; near an edge at high inflation one hit sends them off. Near misses hit harder (splash
+   0.65), air steering is weaker, and bots no longer recover perfectly. Every knob is in
+   `src/shared/balance.ts` (`knockback`, `weapons.*.inflation`, `inflation`);
+   `npx tsx scripts/knockback-sweep.ts` prints distances and hits-to-knockout for any setting.
+   Above 60% inflation tube men wobble harder, shiver and pulse red faster as they near max; your
+   own % pulses and the screen edges glow red; name tags pulse from 75%.
+2. **Hit impact (§3).** Hit-stop lives in the shared simulation: the target freezes 45-90 ms
+   (harder hits longer) and then the knockback plays out, identically on the server and in
+   prediction. The shooter's screen shakes in proportion to the hit and their gun holds still for
+   the same beat. Bigger star-burst muzzle flashes for every weapon; an impact burst (flash, ring,
+   air puffs, confetti along the launch) on the target, who squashes and flashes white; a
+   separate impact sound (thump + rubbery bwomp + slap).
+3. **Chaos (§7a-b).** These already existed (Phase 4). `npx tsx scripts/chaos-report.ts` measures
+   a normal 6-bot, 4-minute Knockout match at about 3-4 random events, ~13 chain-reaction hits,
+   ~5 crown changes, ~4 crown and ~4 revenge knockouts, and the final-30 collapse every match.
+   The first event now comes 15-30 s in, and chain hits get their own ring, callout and
+   announcer line.
+4. **Crown, revenge, callouts (§7c-d).** Already in (Phase 4); verified in the report above.
+5. **Look (§1) and sound (§2).** Fixed inside-out tube geometry (it flattened all shading).
+   Glossy vinyl material with reflections, clear coat and a rim light; rounder head that swells
+   out of the tube, bigger face, shorter arms; more squash and stretch and an idle bounce;
+   ambient occlusion (GTAO) on Medium and High; softer, lower-threshold bloom so players,
+   balloons and event banners glow. `?lookdev` shows a lineup for judging it. Body sounds (fart,
+   rare long fart, burp, groan, deflate squeal, squeak, hit impact) are now rendered from
+   physical source-filter models into several sample variants each and played with random pitch;
+   real recordings can replace any of them (see README, "Custom sounds").
+6. **Third-person camera (§6).** V toggles an over-the-shoulder chase camera (controller:
+   right-stick click); Utility 2 moved from V to G. The camera pulls in when walls or the floor
+   are in the way, and your shot aims from your eye at whatever is under the reticle. The choice
+   is saved in settings (also in Settings → Controls).
+7. **Control hints (§5).** Every ability shows its current key or controller button on the HUD
+   (dash, brace, grab, grapple, reload, camera, both utilities), and new players get one tooltip
+   at a time for the things they haven't tried yet; progress is remembered.
+8. **Utilities and final 30 (§7e-f).** Already in (Phases 3-4): Air Grenade, Bounce Pad,
+   Inflatable Wall, Vacuum Grenade; the map collapses in the last 30 seconds and knockouts count
+   double.
+
+Checks: `npm test` (86 tests, including hit-stop, knockback targets, chase camera collision and
+reticle aim, and sound model pitch/length checks), `node scripts/smoke-controls.mjs` (hints,
+tooltips, third person, persistence), `node scripts/lookdev.mjs`.
 

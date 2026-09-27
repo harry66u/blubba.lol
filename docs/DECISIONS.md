@@ -167,3 +167,42 @@ The spec leaves the tech stack and many details open. This file records what was
 | Sound packs (kazoo, duck, trumpet, slide whistle, boing) | "BZZ-BZZ!", "QUACK!", "TA-DAA!", "WHOOEEE!", "BOING!" popups on taunts and knockouts |
 | Goal horn and crowd | Big GOAL! callout in the team color plus confetti |
 | Brace clang | Metallic flash + "BRACED!" popup |
+
+## Fix pass (BUBBA_FIX_SPEC.md)
+
+- **Knockback curve.** Rather than a bigger flat multiplier (which makes early hits fling people
+  too and shortens every life), knockback grows with inflation cubed. That keeps the "about five
+  clean hits" target while making high inflation clearly lethal near an edge. The inflation cap
+  stays at 100% with 15% per full Air Cannon hit.
+- **Hit-stop is in the simulation, not just the renderer.** The target's velocity is stored and
+  released after the freeze inside the shared movement step, so the server, the victim's
+  prediction and everyone's interpolation agree. The *shooter* is not frozen in the simulation
+  (that would steal control of your own character on every hit you land); instead their gun and
+  screen get the beat: the weapon holds still for the same time and the camera shakes.
+- **Chaos systems were already built.** The fix spec lists random events, chain reactions, crown,
+  revenge, callouts, Air Grenade, Bounce Pad and the final-30 collapse as missing; they shipped in
+  Phases 3-4. This pass measured them (`scripts/chaos-report.ts`) and made them easier to notice.
+- **Sounds are modelled, with a drop-in for recordings.** The build has no licensed sound
+  library to pull real recordings from, so each body sound is rendered from a physical model
+  (a buzzing lip or glottal pulse train through body resonances, plus air noise) into several
+  sample variants when audio starts, then played back at random pitch like a sample bank. Any of
+  them can be replaced with real files via `src/client/public/sounds/manifest.json` without code
+  changes.
+- **Third-person aim.** The reticle stays centered and the character turns to face it. Because
+  the camera sits over your shoulder, shots don't leave from the camera: each input frame casts
+  the camera's center ray into the world, finds what it hits (map or player), and sends the
+  yaw/pitch from your eye to that point, so the server needs no changes and shots land under the
+  reticle. Movement stays relative to the camera. Looking up, the camera swings down only 30% as
+  much as the view so it doesn't end up on the floor.
+- **Key change:** the spec's original layout had Utility 2 on V; the fix spec asks for V as the
+  camera toggle, so Utility 2 moved to G (still rebindable). Controllers toggle the camera with
+  a right-stick click.
+- **Control hints:** always-visible key labels next to each ability (they follow rebinding and
+  switch to controller buttons), plus first-use tooltips shown one at a time, each until the
+  action is used or it has been shown three times (stored in the browser).
+- **Performance:** ambient occlusion and clear coat are on Medium and High only (AO renders at
+  half resolution); Low keeps the old cheap path. Auto quality starts at Medium and lowers the
+  render resolution when frames run slow; on a machine that still struggles, Low turns all of
+  it off. Not yet measured on real laptop GPUs (the build environment only has a software
+  renderer).
+
