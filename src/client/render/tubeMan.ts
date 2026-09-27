@@ -76,8 +76,12 @@ export function defaultPose(): TubeManPose {
 const BODY_LEN = 1.72;
 const BODY_R = 0.36;
 const BASE_H = 0.24;
-const ARM_LEN = 1.2;
-const ARM_R = 0.11;
+/** A little self-glow so saturated colors catch the bloom. */
+const BASE_GLOW = 0.1;
+/** The head swells out of the tube (rounder, friendlier silhouette). */
+const HEAD_R = BODY_R * 1.3;
+const ARM_LEN = 0.95;
+const ARM_R = 0.125;
 const BODY_RINGS = 24;
 const ARM_RINGS = 11;
 
@@ -145,15 +149,15 @@ export function patternTexture(p: Pattern): THREE.Texture | null {
 }
 
 /** Adds a soft candy-colored rim light (fresnel glow) to a standard material. */
-export function addRim(mat: THREE.MeshStandardMaterial, strength = 0.35): void {
+export function addRim(mat: THREE.MeshStandardMaterial, strength = 0.55): void {
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.rimStrength = { value: strength };
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', '#include <common>\nuniform float rimStrength;')
       .replace(
         '#include <opaque_fragment>',
-        `float rimF = pow(1.0 - saturate(dot(normalize(normal), normalize(vViewPosition))), 3.0);
-        outgoingLight += (diffuseColor.rgb * 0.6 + vec3(0.4)) * rimF * rimStrength;
+        `float rimF = pow(1.0 - saturate(dot(normalize(normal), normalize(vViewPosition))), 2.6);
+        outgoingLight += (diffuseColor.rgb * 0.5 + vec3(0.5)) * rimF * rimStrength;
         #include <opaque_fragment>`,
       );
   };
@@ -229,14 +233,24 @@ export class TubeMan {
   constructor(colorHex: number, opts: { physical?: boolean; seed?: number; pattern?: Pattern; look?: Partial<Look> } = {}) {
     this.seed = opts.seed ?? Math.random() * 100;
     this.look = { ...DEFAULT_LOOK, ...(opts.pattern ? { pattern: opts.pattern } : {}), ...opts.look };
-    const matOpts = { color: colorHex, roughness: 0.3, metalness: 0.0, emissive: new THREE.Color(colorHex), emissiveIntensity: 0.0, map: patternTexture(this.look.pattern as Pattern) };
+    // Glossy vinyl: low roughness, strong environment reflections, a clear coat when the GPU can
+    // afford it, and a rim light so the silhouette pops.
+    const matOpts = {
+      color: colorHex,
+      roughness: 0.2,
+      metalness: 0.0,
+      emissive: new THREE.Color(colorHex),
+      emissiveIntensity: BASE_GLOW,
+      envMapIntensity: 2.2,
+      map: patternTexture(this.look.pattern as Pattern),
+    };
     this.bodyMat = opts.physical
-      ? new THREE.MeshPhysicalMaterial({ ...matOpts, clearcoat: 0.7, clearcoatRoughness: 0.2 })
+      ? new THREE.MeshPhysicalMaterial({ ...matOpts, clearcoat: 0.9, clearcoatRoughness: 0.08 })
       : new THREE.MeshStandardMaterial(matOpts);
     addRim(this.bodyMat);
     this.color.set(colorHex);
 
-    this.body = new FlexTube(BODY_RINGS, 18, this.bodyMat);
+    this.body = new FlexTube(BODY_RINGS, 24, this.bodyMat);
     this.arms = [new FlexTube(ARM_RINGS, 9, this.bodyMat), new FlexTube(ARM_RINGS, 9, this.bodyMat)];
     this.body.mesh.castShadow = true;
     for (const a of this.arms) a.mesh.castShadow = true;
@@ -272,6 +286,9 @@ export class TubeMan {
     this.faceExtras = buildFaceExtras(this.look.face);
     this.face.add(this.faceExtras);
     this.applyFaceBase();
+    // Bigger, friendlier face and hats sized for the rounder head.
+    this.face.scale.setScalar(1.3);
+    this.hair.scale.setScalar(HEAD_R / BODY_R);
 
     this.bubble = new THREE.Mesh(sharedGeo.bubble, sharedMat.bubble);
     this.bubble.visible = false;
@@ -441,10 +458,13 @@ export class TubeMan {
     this.leanZ += this.leanVZ * dt;
 
     // Squash on landing, stretch when rising fast.
-    if (p.onGround && this.lastVy < -6) this.squashV -= Math.min(6, -this.lastVy * 0.35);
+    if (p.onGround && this.lastVy < -5) this.squashV -= Math.min(8, -this.lastVy * 0.5);
     this.lastVy = p.vy;
-    const squashTarget = p.bracing ? -0.22 : p.onGround ? 0 : Math.max(-0.1, Math.min(0.15, p.vy * 0.012));
-    this.squashV += (120 * (squashTarget - this.squash) - 9 * this.squashV) * dt;
+    // Idle: a slow, bouncy breathing so nobody ever stands dead still.
+    const speedH = Math.hypot(lvx, lvz);
+    const idle = p.onGround && speedH < 1.5 ? Math.sin(t * 3.4 + this.seed) * 0.05 : 0;
+    const squashTarget = p.bracing ? -0.22 : p.onGround ? idle : Math.max(-0.12, Math.min(0.22, p.vy * 0.02));
+    this.squashV += (95 * (squashTarget - this.squash) - 6 * this.squashV) * dt;
     this.squash += this.squashV * dt;
 
     // Tumble while launched.
@@ -463,15 +483,19 @@ export class TubeMan {
     for (let i = 0; i < n; i++) {
       let u: number;
       let r: number;
+      const capU = 1 - HEAD_R / BODY_LEN;
       if (i < capStart) {
-        u = (i / capStart) * (1 - BODY_R / BODY_LEN);
-        // Slight flare at the bottom where the tube meets the blower.
+        u = (i / capStart) * capU;
+        // Slight flare at the bottom where the tube meets the blower, and the head swelling out
+        // toward the top.
         const flare = 1 + 0.25 * Math.max(0, 1 - u * 6);
-        r = BODY_R * flare;
+        const k = Math.min(1, Math.max(0, (u - 0.42) / (capU - 0.42)));
+        const swell = k * k * (3 - 2 * k);
+        r = BODY_R * flare * (1 + (HEAD_R / BODY_R - 1) * swell);
       } else {
         const a = ((i - capStart) / (n - 1 - capStart)) * (Math.PI / 2);
-        u = 1 - BODY_R / BODY_LEN + (Math.sin(a) * BODY_R) / BODY_LEN;
-        r = BODY_R * Math.cos(a);
+        u = capU + (Math.sin(a) * HEAD_R) / BODY_LEN;
+        r = HEAD_R * Math.cos(a);
       }
       const sArc = u * BODY_LEN * lenScale;
       const bend = u * u;
@@ -610,7 +634,7 @@ export class TubeMan {
     }
 
     // Glow while charging, flash while braced; the crown wearer glows gold, your nemesis red.
-    let glow = p.charge * 0.55 + (p.bracing ? 0.6 : 0);
+    let glow = BASE_GLOW + p.charge * 0.55 + (p.bracing ? 0.6 : 0);
     if (p.crowned) glow += 0.35 + Math.sin(t * 5) * 0.15;
     if (p.nemesis) {
       glow += 0.45 + Math.sin(t * 8) * 0.25;
@@ -639,7 +663,7 @@ export class TubeMan {
 
     // Weapon held out in front of the chest, pointing where the player aims.
     if (this.gun) {
-      const gi = Math.round(n * 0.5);
+      const gi = Math.round(n * 0.4);
       const gr = radii[gi] + 0.12;
       this.gunMount.position.set(spine[gi * 3] + N[gi * 3] * gr, spine[gi * 3 + 1] + N[gi * 3 + 1] * gr, spine[gi * 3 + 2] + N[gi * 3 + 2] * gr);
       this.gunMount.rotation.set(p.pitch - this.rig.rotation.x, Math.PI, 0);

@@ -3,6 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { MapTheme } from '../../shared/maps/types';
 
@@ -14,12 +15,14 @@ interface QualityProfile {
   shadowSize: number;
   bloom: boolean;
   physical: boolean;
+  /** Screen-space ambient occlusion (GTAO), computed at half resolution. */
+  ao: boolean;
 }
 
 const PROFILES: Record<Quality, QualityProfile> = {
-  low: { maxPixelRatio: 0.85, shadows: false, shadowSize: 512, bloom: false, physical: false },
-  medium: { maxPixelRatio: 1.25, shadows: true, shadowSize: 1024, bloom: true, physical: false },
-  high: { maxPixelRatio: 2, shadows: true, shadowSize: 2048, bloom: true, physical: true },
+  low: { maxPixelRatio: 0.85, shadows: false, shadowSize: 512, bloom: false, physical: false, ao: false },
+  medium: { maxPixelRatio: 1.25, shadows: true, shadowSize: 1024, bloom: true, physical: true, ao: true },
+  high: { maxPixelRatio: 2, shadows: true, shadowSize: 2048, bloom: true, physical: true, ao: true },
 };
 
 /**
@@ -34,6 +37,7 @@ export class Renderer {
   readonly hemi: THREE.HemisphereLight;
   private composer: EffectComposer | null = null;
   private bloom: UnrealBloomPass | null = null;
+  private ao: GTAOPass | null = null;
   private sky: THREE.Mesh;
   quality: Quality;
   profile: QualityProfile;
@@ -123,16 +127,28 @@ export class Renderer {
       const m = (o as THREE.Mesh).material as THREE.Material | undefined;
       if (m) m.needsUpdate = true;
     });
-    if (p.bloom) {
+    this.composer?.dispose();
+    this.ao?.dispose();
+    this.composer = null;
+    this.bloom = null;
+    this.ao = null;
+    if (p.bloom || p.ao) {
       this.composer = new EffectComposer(this.renderer);
       this.composer.addPass(new RenderPass(this.scene, this.camera));
-      this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.28, 0.45, 0.92);
-      this.composer.addPass(this.bloom);
+      if (p.ao) {
+        // Contact shadows where things meet (feet on the deck, cars, crates) give shapes depth.
+        this.ao = new GTAOPass(this.scene, this.camera, 256, 256);
+        this.ao.blendIntensity = 0.85;
+        this.ao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1, thickness: 1.2, scale: 1.4, samples: 12 });
+        this.ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 5, rings: 2, samples: 12 });
+        this.composer.addPass(this.ao);
+      }
+      if (p.bloom) {
+        // Low enough that bright, saturated colors (players, balloons) glow a little.
+        this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.4, 0.55, 0.8);
+        this.composer.addPass(this.bloom);
+      }
       this.composer.addPass(new OutputPass());
-    } else {
-      this.composer?.dispose();
-      this.composer = null;
-      this.bloom = null;
     }
   }
 
@@ -147,8 +163,9 @@ export class Renderer {
     if (this.composer) {
       this.composer.setPixelRatio(pr);
       this.composer.setSize(w, h);
-      // Bloom at reduced resolution is plenty for a soft glow and much cheaper.
+      // Bloom and AO at half resolution are plenty (soft effects) and much cheaper.
       this.bloom?.setSize(Math.round(w * pr * 0.5), Math.round(h * pr * 0.5));
+      this.ao?.setSize(Math.round(w * pr * 0.5), Math.round(h * pr * 0.5));
     }
   }
 

@@ -561,6 +561,15 @@ window.addEventListener('beforeunload', (e) => {
 
 // --- Main loop -------------------------------------------------------------------------------
 
+/** ?lookdev: a fixed lineup of tube men for judging the look (developer tool). */
+let lookdev: ((dt: number) => void) | null = null;
+if (new URLSearchParams(location.search).has('lookdev')) {
+  void import('./lookdev').then((m) => {
+    lookdev = m.startLookdev(renderer);
+    uiRoot.style.display = 'none';
+  });
+}
+
 /** CPU time spent per frame (exposed for performance testing). */
 const perf = { update: 0, render: 0, frames: 0 };
 let last = performance.now();
@@ -572,7 +581,10 @@ function loop(now: number): void {
   const dt = dtMs / 1000;
   input.pollGamepad(dt);
   const t0 = performance.now();
-  game.frame(dt);
+  if (lookdev) {
+    game.mapView.update(dt, now / 1000);
+    lookdev(dt);
+  } else game.frame(dt);
   const t1 = performance.now();
   renderer.render();
   const t2 = performance.now();

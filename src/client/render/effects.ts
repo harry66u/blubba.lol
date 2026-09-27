@@ -557,8 +557,18 @@ export class Effects {
   }
 
   /** Air Horn: a cone of air bursting forward. */
-  honkBlast(x: number, y: number, z: number, dx: number, dy: number, dz: number, range: number, cone: number, power: number): void {
-    const n = 14 + Math.round(power * 10);
+  honkBlast(x: number, y: number, z: number, dx: number, dy: number, dz: number, range: number, cone: number, power: number, camPos?: THREE.Vector3): void {
+    // A honk aimed at your face shouldn't blind you: thin it out and shrink it near the camera.
+    let near = 1;
+    if (camPos) {
+      const tx = camPos.x - x;
+      const ty = camPos.y - y;
+      const tz = camPos.z - z;
+      const td = Math.hypot(tx, ty, tz) || 1;
+      const facing = (tx * dx + ty * dy + tz * dz) / td;
+      if (facing > 0.5) near = Math.max(0.25, Math.min(1, (td - 1) / 7));
+    }
+    const n = Math.round((14 + power * 10) * near);
     for (let i = 0; i < n; i++) {
       // Random direction inside the cone.
       const a = Math.random() * Math.PI * 2;
@@ -580,7 +590,7 @@ export class Effects {
       const vy = dy + (py * Math.cos(a) + qy * Math.sin(a)) * r;
       const vz = dz + (pz * Math.cos(a) + qz * Math.sin(a)) * r;
       const sp = range * (2.2 + Math.random());
-      this.puffs.spawn({ x: x + dx * 0.8, y: y + dy * 0.8, z: z + dz * 0.8, vx: vx * sp, vy: vy * sp, vz: vz * sp, size: 0.15 + power * 0.1, grow: 2.5, max: 0.4, drag: 5 }, 0xfff6c8);
+      this.puffs.spawn({ x: x + dx * 0.8, y: y + dy * 0.8, z: z + dz * 0.8, vx: vx * sp, vy: vy * sp, vz: vz * sp, size: (0.15 + power * 0.1) * (0.5 + 0.5 * near), grow: 1 + 1.5 * near, max: 0.4, drag: 5 }, 0xfff6c8);
     }
   }
 

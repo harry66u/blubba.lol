@@ -1958,3 +1958,21 @@ body {
 .nametag.danger .pct {
   animation: danger-pulse 0.5s ease-in-out infinite;
 }
+
+/* Soft glow on warnings and big callouts (the 3D bloom can't reach HUD text). */
+.event-banner {
+  box-shadow: 0 0 18px 4px rgba(255, 159, 28, 0.55);
+  animation: event-glow 1s ease-in-out infinite;
+}
+@keyframes event-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 14px 3px rgba(255, 159, 28, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 26px 8px rgba(255, 159, 28, 0.75);
+  }
+}
+.callout .main {
+  filter: drop-shadow(0 0 14px rgba(255, 255, 255, 0.45));
+}

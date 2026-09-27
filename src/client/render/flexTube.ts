@@ -40,7 +40,8 @@ export class FlexTube {
       for (let j = 0; j < segs; j++) {
         const a = i * (segs + 1) + j;
         const b = a + segs + 1;
-        index.push(a, b, a + 1, b, b + 1, a + 1);
+        // Counter-clockwise seen from outside, so the outer surface is the front face.
+        index.push(a, a + 1, b, b, a + 1, b + 1);
       }
     }
     this.geometry = new THREE.BufferGeometry();

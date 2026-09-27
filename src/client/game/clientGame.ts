@@ -702,7 +702,7 @@ export class ClientGame {
       }
       case 'honk': {
         if (e.id !== you) {
-          fx.honkBlast(e.x, e.y, e.z, e.dx, e.dy, e.dz, e.range, e.cone, e.power);
+          fx.honkBlast(e.x, e.y, e.z, e.dx, e.dy, e.dz, e.range, e.cone, e.power, this.r.camera.position);
           fx.muzzleFlash(e.x, e.y, e.z, e.dx, e.dy, e.dz, e.power);
           a.honk(e.power, [e.x, e.y, e.z]);
           this.hud.popup(tmpV.set(e.x + e.dx * 2, e.y + e.dy * 2 + 0.5, e.z + e.dz * 2), 'HONK!', '#ffd60a', 0.8 + e.power * 0.6, 0.8);
