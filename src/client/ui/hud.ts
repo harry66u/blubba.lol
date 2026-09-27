@@ -33,6 +33,10 @@ export interface HudState {
   sub: string;
   alive: boolean;
   weaponName: string;
+  stream: boolean;
+  u1Ready: number;
+  u2Ready: number;
+  pin: number;
 }
 
 export interface Nametag {
@@ -65,6 +69,10 @@ export class Hud {
   private readonly escapeMarker: HTMLElement;
   private readonly escapeLabel: HTMLElement;
   private readonly flashEl: HTMLElement;
+  private readonly tank: HTMLElement;
+  private readonly tankFill: HTMLElement;
+  private readonly utilEls: { box: HTMLElement; cool: HTMLElement; icon: HTMLElement }[] = [];
+  private readonly pinBadge: HTMLElement;
   private readonly clock: HTMLElement;
   private readonly sub: HTMLElement;
   private readonly killfeed: HTMLElement;
@@ -119,7 +127,18 @@ export class Hud {
     this.reloadFill = el('div');
     this.reloadBar = el('div', { class: 'reload-bar hidden' }, this.reloadFill);
     this.weaponName = el('div', { class: 'weapon-name', text: 'AIR CANNON' });
-    const ammo = el('div', { class: 'ammo' }, this.weaponName, this.ammoPips, this.reloadBar);
+    this.tankFill = el('div');
+    this.tank = el('div', { class: 'tank hidden' }, this.tankFill);
+    const ammo = el('div', { class: 'ammo' }, this.weaponName, this.ammoPips, this.tank, this.reloadBar);
+    const utils = el('div', { class: 'utils' });
+    for (const k of ['C', 'V']) {
+      const cool = el('div', { class: 'cool' });
+      const icon = el('div', { text: '?' });
+      const box = el('div', { class: 'util' }, el('div', { class: 'k', text: k }), icon, cool);
+      utils.append(box);
+      this.utilEls.push({ box, cool, icon });
+    }
+    this.pinBadge = el('div', { class: 'pin-badge hidden', text: '📌 PIN' });
 
     this.dashPips = el('div', { class: 'pips' });
     const ability = (label: string): [HTMLElement, HTMLElement] => {
@@ -155,7 +174,7 @@ export class Hud {
     this.damage = el('div', { class: 'damage-dir' });
     this.ping = el('div', { class: 'ping' });
 
-    this.root.append(this.flashEl, this.nametags, this.popups, this.damage, this.crosshair, this.hitmarker, inflation, movement, ammo, timer, this.killfeed, this.calloutBox, this.respawnBox, this.note, this.hintEl, this.escapeBox, this.ping);
+    this.root.append(this.flashEl, this.nametags, this.popups, this.damage, this.crosshair, this.hitmarker, inflation, movement, ammo, utils, this.pinBadge, timer, this.killfeed, this.calloutBox, this.respawnBox, this.note, this.hintEl, this.escapeBox, this.ping);
   }
 
   show(v: boolean): void {
@@ -177,10 +196,20 @@ export class Hud {
       this.balloon.style.transform = `scale(${0.8 + s.inflation * 0.7})`;
       this.balloon.style.background = `radial-gradient(circle at 35% 30%, #fff 0 8%, transparent 9%), hsl(${hue}, 90%, 60%)`;
     });
-    this.setIf('ammo', `${s.ammo}/${s.maxAmmo}`, () => {
-      clear(this.ammoPips);
-      for (let i = 0; i < s.maxAmmo; i++) this.ammoPips.append(el('div', { class: `pip${i < s.ammo ? '' : ' empty'}` }));
-    });
+    this.ammoPips.classList.toggle('hidden', s.stream);
+    this.tank.classList.toggle('hidden', !s.stream);
+    if (s.stream) {
+      this.tankFill.style.width = `${Math.round((s.ammo / s.maxAmmo) * 100)}%`;
+    } else {
+      this.setIf('ammo', `${s.ammo}/${s.maxAmmo}`, () => {
+        clear(this.ammoPips);
+        for (let i = 0; i < s.maxAmmo; i++) this.ammoPips.append(el('div', { class: `pip${i < s.ammo ? '' : ' empty'}` }));
+      });
+    }
+    this.utilEls[0].cool.style.height = `${Math.round((1 - s.u1Ready) * 100)}%`;
+    this.utilEls[1].cool.style.height = `${Math.round((1 - s.u2Ready) * 100)}%`;
+    this.pinBadge.classList.toggle('hidden', s.pin <= 0);
+    if (s.pin > 0) this.setIf('pin', Math.ceil(s.pin), () => (this.pinBadge.textContent = `📌 PIN ${Math.ceil(s.pin)}s`));
     this.reloadBar.classList.toggle('hidden', s.reloadFrac <= 0);
     if (s.reloadFrac > 0) this.reloadFill.style.width = `${Math.round(s.reloadFrac * 100)}%`;
     this.setIf('weapon', s.weaponName, () => (this.weaponName.textContent = s.weaponName));
@@ -222,6 +251,16 @@ export class Hud {
       this.calloutTimer -= dt;
       if (this.calloutTimer <= 0) clear(this.calloutBox);
     }
+  }
+
+  setUtilities(names: string[]): void {
+    const icons: Record<string, string> = { 'Bounce Pad': '🟣', 'Air Grenade': '💥', 'Inflatable Wall': '🧱', 'Vacuum Grenade': '🌀' };
+    names.forEach((n, i) => {
+      const u = this.utilEls[i];
+      if (!u) return;
+      u.icon.textContent = icons[n] ?? '?';
+      u.box.title = n;
+    });
   }
 
   showAbilities(f: { brace: boolean; grab: boolean; grapple: boolean }): void {

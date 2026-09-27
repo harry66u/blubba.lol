@@ -3,6 +3,7 @@ import { BALANCE } from '../shared/balance';
 import { GameSim } from '../shared/game/sim';
 import { emptyInput } from '../shared/input';
 import { getMap } from '../shared/maps';
+import { type Loadout, weaponIndex } from '../shared/loadout';
 import { MODE_DEAD } from '../shared/player';
 import {
   type ClientMessage,
@@ -90,16 +91,17 @@ export class Room {
     return this.humanCount < BALANCE.match.maxPlayers;
   }
 
-  join(ws: WebSocket, name: string, guestId: string): Conn | null {
+  join(ws: WebSocket, name: string, guestId: string, loadout?: Loadout): Conn | null {
     if (!this.canJoin()) return null;
     // Make room by removing a bot if needed.
     if (this.playerCount >= BALANCE.match.maxPlayers) this.removeOneBot();
-    const p = this.sim.addPlayer(name);
+    const p = this.sim.addPlayer(name, { loadout });
     const conn: Conn = { ws, playerId: p.id, guestId, name, rtt: 0, inputMsgs: 0 };
     this.conns.set(p.id, conn);
     if (this.hostId < 0 || !this.conns.has(this.hostId)) this.hostId = p.id;
     this.send(conn, { type: 'welcome', v: PROTOCOL_VERSION, you: p.id, room: this.info(), tick: this.sim.tick, name });
     this.send(conn, this.matchMessage());
+    this.send(conn, { type: 'entities', ...this.sim.entitySnapshot() });
     this.rosterDirty = true;
     this.balanceBots();
     this.broadcastJson({ type: 'room', room: this.info() });
@@ -159,6 +161,9 @@ export class Room {
       case 'ping':
         if (typeof msg.t === 'number') this.send(conn, { type: 'pong', t: msg.t, tick: this.sim.tick });
         break;
+      case 'loadout':
+        this.sim.setLoadout(conn.playerId, msg.loadout);
+        break;
       case 'host':
         if (conn.playerId !== this.hostId || !this.isPrivate) return;
         if (msg.action === 'kick' && typeof msg.id === 'number') this.kick(msg.id);
@@ -190,7 +195,7 @@ export class Room {
       (this as { sim: GameSim }).sim = fresh;
       for (const p of old.players.values()) {
         if (p.isBot) continue;
-        const np = fresh.addPlayer(p.name, { id: p.id, color: p.color });
+        const np = fresh.addPlayer(p.name, { id: p.id, color: p.color, loadout: p.loadout });
         // Carry press counters so the client's next input isn't read as a burst of presses.
         for (const k of ['cJump', 'cDash', 'cBrace', 'cGrab', 'cGrapple', 'cReload', 'cU1', 'cU2', 'cTaunt'] as const) np.state[k] = p.state[k];
         np.lastSeq = p.lastSeq;
@@ -224,7 +229,7 @@ export class Room {
       this.rosterDirty = false;
       this.lastRosterAt = now;
     }
-    const all = [...this.sim.players.values()].map((p) => ({ id: p.id, state: p.state }));
+    const all = [...this.sim.players.values()].map((p) => ({ id: p.id, state: p.state, weapon: weaponIndex(p.loadout.weapon), streaming: p.streaming }));
     for (const conn of this.conns.values()) {
       conn.inputMsgs = Math.max(0, conn.inputMsgs - Math.round(BALANCE.tickRate / BALANCE.snapshotRate) * 1.25);
       const me = this.sim.players.get(conn.playerId);

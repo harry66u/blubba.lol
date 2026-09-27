@@ -9,6 +9,7 @@ import { type Settings, loadIdentity, loadSettings, saveIdentity, saveSettings }
 import { clear } from './ui/dom';
 import { Hud } from './ui/hud';
 import { buildClickToPlay, buildHowTo, buildMainMenu, buildPause, buildResults, buildRoomJoin, buildScoreboard, buildSettings } from './ui/menus';
+import { buildLoadout, loadLoadout, saveLoadout } from './ui/loadout';
 
 const settings = loadSettings();
 const identity = loadIdentity(() => randomGuestName());
@@ -28,6 +29,7 @@ const input = new InputManager(canvas, settings);
 const net = new Connection();
 const hud = new Hud();
 const game = new ClientGame(renderer, audio, hud, input, net, settings);
+game.setLoadout(loadLoadout(), false);
 
 // Layers: HUD at the bottom, then menus/overlays on top.
 const menuLayer = document.createElement('div');
@@ -40,7 +42,7 @@ uiRoot.append(hud.root, scoreLayer, menuLayer, overlayLayer, fpsEl);
 
 type Screen = 'menu' | 'room-join' | 'connecting' | 'playing';
 let screen: Screen = 'menu';
-let overlay: 'none' | 'pause' | 'settings' | 'howto' | 'click' | 'results' = 'none';
+let overlay: 'none' | 'pause' | 'settings' | 'howto' | 'click' | 'results' | 'loadout' = 'none';
 let pendingJoin: JoinRequest | null = null;
 let scoreboardOpen = false;
 
@@ -64,6 +66,7 @@ function showMenu(notice?: string): void {
   setPath('/');
   menuLayer.append(
     buildMainMenu(identity.name, {
+      onLoadout: () => setOverlay('loadout'),
       onPlay: (name) => startJoin(name, { kind: 'quick' }),
       onCreate: (name) => startJoin(name, { kind: 'create' }),
       onJoinCode: (name, code) => startJoin(name, { kind: 'code', code }),
@@ -100,7 +103,7 @@ function startJoin(name: string, join: JoinRequest): void {
   screen = 'connecting';
   pendingJoin = join;
   clear(menuLayer);
-  net.join(name, identity.guestId, join).catch((err: Error) => {
+  net.join(name, identity.guestId, join, game.loadout).catch((err: Error) => {
     input.exitLock();
     showMenu(err.message || 'Could not connect. Check your Wi-Fi and try again.');
   });
@@ -113,6 +116,7 @@ function setOverlay(next: typeof overlay): void {
     case 'pause':
       overlayLayer.append(
         buildPause(game.room, game.room?.hostId === game.youId, {
+          onLoadout: () => setOverlay('loadout'),
           onResume: resume,
           onLeave: leaveMatch,
           onSettings: () => setOverlay('settings'),
@@ -139,6 +143,20 @@ function setOverlay(next: typeof overlay): void {
             };
           },
         }),
+      );
+      break;
+    case 'loadout':
+      overlayLayer.append(
+        buildLoadout(
+          game.loadout,
+          (l) => {
+            saveLoadout(l);
+            game.setLoadout(l, true);
+          },
+          () => setOverlay(screen === 'playing' ? 'pause' : 'none'),
+          undefined,
+          screen === 'playing' ? 'Changes apply the next time you respawn.' : '',
+        ),
       );
       break;
     case 'howto':

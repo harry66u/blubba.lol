@@ -63,8 +63,11 @@ export class BotBrain {
 
   /** When (in seconds after being grabbed) this bot will try to dash free. */
   private escapeAt = -1;
+  /** How long we've been off the stage (bots react late, like people do). */
+  private offStageTime = 0;
+  private bracedFor = new Set<number>();
 
-  private press(key: 'jump' | 'dash' | 'brace' | 'grab' | 'grapple'): void {
+  private press(key: 'jump' | 'dash' | 'brace' | 'grab' | 'grapple' | 'util1' | 'util2'): void {
     this.input[key] = (this.input[key] + 1) & 255;
   }
 
@@ -114,6 +117,13 @@ export class BotBrain {
       if (rnd() < 0.05) this.press('jump');
       return { ...f };
     }
+    this.offStageTime = offStage ? this.offStageTime + sim.dt : 0;
+    const reaction = 0.55 - this.skill * 0.35;
+    if (offStage && this.offStageTime < reaction) {
+      // Still flailing in surprise.
+      f.buttons = 0;
+      return { ...f };
+    }
     if (offStage) {
       const dx = home.x - s.px;
       const dz = home.z - s.pz;
@@ -124,13 +134,17 @@ export class BotBrain {
       f.moveZ = 1;
       f.buttons = 0;
       const recoverSkill = 0.4 + this.skill * 0.6;
-      if (sim.features.grapple && s.grappleCool <= 0 && rnd() < 0.08 * recoverSkill) {
+      const wallSlot = me.loadout.utils.indexOf('inflatableWall');
+      const wallCool = wallSlot === 0 ? s.u1Cool : s.u2Cool;
+      if (wallSlot >= 0 && wallCool <= 0 && s.vy < -4 && rnd() < 0.04 * recoverSkill) {
+        this.press(wallSlot === 0 ? 'util1' : 'util2');
+      } else if (sim.features.grapple && s.grappleCool <= 0 && rnd() < 0.02 * recoverSkill) {
         // Aim at the near edge of the main deck and zip back.
         const dy = home.y + 0.5 - (s.py + eyeHeight(s));
         f.pitch = Math.atan2(dy, Math.hypot(home.x - s.px, home.z - s.pz));
         this.press('grapple');
-      } else if (s.vy < -3 && s.jumpsUsed < 2 && s.launchTimer <= 0 && rnd() < 0.25 * recoverSkill) this.press('jump');
-      else if (s.vy < -5 && s.dashCharges > 0 && rnd() < 0.2 * recoverSkill) this.press('dash');
+      } else if (s.vy < -3 && s.jumpsUsed < 2 && s.launchTimer <= 0 && rnd() < 0.12 * recoverSkill) this.press('jump');
+      else if (s.vy < -5 && s.dashCharges > 0 && rnd() < 0.08 * recoverSkill) this.press('dash');
       if (rnd() < 0.08 * this.skill) this.press('grab'); // try to catch a ledge
       return { ...f };
     }
@@ -141,7 +155,9 @@ export class BotBrain {
       this.targetId = this.pickTarget(sim, me);
       this.retargetAt = sim.time + 1.5 + rnd() * 2;
       if (this.targetId !== prev) this.nextShotAt = Math.max(this.nextShotAt, sim.time + 0.9 - this.skill * 0.6 + rnd() * 0.4);
-      this.desiredDist = 6 + rnd() * 9;
+      const kind = me.weapon.kind;
+      this.desiredDist =
+        kind === 'cone' ? 2.5 + rnd() * 2.5 : kind === 'stream' ? 4 + rnd() * 3 : kind === 'hitscan' ? 14 + rnd() * 12 : 6 + rnd() * 9;
       this.aimFeet = rnd() < 0.35;
     }
     const target = sim.players.get(this.targetId);
@@ -162,7 +178,7 @@ export class BotBrain {
       const ey = s.py + eyeHeight(s);
       const ez = s.pz;
       dist = Math.hypot(t.px - ex, t.pz - ez);
-      const lead = (dist / BALANCE.weapons.airCannon.projSpeed) * (this.skill * this.skill);
+      const lead = me.weapon.kind === 'projectile' ? (dist / me.weapon.projSpeed) * (this.skill * this.skill) : 0;
       const tx = t.px + t.vx * lead;
       const tz = t.pz + t.vz * lead;
       const ty = t.py + (this.aimFeet ? 0.15 : playerHeight(t) * 0.5) + Math.min(0, t.vy) * lead * 0.3;
@@ -250,19 +266,41 @@ export class BotBrain {
         const dz = s.pz - pr.z;
         const d = Math.hypot(dx, dy, dz);
         const closing = (dx * pr.vx + dy * pr.vy + dz * pr.vz) / (d || 1);
-        if (d < 4 && closing > 20 && rnd() < this.skill * 0.5) {
-          this.press('brace');
+        if (d < 4 && closing > 20 && !this.bracedFor.has(pr.id)) {
+          // One reaction per incoming shot, and only sometimes in time.
+          this.bracedFor.add(pr.id);
+          if (this.bracedFor.size > 50) this.bracedFor.clear();
+          if (rnd() < this.skill * 0.35) this.press('brace');
           break;
         }
       }
     }
 
+    // --- Utilities: lob a grenade at mid range now and then; walls/rafts save us when falling. ---
+    const utils = me.loadout.utils;
+    for (let slot = 0; slot < 2; slot++) {
+      const cool = slot === 0 ? s.u1Cool : s.u2Cool;
+      if (cool > 0 || !target) continue;
+      const u = utils[slot];
+      const want =
+        ((u === 'airGrenade' || u === 'vacuumGrenade') && dist > 5 && dist < 14 && rnd() < 0.004 * this.skill) ||
+        (u === 'bouncePad' && s.onGround && rnd() < 0.0015) ||
+        (u === 'inflatableWall' && dist < 10 && rnd() < 0.0015);
+      if (want) {
+        this.press(slot === 0 ? 'util1' : 'util2');
+        break;
+      }
+    }
+
     // --- Shoot: hold to charge, release when charged and on target. ---
-    const hasTarget = !!target && dist < 40;
+    const range = me.weapon.kind === 'projectile' ? me.weapon.projSpeed * me.weapon.projLifetime : me.weapon.range;
+    const hasTarget = !!target && dist < Math.min(40, range + 1);
     if (!hasTarget) {
       f.buttons = 0;
+    } else if (me.weapon.kind === 'stream') {
+      f.buttons = aimError < 0.25 && s.ammo > 0 && s.reloadTimer <= 0 ? BTN_FIRE : 0;
     } else if (s.charging) {
-      const onTarget = aimError < 0.08 + (1 - this.skill) * 0.1;
+      const onTarget = aimError < (me.weapon.kind === 'hitscan' ? 0.03 : 0.08) + (1 - this.skill) * 0.1;
       if (s.charge >= this.chargeGoal && onTarget) {
         f.buttons = 0;
         this.chargeGoal = 0.3 + this.skill * 0.3 + rnd() * 0.4;

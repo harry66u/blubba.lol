@@ -57,10 +57,18 @@ export function moverOffset(m: MoverDef, time: number): number {
   return 0.5 - 0.5 * Math.cos(phase * Math.PI * 2);
 }
 
+export interface DynamicSolidDef {
+  min: [number, number, number];
+  max: [number, number, number];
+  ledge: boolean;
+}
+
 export class World {
   readonly solids: Solid[] = [];
   readonly pads: BouncePad[] = [];
   time = 0;
+  /** Solids with an id at or above this were added during play (walls, rafts). */
+  readonly staticCount: number;
 
   constructor(readonly map: MapDef) {
     map.solids.forEach((def, i) => {
@@ -90,6 +98,7 @@ export class World {
       this.solids.push(s);
     });
     map.bouncePads.forEach((p, i) => this.pads.push({ ...p, id: i, owner: -1, expires: Infinity }));
+    this.staticCount = this.solids.length;
     this.setTime(0);
   }
 
@@ -333,16 +342,56 @@ export class World {
     return best;
   }
 
-  addPad(pad: Omit<BouncePad, 'id'>): BouncePad {
-    const id = this.pads.reduce((m, p) => Math.max(m, p.id), -1) + 1;
-    const full = { ...pad, id };
+  addPad(pad: Omit<BouncePad, 'id'>, id?: number): BouncePad {
+    const pid = id ?? this.pads.reduce((m, p) => Math.max(m, p.id), -1) + 1;
+    this.removePad(pid);
+    const full = { ...pad, id: pid };
     this.pads.push(full);
     return full;
   }
 
-  removeExpiredPads(time: number): void {
-    for (let i = this.pads.length - 1; i >= 0; i--) {
-      if (this.pads[i].expires <= time) this.pads.splice(i, 1);
+  removePad(id: number): void {
+    const i = this.pads.findIndex((p) => p.id === id);
+    if (i >= 0) this.pads.splice(i, 1);
+  }
+
+  /** Adds a temporary solid (inflatable wall or raft) and returns its id. */
+  addDynamicSolid(def: DynamicSolidDef): number {
+    let id = -1;
+    for (let i = this.staticCount; i < this.solids.length; i++) {
+      if (!this.solids[i].enabled) {
+        id = i;
+        break;
+      }
     }
+    if (id < 0) id = this.solids.length;
+    this.setSolidAt(id, def);
+    return id;
+  }
+
+  /** Creates, replaces, or (with null) disables the dynamic solid at `id`. Used to mirror the server. */
+  setSolidAt(id: number, def: DynamicSolidDef | null): void {
+    if (id < this.staticCount) return;
+    while (this.solids.length <= id) {
+      const n = this.solids.length;
+      this.solids.push({
+        id: n, minX: 0, minY: -9999, minZ: 0, maxX: 0, maxY: -9999, maxZ: 0, ledge: false, enabled: false, mover: null,
+        baseMinX: 0, baseMinY: 0, baseMinZ: 0, baseMaxX: 0, baseMaxY: 0, baseMaxZ: 0, dX: 0, dY: 0, dZ: 0, sink: 0, sinkRate: 0,
+      });
+    }
+    const s = this.solids[id];
+    if (!def) {
+      s.enabled = false;
+      return;
+    }
+    s.minX = s.baseMinX = def.min[0];
+    s.minY = s.baseMinY = def.min[1];
+    s.minZ = s.baseMinZ = def.min[2];
+    s.maxX = s.baseMaxX = def.max[0];
+    s.maxY = s.baseMaxY = def.max[1];
+    s.maxZ = s.baseMaxZ = def.max[2];
+    s.ledge = def.ledge;
+    s.enabled = true;
+    s.dX = s.dY = s.dZ = 0;
   }
 }

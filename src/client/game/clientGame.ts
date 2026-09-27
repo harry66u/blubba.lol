@@ -29,15 +29,19 @@ import {
   FLAG_DOUBLED,
   FLAG_GROUND,
   FLAG_LAUNCHED,
+  FLAG_PIN,
   FLAG_PROTECTED,
+  FLAG_STREAM,
   type PublicPlayer,
   type RoomInfo,
   type RosterEntry,
   type ServerMessage,
   type Snapshot,
 } from '../../shared/protocol';
-import type { MatchPhase, MatchResult } from '../../shared/game/sim';
+import { type MatchPhase, type MatchResult, rayCapsule } from '../../shared/game/sim';
 import { World } from '../../shared/world';
+import { DEFAULT_LOADOUT, type Loadout, UTILITY_INFO, WEAPON_IDS, WEAPON_INFO, type WeaponStats, computeWeaponStats, sanitizeLoadout } from '../../shared/loadout';
+import { EntityView } from '../render/entities';
 import type { Audio } from '../audio/audio';
 import { type Action, type InputManager, codeLabel } from '../input/input';
 import type { Connection } from '../net/connection';
@@ -76,6 +80,7 @@ interface RemoteView {
 
 interface RemoteShot {
   id: number;
+  g: number;
   tick: number;
   x: number;
   y: number;
@@ -128,6 +133,10 @@ export class ClientGame {
   readonly effects = new Effects();
   readonly circles = new LandingCircles();
   readonly viewModel = new ViewModel(0xff3b5c);
+  readonly entities = new EntityView();
+  loadout: Loadout = { ...DEFAULT_LOADOUT };
+  weapon: WeaponStats = computeWeaponStats('airCannon', []);
+  private streamStrength = 0;
   readonly clock = new ServerClock();
   pred: PlayerState = createPlayerState();
   private havePred = false;
@@ -182,7 +191,7 @@ export class ClientGame {
     this.world = new World(this.map);
     this.mapView = new MapView(this.map, this.world);
     this.ctx = this.makeCtx({ ...ALL_FEATURES });
-    r.scene.add(this.mapView.root, this.effects.root, this.circles.root);
+    r.scene.add(this.mapView.root, this.effects.root, this.circles.root, this.entities.root);
     r.scene.add(r.camera);
     r.camera.add(this.viewModel.root);
     this.viewModel.root.visible = false;
@@ -190,13 +199,21 @@ export class ClientGame {
   }
 
   private makeCtx(features: StepContext['features']): StepContext {
-    const w = BALANCE.weapons.airCannon;
-    return {
-      world: this.world,
-      dt: DT,
-      weapon: { ammo: w.ammo, reloadTime: w.reloadTime, fireCooldown: w.fireCooldown, chargeTime: w.chargeTime, tapPower: w.tapPower },
-      features,
-    };
+    return { world: this.world, dt: DT, weapon: this.weapon, features };
+  }
+
+  /** Your chosen loadout. The server applies changes when you next respawn. */
+  setLoadout(l: Loadout, send: boolean): void {
+    this.loadout = sanitizeLoadout(l);
+    if (send && this.active) this.net.send({ type: 'loadout', loadout: this.loadout });
+    if (!this.active) this.applyWeapon(this.loadout);
+  }
+
+  private applyWeapon(l: Loadout): void {
+    this.weapon = computeWeaponStats(l.weapon, l.mods);
+    this.ctx.weapon = this.weapon;
+    this.viewModel.setWeapon(l.weapon);
+    this.hud.setUtilities(l.utils.map((u) => UTILITY_INFO[u].name));
   }
 
   private setMap(id: string): void {
@@ -217,8 +234,11 @@ export class ClientGame {
     this.youId = msg.you;
     this.room = msg.room;
     this.setMap(msg.room.mapId);
+    this.applyWeapon(this.loadout);
     this.ctx = this.makeCtx(msg.room.features);
     this.hud.showAbilities(msg.room.features);
+    this.entities.clear();
+    for (let i = this.world.staticCount; i < this.world.solids.length; i++) this.world.setSolidAt(i, null);
     this.clock.reset();
     this.clock.observe(msg.tick, performance.now());
     this.havePred = false;
@@ -248,6 +268,8 @@ export class ClientGame {
     this.viewModel.root.visible = false;
     this.hud.show(false);
     this.audio.setCharge(0);
+    this.audio.setBlower(0);
+    this.entities.clear();
   }
 
   // --- Network -----------------------------------------------------------------------------
@@ -281,6 +303,17 @@ export class ClientGame {
         break;
       case 'ev':
         this.onEvents(msg.list);
+        break;
+      case 'entities':
+        for (const k of msg.pickups) this.entities.setPickup(k.id, k.kind, k.x, k.y, k.z, k.active);
+        for (const d of msg.solids) {
+          this.world.setSolidAt(d.id, { min: d.min, max: d.max, ledge: true });
+          this.entities.addSolid(d.id, d.min, d.max, d.raft);
+        }
+        for (const p of msg.pads) {
+          this.world.addPad({ x: p.x, y: p.y, z: p.z, half: p.half, strength: p.strength, owner: 0, expires: Infinity }, p.id);
+          this.entities.addPad(p.id, p.x, p.y, p.z, p.half);
+        }
         break;
       case 'error':
         if (msg.code === 'kicked') this.onKicked?.(msg.message);
@@ -365,9 +398,24 @@ export class ClientGame {
     const you = this.youId;
     switch (e.t) {
       case 'shot':
+        return e.owner === you && e.w === 0;
       case 'boom':
       case 'fizzle':
-        return e.t === 'shot' ? e.owner === you : this.localByServer.has(e.id);
+        return this.localByServer.has(e.id);
+      case 'loadout':
+      case 'honk':
+      case 'tracer':
+        return e.id === you;
+      case 'solid':
+      case 'solidGone':
+      case 'pad':
+      case 'padGone':
+        // The world must match the server for prediction, so these apply right away.
+        return true;
+      case 'pickup':
+        return e.by === you;
+      case 'pop':
+        return e.id === you || e.target === you;
       case 'hit':
         return e.target === you;
       case 'ko':
@@ -418,7 +466,7 @@ export class ClientGame {
     const fx = this.effects;
     switch (e.t) {
       case 'shot': {
-        if (e.owner === you) {
+        if (e.owner === you && e.w === 0) {
           // Link the server's projectile to the one we already drew.
           const local = e.cs !== undefined ? this.localShots.get(-e.cs) : undefined;
           if (local) {
@@ -431,9 +479,10 @@ export class ClientGame {
             this.localByServer.set(e.id, key);
           }
         } else {
-          const p3 = fx.addProjectile(e.id, e.x, e.y, e.z, e.vx, e.vy, e.vz, e.r);
-          this.remoteShots.set(e.id, { id: e.id, tick: e.tick, x: e.x, y: e.y, z: e.z, vx: e.vx, vy: e.vy, vz: e.vz, p3 });
-          a.shoot(e.power, [e.x, e.y, e.z]);
+          const p3 = fx.addProjectile(e.id, e.x, e.y, e.z, e.vx, e.vy, e.vz, e.r, undefined, e.w);
+          this.remoteShots.set(e.id, { id: e.id, g: e.g ?? 0, tick: e.tick, x: e.x, y: e.y, z: e.z, vx: e.vx, vy: e.vy, vz: e.vz, p3 });
+          if (e.w === 0) a.shoot(e.power, [e.x, e.y, e.z]);
+          else a.whoosh(0.3, e.owner === you ? null : [e.x, e.y, e.z]);
           const rv = this.remotes.get(e.owner);
           if (rv) rv.man.group.userData.kick = 1;
         }
@@ -457,9 +506,102 @@ export class ClientGame {
             this.remoteShots.delete(e.id);
           }
           this.showBlast(e.x, e.y, e.z, e.r, e.power);
+          if (e.k) {
+            fx.confettiBurst(e.x, e.y, e.z, 25, [0x2ec5ff, 0xffffff, 0x9fe8ff]);
+            this.hud.popup(tmpV.set(e.x, e.y + 1.5, e.z), 'KA-WHOOSH!', '#2ec5ff', 1.2, 1);
+          }
         }
         break;
       }
+      case 'proj': {
+        const rs = this.remoteShots.get(e.id);
+        if (rs) {
+          Object.assign(rs, { tick: e.tick, x: e.x, y: e.y, z: e.z, vx: e.vx, vy: e.vy, vz: e.vz });
+          a.thud([e.x, e.y, e.z], 3);
+        }
+        break;
+      }
+      case 'honk': {
+        if (e.id !== you) {
+          fx.honkBlast(e.x, e.y, e.z, e.dx, e.dy, e.dz, e.range, e.cone, e.power);
+          a.honk(e.power, [e.x, e.y, e.z]);
+          this.hud.popup(tmpV.set(e.x + e.dx * 2, e.y + e.dy * 2 + 0.5, e.z + e.dz * 2), 'HONK!', '#ffd60a', 0.8 + e.power * 0.6, 0.8);
+        }
+        break;
+      }
+      case 'tracer': {
+        if (e.id !== you) {
+          const rv = this.remotes.get(e.id);
+          const from = rv?.man.muzzleWorld(new THREE.Vector3()) ?? new THREE.Vector3(e.x, e.y, e.z);
+          fx.tracer(from.x, from.y, from.z, e.x2, e.y2, e.z2);
+          a.pew(e.power, [e.x, e.y, e.z]);
+        }
+        break;
+      }
+      case 'blow': {
+        const p = this.posOf(e.target);
+        if (p) {
+          fx.airPuff(p.x, p.y + 1, p.z, 3, 2, 0.15);
+          a.gust(e.target === you ? null : [p.x, p.y, p.z]);
+        }
+        if (e.id === you) this.hud.hitMarker();
+        break;
+      }
+      case 'pop': {
+        a.bigPop(e.id === you || e.target === you ? null : [e.x, e.y, e.z]);
+        fx.confettiBurst(e.x, e.y, e.z, 90);
+        this.hud.popup(tmpV.set(e.x, e.y + 1.5, e.z), 'POP!!', '#ff2d55', 2, 1.3);
+        if (e.id === you) this.hud.callout('PINNED!', 'Popped at max inflation', 1.8, '#ff2d55');
+        break;
+      }
+      case 'vacuum':
+        this.entities.addVacuum(e.x, e.y, e.z, e.until, BALANCE.utilities.vacuumGrenade.radius);
+        a.suck([e.x, e.y, e.z]);
+        this.hud.popup(tmpV.set(e.x, e.y + 1.5, e.z), 'SHLURP!', '#c49bff', 1.1, 1.1);
+        if (this.remoteShots.has(e.id)) {
+          fx.removeProjectile(e.id);
+          this.remoteShots.delete(e.id);
+        }
+        break;
+      case 'solid':
+        this.world.setSolidAt(e.id, { min: e.min, max: e.max, ledge: true });
+        this.entities.addSolid(e.id, e.min, e.max, e.raft);
+        a.stretch([(e.min[0] + e.max[0]) / 2, e.min[1], (e.min[2] + e.max[2]) / 2]);
+        break;
+      case 'solidGone':
+        this.world.setSolidAt(e.id, null);
+        this.entities.removeSolid(e.id);
+        break;
+      case 'pad':
+        this.world.addPad({ x: e.x, y: e.y, z: e.z, half: e.half, strength: e.strength, owner: 0, expires: Infinity }, e.id);
+        this.entities.addPad(e.id, e.x, e.y, e.z, e.half);
+        break;
+      case 'padGone':
+        this.world.removePad(e.id);
+        this.entities.removePad(e.id);
+        break;
+      case 'pickup': {
+        this.entities.setPickup(e.id, e.kind, e.x, e.y, e.z, e.active);
+        if (!e.active && e.by >= 0) {
+          const p = this.posOf(e.by);
+          if (e.kind === 'soda') {
+            a.canOpen(e.by === you ? null : [e.x, e.y, e.z]);
+            window.setTimeout(() => a.burp(e.by === you ? null : [e.x, e.y, e.z]), 250);
+            if (p) this.hud.popup(tmpV.set(p.x, p.y + 2.6, p.z), 'BUURRP!', '#b8f06a', 1.1, 1.2);
+            if (e.by === you) this.hud.toast('Soda! Dashes refilled.', 1500);
+          } else {
+            a.koConfirm();
+            if (e.by === you) this.hud.callout('YOU GOT THE PIN!', 'Pop anyone at 100%!', 2.2, '#ff2d55');
+            else this.hud.toast(`${this.nameOf(e.by)} grabbed the PIN! Stay under 100%!`, 3000);
+          }
+        } else if (e.active && e.kind === 'pin') {
+          this.hud.toast('A PIN appeared! It pops anyone at 100% inflation.', 3000);
+        }
+        break;
+      }
+      case 'loadout':
+        if (e.id === you) this.applyWeapon(sanitizeLoadout(e));
+        break;
       case 'fizzle': {
         const localKey = this.localByServer.get(e.id);
         if (localKey !== undefined) {
@@ -724,17 +866,57 @@ export class ClientGame {
 
   private fireLocal(out: StepResult): void {
     const f = out.fired!;
-    const w = BALANCE.weapons.airCannon;
+    const w = this.weapon;
+    if (w.kind === 'cone') {
+      this.viewModel.kick(f.power * 1.5);
+      this.audio.honk(f.power, null);
+      this.trauma = Math.min(1, this.trauma + 0.1 + f.power * 0.15);
+      this.viewModel.muzzle.getWorldPosition(tmpV);
+      this.effects.honkBlast(tmpV.x, tmpV.y, tmpV.z, f.dx, f.dy, f.dz, w.range, w.cone, f.power);
+      this.hud.popup(tmpV3.set(tmpV.x + f.dx * 2.5, tmpV.y + f.dy * 2.5 + 0.4, tmpV.z + f.dz * 2.5), 'HONK!', '#ffd60a', 0.9 + f.power * 0.5, 0.6);
+      return;
+    }
+    if (w.kind === 'hitscan') {
+      this.viewModel.kick(f.power);
+      this.audio.pew(f.power, null);
+      this.viewModel.muzzle.getWorldPosition(tmpV);
+      const end = this.localRay(f.ox, f.oy, f.oz, f.dx, f.dy, f.dz, w.range, w.rayRadius);
+      this.effects.tracer(tmpV.x, tmpV.y, tmpV.z, end.x, end.y, end.z);
+      return;
+    }
     this.viewModel.kick(f.power);
     this.audio.shoot(f.power, null);
     this.trauma = Math.min(1, this.trauma + 0.05 + f.power * 0.1);
     const key = -this.seq;
     this.viewModel.muzzle.getWorldPosition(tmpV);
     const r = w.projRadius * (0.75 + 0.25 * f.power);
+    this.localBlast = w.blastRadius;
     const p3 = this.effects.addProjectile(key, f.ox, f.oy, f.oz, f.dx * w.projSpeed, f.dy * w.projSpeed, f.dz * w.projSpeed, r, tmpV);
     this.localShots.set(key, { p3, serverId: -1, life: w.projLifetime, exploded: false, boomAt: null });
     this.effects.airPuff(tmpV.x, tmpV.y, tmpV.z, 5, 2, 0.12);
   }
+
+  private localBlast = BALANCE.weapons.airCannon.blastRadius;
+
+  /** Where a ray from your eye stops (world or another player), for instant tracer feedback. */
+  private localRay(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, range: number, extra: number): THREE.Vector3 {
+    const wh = this.world.raycast(ox, oy, oz, dx, dy, dz, range);
+    let best = wh ? wh.dist : range;
+    for (const rv of this.remotes.values()) {
+      const c = rv.cur;
+      if (!c || c.mode === MODE_DEAD) continue;
+      const tmp = this.scratch;
+      tmp.px = c.px;
+      tmp.py = c.py;
+      tmp.pz = c.pz;
+      tmp.inflation = c.inflation;
+      const t = rayCapsule(ox, oy, oz, dx, dy, dz, tmp, playerRadius(tmp) + extra);
+      if (t !== null && t < best) best = t;
+    }
+    return new THREE.Vector3(ox + dx * best, oy + dy * best, oz + dz * best);
+  }
+
+  private readonly scratch = createPlayerState();
 
   // --- Per-frame -------------------------------------------------------------------------
 
@@ -778,6 +960,7 @@ export class ClientGame {
     this.input.sample(f);
     f.seq = ++this.seq;
     f.tick = this.predTick();
+    f.viewTick = Math.max(0, Math.round(this.renderTick));
     quantizeInput(f);
     this.pendingSend.push(f);
     if (!this.havePred) return;
@@ -903,9 +1086,17 @@ export class ClientGame {
     p.hanging = c.mode === MODE_HANG;
     p.holding = c.holding >= 0;
     p.held = c.mode === MODE_HELD;
+    p.pitch = c.pitch;
+    p.streaming = (c.flags & FLAG_STREAM) !== 0;
+    p.hasPin = (c.flags & FLAG_PIN) !== 0;
+    rv.man.setWeapon(WEAPON_IDS[c.weapon] ?? 'airCannon');
     p.dashing = (c.flags & FLAG_DASHING) !== 0;
     p.protected = (c.flags & FLAG_PROTECTED) !== 0;
     rv.man.update(p);
+    if (p.streaming && rv.man.muzzleWorld(tmpV3)) {
+      const d = lookDir(c.yaw, c.pitch, tmpDir);
+      this.effects.leafStream(tmpV3.x, tmpV3.y, tmpV3.z, d.x, d.y, d.z, c.charge, dt);
+    }
 
     // Name tag with inflation percentage above the head.
     const headY = c.py + rv.man.headHeight(c.inflation) + 0.35;
@@ -934,8 +1125,8 @@ export class ClientGame {
     // Remote shots follow the interpolated timeline.
     for (const s of this.remoteShots.values()) {
       const t = Math.max(0, (this.renderTick - s.tick) * DT);
-      this.effects.placeProjectile(s.p3, s.x + s.vx * t, s.y + s.vy * t, s.z + s.vz * t, dt);
-      if (t > BALANCE.weapons.airCannon.projLifetime + 0.5) {
+      this.effects.placeProjectile(s.p3, s.x + s.vx * t, s.y + s.vy * t - 0.5 * s.g * t * t, s.z + s.vz * t, dt);
+      if (t > (s.g > 0 ? 7 : 2.5)) {
         this.effects.removeProjectile(s.id);
         this.remoteShots.delete(s.id);
       }
@@ -974,7 +1165,7 @@ export class ClientGame {
         s.exploded = true;
         s.boomAt = new THREE.Vector3(nx, ny, nz);
         this.effects.removeProjectile(key);
-        this.showBlast(nx, ny, nz, BALANCE.weapons.airCannon.blastRadius * 0.9, 0.7);
+        this.showBlast(nx, ny, nz, this.localBlast * 0.9, 0.7);
         continue;
       }
       if (s.life <= 0) {
@@ -1033,20 +1224,33 @@ export class ClientGame {
 
   private updateLocalFeedback(dt: number): void {
     const p = this.pred;
-    const w = BALANCE.weapons.airCannon;
+    const w = this.weapon;
     const alive = p.mode !== MODE_DEAD && this.havePred;
+    const streaming = alive && w.kind === 'stream' && p.charging === 1;
     this.viewModel.update(dt, {
       speed: Math.hypot(p.vx, p.vz),
-      charge: p.charging ? p.charge : 0,
+      charge: p.charging || w.kind === 'stream' ? p.charge : 0,
       onGround: p.onGround === 1,
       lookDX: this.input.lookDX,
       lookDY: this.input.lookDY,
       ammoFrac: p.ammo / w.ammo,
       reloading: p.reloadTimer > 0,
+      active: streaming,
     });
+    const blow = streaming ? w.tapPower + (1 - w.tapPower) * p.charge : 0;
+    if (Math.abs(blow - this.streamStrength) > 0.02 || (blow === 0) !== (this.streamStrength === 0)) {
+      this.audio.setBlower(blow);
+      this.streamStrength = blow;
+    }
+    if (streaming) {
+      this.viewModel.muzzle.getWorldPosition(tmpV3);
+      const d = lookDir(this.input.yaw, this.input.pitch, tmpDir);
+      this.effects.leafStream(tmpV3.x, tmpV3.y, tmpV3.z, d.x, d.y, d.z, blow, dt);
+      if (p.hovering) this.effects.airPuff(p.px, p.py, p.pz, 1, 3, 0.2);
+    }
     this.input.lookDX = 0;
     this.input.lookDY = 0;
-    const charge = alive && p.charging ? p.charge : 0;
+    const charge = alive && p.charging && w.kind !== 'stream' ? p.charge : 0;
     if (charge !== this.lastCharge) {
       this.audio.setCharge(charge);
       this.lastCharge = charge;
@@ -1086,7 +1290,11 @@ export class ClientGame {
         phase: this.match.phase,
         sub,
         alive,
-        weaponName: 'AIR CANNON',
+        weaponName: WEAPON_INFO[w.id].name.toUpperCase(),
+        stream: w.kind === 'stream',
+        u1Ready: 1 - Math.min(1, p.u1Cool / BALANCE.utilities[this.loadout.utils[0]].cooldown),
+        u2Ready: 1 - Math.min(1, p.u2Cool / BALANCE.utilities[this.loadout.utils[1]].cooldown),
+        pin: p.pinTimer,
       },
       dt,
     );

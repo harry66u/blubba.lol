@@ -34,3 +34,19 @@ Phases follow spec §14. Each phase is committed separately and playable on its 
 - Blast jumping (from Phase 1) and air combos with a combo counter callout for the attacker.
 - Bots use braces, grapple recovery, grabs, timed escapes, throws toward edges, and stomps.
 - Context hints for new players (falling, hanging, holding, launched, stomp opportunities).
+
+## Phase 3: Loadouts ✅
+
+- Weapons (all charge by holding fire; limited ammo and reloads):
+  - **Air Cannon**: medium-range air blobs with splash.
+  - **Leaf Blower**: continuous stream that spins up while held and shoves (and slowly inflates)
+    everyone in it; its tank drains in seconds. Aim at the ground while airborne to hover.
+  - **Air Horn**: close-range cone blast with a HONK and recoil you can use to recover.
+  - **Pump Rifle**: long-range, lag-compensated hitscan with a tiny hitbox and extra inflation.
+- Mods (up to two, each a trade-off): Wide Nozzle, Big Tank, Charge Valve, Quick Valve, Long
+  Barrel. Charge/Quick Valve and Wide Nozzle/Long Barrel are mutually exclusive.
+- Utilities (pick two, C and V): Bounce Pad, Air Grenade, Inflatable Wall (becomes a raft under
+  you when thrown while falling), Vacuum Grenade.
+- Pickups: Soda Cans refill dash charges (with a burp); a rare Pin pops anyone at 100% inflation.
+- Loadout screen from the main menu and pause menu; changes apply on your next respawn.
+- Bots bring random loadouts and use utilities; `scripts/weapon-soak.ts` compares weapons.

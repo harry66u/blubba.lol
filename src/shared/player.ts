@@ -1,6 +1,9 @@
 import { BALANCE } from './balance';
 import { BTN_FIRE, BTN_GRAB, type InputFrame, pressesSince } from './input';
+import type { WeaponStats } from './loadout';
 import type { World } from './world';
+
+export type { WeaponStats } from './loadout';
 
 /**
  * Complete simulation state of one player. Every field is a number so the whole state can be
@@ -16,7 +19,7 @@ export const PLAYER_FIELDS = [
   'climbTimer', 'climbFromX', 'climbFromY', 'climbFromZ',
   'doubledTimer', 'grabCool', 'heldBy', 'holding', 'holdTimer', 'escapeUsed',
   'grappleCool', 'zipTimer', 'zipX', 'zipY', 'zipZ',
-  'spawnProt', 'hoverTimer',
+  'spawnProt', 'hoverTimer', 'hovering', 'pinTimer', 'blownTimer',
   'ammo', 'reloadTimer', 'fireCool', 'charge', 'charging',
   'u1Cool', 'u2Cool', 'u1Uses', 'u2Uses',
   'cJump', 'cDash', 'cBrace', 'cGrab', 'cGrapple', 'cReload', 'cU1', 'cU2', 'cTaunt',
@@ -40,6 +43,7 @@ export function createPlayerState(): PlayerState {
   s.holding = -1;
   s.dashCharges = BALANCE.dash.charges;
   s.ammo = BALANCE.weapons.airCannon.ammo;
+  s.hoverTimer = BALANCE.weapons.leafBlower.hoverTime;
   s.sinceHit = 999;
   return s;
 }
@@ -113,6 +117,8 @@ export class StepResult {
   util2 = false;
   taunt = false;
   fired: ShotSpec | null = null;
+  /** Leaf Blower stream strength this step (0 = not blowing). */
+  stream = 0;
 
   reset(): void {
     this.jumped = false;
@@ -136,15 +142,8 @@ export class StepResult {
     this.util2 = false;
     this.taunt = false;
     this.fired = null;
+    this.stream = 0;
   }
-}
-
-export interface WeaponStats {
-  ammo: number;
-  reloadTime: number;
-  fireCooldown: number;
-  chargeTime: number;
-  tapPower: number;
 }
 
 export interface Features {
@@ -254,7 +253,8 @@ function tickTimers(p: PlayerState, dt: number): void {
   p.fireCool = Math.max(0, p.fireCool - dt);
   p.u1Cool = Math.max(0, p.u1Cool - dt);
   p.u2Cool = Math.max(0, p.u2Cool - dt);
-  p.hoverTimer = Math.max(0, p.hoverTimer - dt);
+  p.pinTimer = Math.max(0, p.pinTimer - dt);
+  p.blownTimer = Math.max(0, p.blownTimer - dt);
   p.sinceHit += dt;
   if (p.mode === MODE_HELD || p.holding >= 0) p.holdTimer += dt;
   if (p.launchTimer > 0) {
@@ -423,7 +423,8 @@ function stepMove(
   const moveMult = (doubled ? K.doubleOverMoveMult : 1) * (p.charging ? P.chargingMoveMult : 1) * (p.holding >= 0 ? 0.6 : 1);
   if (p.onGround && !jumpedNow) {
     const sliding = p.slideTimer > 0;
-    const fr = sliding ? D.slideFriction : P.groundFriction;
+    // Caught in a leaf blower's stream: you skid instead of gripping the ground.
+    const fr = sliding || p.blownTimer > 0 ? D.slideFriction : P.groundFriction;
     const speed = Math.hypot(p.vx, p.vz);
     if (speed > 1e-4) {
       const control = Math.max(speed, P.stopSpeed);
@@ -826,6 +827,8 @@ function stepWeapon(p: PlayerState, inp: InputFrame, ctx: StepContext, out: Step
       p.ammo = W.ammo;
     }
   }
+  if (p.onGround) p.hoverTimer = W.hoverTime;
+  p.hovering = 0;
   const canAct = p.mode === MODE_NORMAL && p.doubledTimer <= 0 && p.holding < 0;
   const fireHeld = (inp.buttons & BTN_FIRE) !== 0 && canAct;
   // While holding someone, pulling the trigger throws them instead of shooting.
@@ -839,6 +842,36 @@ function stepWeapon(p: PlayerState, inp: InputFrame, ctx: StepContext, out: Step
   if (reloadP && canAct && p.ammo < W.ammo && p.reloadTimer <= 0 && !p.charging) {
     p.reloadTimer = W.reloadTime;
     out.reloadStart = true;
+  }
+
+  if (W.kind === 'stream') {
+    // Leaf Blower: blows while held, spinning up to full strength; the tank drains in seconds.
+    if (fireHeld && p.ammo > 0 && p.reloadTimer <= 0 && p.fireCool <= 0) {
+      p.charging = 1;
+      p.charge = Math.min(1, p.charge + dt / W.chargeTime);
+      p.ammo = Math.max(0, p.ammo - dt);
+      p.spawnProt = 0;
+      out.stream = W.tapPower + (1 - W.tapPower) * p.charge;
+      // Aimed at the ground while airborne: hover.
+      if (p.pitch < -0.75 && !p.onGround && p.hoverTimer > 0 && p.mode === MODE_NORMAL) {
+        const g = ctx.world.groundBelow(p.px, p.py + 0.1, p.pz, 7);
+        if (g !== null) {
+          p.hoverTimer -= dt;
+          p.hovering = 1;
+          if (p.vy < W.hoverLift * out.stream) p.vy = Math.min(W.hoverLift * out.stream, p.vy + 60 * dt);
+        }
+      }
+      if (p.ammo <= 0) {
+        p.charging = 0;
+        p.reloadTimer = W.reloadTime;
+        out.reloadStart = true;
+      }
+    } else {
+      if (p.charging) p.fireCool = W.fireCooldown;
+      p.charging = 0;
+      p.charge = Math.max(0, p.charge - dt * 3);
+    }
+    return;
   }
 
   if (p.charging) {
@@ -863,13 +896,23 @@ function stepWeapon(p: PlayerState, inp: InputFrame, ctx: StepContext, out: Step
       p.charging = 0;
       p.charge = 0;
       p.spawnProt = 0;
+      if (W.recoil > 0 && p.mode === MODE_NORMAL) {
+        // The Air Horn kicks you backwards (and up if you fire at the floor).
+        const k = W.recoil * power;
+        p.vx -= tmpDir.x * k;
+        p.vz -= tmpDir.z * k;
+        if (tmpDir.y < -0.3) {
+          p.vy = Math.max(p.vy, 0) - tmpDir.y * k;
+          p.onGround = 0;
+        }
+      }
       if (p.ammo <= 0) {
         p.ammo = 0;
         p.reloadTimer = W.reloadTime;
         out.reloadStart = true;
       }
     }
-  } else if (fireHeld && p.fireCool <= 0 && p.reloadTimer <= 0 && p.ammo > 0) {
+  } else if (fireHeld && p.fireCool <= 0 && p.reloadTimer <= 0 && p.ammo >= 1) {
     p.charging = 1;
     p.charge = Math.min(1, dt / W.chargeTime);
   }

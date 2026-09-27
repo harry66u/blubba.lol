@@ -13,6 +13,7 @@ import {
   type StepContext,
   type WeaponStats,
   createPlayerState,
+  copyPlayerState,
   depenetrate,
   eyeHeight,
   inflationMass,
@@ -23,6 +24,7 @@ import {
   stepPlayer,
 } from '../player';
 import { World } from '../world';
+import { DEFAULT_LOADOUT, type Loadout, MOD_IDS, UTILITY_IDS, type UtilityId, WEAPON_IDS, computeWeaponStats, sanitizeLoadout, utilityCooldown } from '../loadout';
 import { BOT_NAMES, BotBrain } from './bot';
 import type { GameEvent } from './events';
 
@@ -68,12 +70,67 @@ export interface SimPlayer {
   comboBy: number;
   comboCount: number;
   comboTime: number;
+  loadout: Loadout;
+  /** Applied at the next respawn so you can't swap weapons mid-fight. */
+  pendingLoadout: Loadout | null;
+  weapon: WeaponStats;
+  /** Recent positions for lag-compensated hitscan (ring buffer indexed by tick). */
+  history: { tick: number; px: number; py: number; pz: number; inflation: number; mode: number }[];
+  /** Last time each target got a "blow" event from this player's leaf blower. */
+  blowEvents: Map<number, number>;
+  streaming: boolean;
+}
+
+/** Thrown or fired objects. Kind 0 is a weapon shot; the rest are utilities. */
+export const PROJ_AIR = 0;
+export const PROJ_AIR_GRENADE = 1;
+export const PROJ_VACUUM = 2;
+export const PROJ_PAD = 3;
+export const PROJ_WALL = 4;
+
+const UTIL_PROJ: Record<UtilityId, number> = {
+  bouncePad: PROJ_PAD,
+  airGrenade: PROJ_AIR_GRENADE,
+  vacuumGrenade: PROJ_VACUUM,
+  inflatableWall: PROJ_WALL,
+};
+
+export interface VacuumField {
+  x: number;
+  y: number;
+  z: number;
+  owner: number;
+  until: number;
+}
+
+export interface Pickup {
+  id: number;
+  kind: 'soda' | 'pin';
+  x: number;
+  y: number;
+  z: number;
+  active: boolean;
+  respawnAt: number;
+}
+
+export interface DynamicSolidInfo {
+  id: number;
+  min: [number, number, number];
+  max: [number, number, number];
+  expires: number;
+  raft: boolean;
 }
 
 export interface Projectile {
   id: number;
   owner: number;
+  /** PROJ_* kind. */
   weapon: number;
+  /** Seconds until a grenade goes off (utilities only). */
+  fuse: number;
+  /** Horizontal direction it was thrown (walls face this way). */
+  throwX: number;
+  throwZ: number;
   x: number;
   y: number;
   z: number;
@@ -137,6 +194,11 @@ export class GameSim {
   /** Called whenever the match phase changes (the server uses it to broadcast). */
   onPhaseChange: (() => void) | null = null;
   readonly bots = new Map<number, BotBrain>();
+  readonly vacuums: VacuumField[] = [];
+  readonly pickups: Pickup[] = [];
+  readonly dynamicSolids = new Map<number, DynamicSolidInfo>();
+  private nextPinAt = 0;
+  private nextPadId = 1000;
   /** Center of the main play area; bots recover toward it. */
   readonly homePoint: { x: number; y: number; z: number };
 
@@ -146,7 +208,9 @@ export class GameSim {
     this.mode = opts.mode ?? 'knockout';
     this.durationSec = opts.durationSec ?? BALANCE.match.durationSec;
     this.features = { ...ALL_FEATURES, ...opts.features };
-    this.ctx = { world: this.world, dt: this.dt, weapon: this.weaponStats(), features: this.features };
+    this.ctx = { world: this.world, dt: this.dt, weapon: computeWeaponStats('airCannon', []), features: this.features };
+    this.map.pickups.forEach(([x, y, z], i) => this.pickups.push({ id: i, kind: 'soda', x, y, z, active: true, respawnAt: 0 }));
+    this.scheduleNextPin();
     const n = this.map.spawns.length;
     this.homePoint = {
       x: this.map.spawns.reduce((a, s) => a + s[0], 0) / n,
@@ -155,14 +219,10 @@ export class GameSim {
     };
   }
 
-  weaponStats(): WeaponStats {
-    const w = BALANCE.weapons.airCannon;
-    return { ammo: w.ammo, reloadTime: w.reloadTime, fireCooldown: w.fireCooldown, chargeTime: w.chargeTime, tapPower: w.tapPower };
-  }
 
   // --- Players -----------------------------------------------------------------------------
 
-  addPlayer(name: string, opts: { isBot?: boolean; color?: number; id?: number } = {}): SimPlayer {
+  addPlayer(name: string, opts: { isBot?: boolean; color?: number; id?: number; loadout?: Loadout } = {}): SimPlayer {
     const id = opts.id ?? this.freeId();
     const state = createPlayerState();
     state.mode = MODE_DEAD;
@@ -188,7 +248,14 @@ export class GameSim {
       comboBy: -1,
       comboCount: 0,
       comboTime: -999,
+      loadout: sanitizeLoadout(opts.loadout ?? DEFAULT_LOADOUT),
+      pendingLoadout: null,
+      weapon: computeWeaponStats('airCannon', []),
+      history: [],
+      blowEvents: new Map(),
+      streaming: false,
     };
+    p.weapon = computeWeaponStats(p.loadout.weapon, p.loadout.mods);
     this.players.set(id, p);
     this.respawn(p);
     this.updatePhase();
@@ -198,7 +265,11 @@ export class GameSim {
   addBot(skill = 0.5): SimPlayer {
     const used = new Set([...this.players.values()].map((p) => p.name));
     const name = BOT_NAMES.find((n) => !used.has(n)) ?? `Bot ${this.players.size + 1}`;
-    const p = this.addPlayer(name, { isBot: true });
+    // Bots bring a mix of weapons and utilities so every loadout shows up in public games.
+    const pick = <T,>(xs: readonly T[]) => xs[Math.floor(Math.random() * xs.length)];
+    const utils = [...UTILITY_IDS].sort(() => Math.random() - 0.5);
+    const loadout = sanitizeLoadout({ weapon: pick(WEAPON_IDS), mods: Math.random() < 0.5 ? [pick(MOD_IDS)] : [], utils: [utils[0], utils[1]] });
+    const p = this.addPlayer(name, { isBot: true, loadout });
     this.bots.set(p.id, new BotBrain(skill, p.id * 7919 + this.tick));
     return p;
   }
@@ -224,6 +295,29 @@ export class GameSim {
     const used = new Set([...this.players.values()].map((p) => p.color));
     for (let i = 0; i < 10; i++) if (!used.has(i)) return i;
     return Math.floor(Math.random() * 10);
+  }
+
+  /** Changes a player's loadout; it takes effect when they next respawn. */
+  setLoadout(id: number, raw: unknown): void {
+    const p = this.players.get(id);
+    if (!p) return;
+    const l = sanitizeLoadout(raw);
+    if (p.state.mode === MODE_DEAD || this.phase === 'waiting') {
+      p.loadout = l;
+      p.pendingLoadout = null;
+      p.weapon = computeWeaponStats(l.weapon, l.mods);
+      p.state.ammo = p.weapon.ammo;
+      p.state.charging = 0;
+      p.state.charge = 0;
+      p.state.reloadTimer = 0;
+      this.emitLoadout(p);
+    } else {
+      p.pendingLoadout = l;
+    }
+  }
+
+  private emitLoadout(p: SimPlayer): void {
+    this.events.push({ t: 'loadout', tick: this.tick, id: p.id, weapon: p.loadout.weapon, mods: [...p.loadout.mods], utils: [...p.loadout.utils] });
   }
 
   humanCount(): number {
@@ -272,6 +366,10 @@ export class GameSim {
     this.updateHolds();
     this.separatePlayers();
     this.stepProjectiles();
+    this.stepVacuums();
+    this.stepPickups();
+    this.expireDynamics();
+    this.recordHistory();
     this.checkBlastZones();
   }
 
@@ -282,6 +380,7 @@ export class GameSim {
     if (last) {
       p.lastSeq = last.seq;
       // Counters must follow the client even while dead so no phantom presses appear later.
+      this.ctx.weapon = p.weapon;
       stepPlayer(p.state, last, this.ctx, this.stepOut);
       p.lastInput = last;
     }
@@ -321,16 +420,31 @@ export class GameSim {
       p.lastInput = f;
     }
     const out = this.stepOut;
+    this.ctx.weapon = p.weapon;
     stepPlayer(s, f, this.ctx, out);
-    this.handleStepResult(p, out);
+    this.handleStepResult(p, out, f);
   }
 
-  private handleStepResult(p: SimPlayer, out: StepResult): void {
+  private handleStepResult(p: SimPlayer, out: StepResult, input: InputFrame): void {
     const s = p.state;
     const tick = this.tick;
     if (out.fired) {
-      this.spawnShot(p, out.fired.ox, out.fired.oy, out.fired.oz, out.fired.dx, out.fired.dy, out.fired.dz, out.fired.power, out.fired.charge, p.lastInput.seq);
+      const f = out.fired;
+      switch (p.weapon.kind) {
+        case 'cone':
+          this.fireCone(p, f.ox, f.oy, f.oz, f.dx, f.dy, f.dz, f.power);
+          break;
+        case 'hitscan':
+          this.fireHitscan(p, f.dx, f.dy, f.dz, f.power, input.viewTick);
+          break;
+        default:
+          this.spawnShot(p, f.ox, f.oy, f.oz, f.dx, f.dy, f.dz, f.power, f.charge, input.seq);
+      }
     }
+    p.streaming = out.stream > 0;
+    if (out.stream > 0) this.blow(p, out.stream);
+    if (out.util1) this.useUtility(p, 0);
+    if (out.util2) this.useUtility(p, 1);
     if (out.jumped) this.events.push({ t: 'move', tick, id: p.id, kind: 'jump', x: s.px, y: s.py, z: s.pz });
     if (out.doubleJumped) this.events.push({ t: 'move', tick, id: p.id, kind: 'djump', x: s.px, y: s.py, z: s.pz });
     if (out.dashed) {
@@ -369,14 +483,22 @@ export class GameSim {
 
   // --- Projectiles -------------------------------------------------------------------------
 
-  private spawnShot(p: SimPlayer, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, power: number, charge: number, clientSeq: number): void {
-    const w = BALANCE.weapons.airCannon;
+  private newProjectileId(): number {
     const id = this.nextProjectileId;
     this.nextProjectileId = (this.nextProjectileId % 65535) + 1;
+    return id;
+  }
+
+  private spawnShot(p: SimPlayer, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, power: number, charge: number, clientSeq: number): void {
+    const w = p.weapon;
+    const id = this.newProjectileId();
     const proj: Projectile = {
       id,
       owner: p.id,
-      weapon: 0,
+      weapon: PROJ_AIR,
+      fuse: 0,
+      throwX: 0,
+      throwZ: 0,
       x: ox,
       y: oy,
       z: oz,
@@ -416,6 +538,10 @@ export class GameSim {
     const dt = this.dt;
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const pr = this.projectiles[i];
+      if (pr.weapon !== PROJ_AIR) {
+        if (this.stepThrown(pr)) this.projectiles.splice(i, 1);
+        continue;
+      }
       const speed = Math.hypot(pr.vx, pr.vy, pr.vz);
       const steps = Math.max(1, Math.ceil((speed * dt) / (pr.radius * 0.8)));
       const sdt = dt / steps;
@@ -552,6 +678,16 @@ export class GameSim {
     target.comboTime = this.time;
     const braced = s.braceTimer > 0;
     const Br = BALANCE.brace;
+    const attacker = this.players.get(attackerId);
+    // A pin pops anyone already at maximum inflation, instantly.
+    if (attacker && attacker !== target && attacker.state.pinTimer > 0 && s.inflation >= BALANCE.inflation.max - 1e-6) {
+      attacker.state.pinTimer = 0;
+      target.lastAttacker = attacker.id;
+      target.lastAttackTime = this.time;
+      this.events.push({ t: 'pop', tick: this.tick, id: attacker.id, target: target.id, x: s.px, y: s.py + playerHeight(s) * 0.5, z: s.pz });
+      this.knockout(target, 'pin');
+      return;
+    }
     s.inflation = Math.min(BALANCE.inflation.max, s.inflation + inflationAdd * (braced ? Br.inflationMult : 1));
     const mass = inflationMass(s.inflation);
     const speed = (power * (K.base + K.growth * s.inflation)) / mass * (braced ? Br.knockbackMult : 1);
@@ -640,6 +776,485 @@ export class GameSim {
     if (!dead) p.launchBy = -1;
   }
 
+  // --- Weapons ---------------------------------------------------------------------------
+
+  /** Air Horn: instant cone blast in front of you. */
+  private fireCone(p: SimPlayer, _ox: number, _oy: number, _oz: number, dx: number, dy: number, dz: number, power: number): void {
+    const w = p.weapon;
+    const s = p.state;
+    const ex = s.px;
+    const ey = s.py + eyeHeight(s);
+    const ez = s.pz;
+    p.stats.shots++;
+    this.events.push({ t: 'honk', tick: this.tick, id: p.id, x: ex, y: ey, z: ez, dx, dy, dz, power, range: w.range, cone: w.cone });
+    for (const o of this.players.values()) {
+      if (o === p || o.state.mode === MODE_DEAD) continue;
+      const t = o.state;
+      const r = playerRadius(t);
+      const h = playerHeight(t);
+      const ay = Math.max(t.py + r, Math.min(t.py + h - r, ey));
+      let vx = t.px - ex;
+      let vy = ay - ey;
+      let vz = t.pz - ez;
+      const d = Math.hypot(vx, vy, vz) || 0.001;
+      if (d - r > w.range) continue;
+      vx /= d;
+      vy /= d;
+      vz /= d;
+      const ang = Math.acos(Math.max(-1, Math.min(1, vx * dx + vy * dy + vz * dz))) - Math.atan2(r, d);
+      if (ang > w.cone) continue;
+      if (this.world.raycast(ex, ey, ez, vx, vy, vz, Math.max(0, d - r))) continue;
+      const falloff = 1 - 0.5 * Math.max(0, Math.min(1, (d - 2) / Math.max(0.1, w.range - 2)));
+      this.applyHit(o, p.id, dx * 0.5 + vx * 0.5, dy * 0.5 + vy * 0.5, dz * 0.5 + vz * 0.5, power * w.knockback * falloff, w.inflation * power * falloff, {
+        direct: true,
+        low: false,
+        x: t.px - vx * r,
+        y: ay,
+        z: t.pz - vz * r,
+      });
+    }
+  }
+
+  /** Pump Rifle: lag-compensated hitscan, judged against what the shooter saw. */
+  private fireHitscan(p: SimPlayer, dx: number, dy: number, dz: number, power: number, viewTick: number): void {
+    const w = p.weapon;
+    const s = p.state;
+    const K = BALANCE.knockback;
+    const ex = s.px;
+    const ey = s.py + eyeHeight(s);
+    const ez = s.pz;
+    const rewind = viewTick > 0 ? Math.max(this.tick - 40, Math.min(this.tick, Math.round(viewTick))) : this.tick;
+    let best: SimPlayer | null = null;
+    let bestT = w.range;
+    const scratch = this.scratchState;
+    let bestPast: { px: number; py: number; pz: number; inflation: number } | null = null;
+    for (const o of this.players.values()) {
+      if (o === p || o.state.mode === MODE_DEAD) continue;
+      const past = this.stateAt(o, rewind);
+      if (past.mode === MODE_DEAD) continue;
+      copyPlayerState(scratch, o.state);
+      scratch.px = past.px;
+      scratch.py = past.py;
+      scratch.pz = past.pz;
+      scratch.inflation = past.inflation;
+      const t = rayCapsule(ex, ey, ez, dx, dy, dz, scratch, playerRadius(scratch) + w.rayRadius);
+      if (t !== null && t < bestT) {
+        bestT = t;
+        best = o;
+        bestPast = past;
+      }
+    }
+    const wh = this.world.raycast(ex, ey, ez, dx, dy, dz, w.range);
+    let endT = wh ? wh.dist : w.range;
+    p.stats.shots++;
+    if (best && bestPast && bestT < endT) {
+      endT = bestT;
+      const t = best.state;
+      // Impact on the rewound body, moved to where the target is now.
+      const ix = ex + dx * bestT + (t.px - bestPast.px);
+      const iy = ey + dy * bestT + (t.py - bestPast.py);
+      const iz = ez + dz * bestT + (t.pz - bestPast.pz);
+      const h = playerHeight(t);
+      let hx = t.px - ix;
+      let hy = t.py + h * 0.5 - iy;
+      let hz = t.pz - iz;
+      const l = Math.hypot(hx, hy, hz) || 1;
+      const b = K.travelBias;
+      hx = (hx / l) * (1 - b) + dx * b;
+      hy = (hy / l) * (1 - b) + dy * b;
+      hz = (hz / l) * (1 - b) + dz * b;
+      const low = iy < t.py + h * K.lowHitFraction;
+      this.applyHit(best, p.id, hx, hy, hz, power * w.knockback, w.inflation * power, { direct: true, low, x: ix, y: iy, z: iz });
+    }
+    this.events.push({ t: 'tracer', tick: this.tick, id: p.id, x: ex, y: ey, z: ez, x2: ex + dx * endT, y2: ey + dy * endT, z2: ez + dz * endT, hit: !!best && bestT <= endT, power });
+  }
+
+  private readonly scratchState = createPlayerState();
+
+  /** Leaf Blower: push everyone in the stream this step. */
+  private blow(p: SimPlayer, strength: number): void {
+    const w = p.weapon;
+    const s = p.state;
+    const K = BALANCE.knockback;
+    const d0 = lookDir(s.yaw, s.pitch, { x: 0, y: 0, z: 0 });
+    const ex = s.px;
+    const ey = s.py + eyeHeight(s);
+    const ez = s.pz;
+    for (const o of this.players.values()) {
+      if (o === p) continue;
+      const t = o.state;
+      if (t.mode === MODE_DEAD || t.mode === MODE_HELD || t.spawnProt > 0) continue;
+      const r = playerRadius(t);
+      const h = playerHeight(t);
+      const ay = Math.max(t.py + r, Math.min(t.py + h - r, ey));
+      let vx = t.px - ex;
+      let vy = ay - ey;
+      let vz = t.pz - ez;
+      const d = Math.hypot(vx, vy, vz) || 0.001;
+      if (d - r > w.range) continue;
+      vx /= d;
+      vy /= d;
+      vz /= d;
+      const ang = Math.acos(Math.max(-1, Math.min(1, vx * d0.x + vy * d0.y + vz * d0.z))) - Math.atan2(r, d);
+      if (ang > w.cone) continue;
+      if (this.world.raycast(ex, ey, ez, vx, vy, vz, Math.max(0, d - r))) continue;
+      const falloff = 1 - 0.6 * Math.min(1, d / w.range);
+      const accel = (w.knockback * strength * falloff * (K.base + K.growth * t.inflation)) / K.base / inflationMass(t.inflation);
+      let px = d0.x * 0.7 + vx * 0.3;
+      let py = d0.y * 0.7 + vy * 0.3 + 0.2;
+      let pz = d0.z * 0.7 + vz * 0.3;
+      const pl = Math.hypot(px, py, pz) || 1;
+      px /= pl;
+      py /= pl;
+      pz /= pl;
+      if ((t.mode === MODE_HANG || t.mode === MODE_CLIMB) && strength > 0.6) releaseLedge(t, 0);
+      t.vx += px * accel * this.dt;
+      t.vy += py * accel * this.dt;
+      t.vz += pz * accel * this.dt;
+      t.blownTimer = 0.15;
+      t.inflation = Math.min(BALANCE.inflation.max, t.inflation + w.inflation * strength * falloff * this.dt);
+      t.sinceHit = 0;
+      o.lastAttacker = p.id;
+      o.lastAttackTime = this.time;
+      if (o.launchBy !== p.id) {
+        o.launchBy = p.id;
+        o.launchFromX = t.px;
+        o.launchFromZ = t.pz;
+      }
+      const lastEv = p.blowEvents.get(o.id) ?? -1;
+      if (this.time - lastEv > 0.35) {
+        p.blowEvents.set(o.id, this.time);
+        this.events.push({ t: 'blow', tick: this.tick, id: p.id, target: o.id });
+      }
+    }
+  }
+
+  private recordHistory(): void {
+    for (const p of this.players.values()) {
+      const s = p.state;
+      p.history.push({ tick: this.tick, px: s.px, py: s.py, pz: s.pz, inflation: s.inflation, mode: s.mode });
+      if (p.history.length > 45) p.history.shift();
+    }
+  }
+
+  private stateAt(p: SimPlayer, tick: number): { px: number; py: number; pz: number; inflation: number; mode: number } {
+    for (let i = p.history.length - 1; i >= 0; i--) {
+      if (p.history[i].tick <= tick) return p.history[i];
+    }
+    return p.state;
+  }
+
+  // --- Utilities -------------------------------------------------------------------------
+
+  private useUtility(p: SimPlayer, slot: 0 | 1): void {
+    const s = p.state;
+    const id = p.loadout.utils[slot];
+    const key = slot === 0 ? 'u1Cool' : 'u2Cool';
+    if (s[key] > 0 || s.mode !== MODE_NORMAL || s.holding >= 0) return;
+    s[key] = utilityCooldown(id);
+    s.spawnProt = 0;
+    const U = BALANCE.utilities;
+    // An inflatable wall thrown while falling with nothing below becomes a raft under your feet.
+    if (id === 'inflatableWall' && !s.onGround && this.world.groundBelow(s.px, s.py, s.pz, 12) === null) {
+      this.deployRaft(p);
+      return;
+    }
+    const d = lookDir(s.yaw, s.pitch, { x: 0, y: 0, z: 0 });
+    const speed = U[id].throwSpeed;
+    const ox = s.px + d.x * 0.6;
+    const oy = s.py + eyeHeight(s) + d.y * 0.6 - 0.2;
+    const oz = s.pz + d.z * 0.6;
+    const hl = Math.hypot(d.x, d.z) || 1;
+    const proj: Projectile = {
+      id: this.newProjectileId(),
+      owner: p.id,
+      weapon: UTIL_PROJ[id],
+      fuse: 'fuse' in U[id] ? (U[id] as { fuse: number }).fuse : 99,
+      throwX: d.x / hl,
+      throwZ: d.z / hl,
+      x: ox,
+      y: oy,
+      z: oz,
+      vx: d.x * speed + s.vx * 0.3,
+      vy: d.y * speed + 4,
+      vz: d.z * speed + s.vz * 0.3,
+      radius: 0.35,
+      power: 1,
+      charge: 1,
+      gravity: U.gravity,
+      expires: this.time + 6,
+      blastRadius: 0,
+      inflation: 0,
+      knockback: 0,
+    };
+    this.projectiles.push(proj);
+    this.events.push({ t: 'shot', tick: this.tick, id: proj.id, owner: p.id, w: proj.weapon, x: ox, y: oy, z: oz, vx: proj.vx, vy: proj.vy, vz: proj.vz, r: proj.radius, power: 1, g: proj.gravity });
+  }
+
+  private readonly sweepOut = { d: 0, hit: -1 };
+
+  /** Moves a thrown utility. Returns true when it's gone (exploded, deployed, or lost). */
+  private stepThrown(pr: Projectile): boolean {
+    const dt = this.dt;
+    const half = pr.radius;
+    pr.fuse -= dt;
+    pr.vy -= pr.gravity * dt;
+    const grenade = pr.weapon === PROJ_AIR_GRENADE || pr.weapon === PROJ_VACUUM;
+    // Grenades go off on contact with a player.
+    if (grenade) {
+      for (const p of this.players.values()) {
+        if (p.id === pr.owner || p.state.mode === MODE_DEAD) continue;
+        if (capsuleSphere(p.state, pr.x, pr.y, pr.z, pr.radius)) {
+          this.detonate(pr);
+          return true;
+        }
+      }
+    }
+    let bounced = false;
+    let landed = false;
+    const box = (): [number, number, number, number, number, number] => [pr.x - half, pr.y - half, pr.z - half, pr.x + half, pr.y + half, pr.z + half];
+    for (const axis of [1, 0, 2] as const) {
+      const v = axis === 0 ? pr.vx : axis === 1 ? pr.vy : pr.vz;
+      const b = box();
+      this.world.sweepAxis(axis, v * dt, b[0], b[1], b[2], b[3], b[4], b[5], this.sweepOut);
+      if (axis === 0) pr.x += this.sweepOut.d;
+      else if (axis === 1) pr.y += this.sweepOut.d;
+      else pr.z += this.sweepOut.d;
+      if (this.sweepOut.hit >= 0) {
+        if (axis === 1 && v < 0) {
+          landed = true;
+          if (Math.abs(pr.vy) > 3) bounced = true;
+          pr.vy = -pr.vy * 0.35;
+          pr.vx *= 0.7;
+          pr.vz *= 0.7;
+        } else if (axis === 1) {
+          pr.vy = 0;
+        } else {
+          if (axis === 0) pr.vx = -pr.vx * 0.4;
+          else pr.vz = -pr.vz * 0.4;
+          bounced = true;
+        }
+      }
+    }
+    if ((pr.weapon === PROJ_PAD || pr.weapon === PROJ_WALL) && landed) {
+      if (pr.weapon === PROJ_PAD) this.deployPad(pr);
+      else this.deployWall(pr);
+      return true;
+    }
+    if (bounced) this.events.push({ t: 'proj', tick: this.tick, id: pr.id, x: pr.x, y: pr.y, z: pr.z, vx: pr.vx, vy: pr.vy, vz: pr.vz });
+    if (grenade && pr.fuse <= 0) {
+      this.detonate(pr);
+      return true;
+    }
+    if (this.time >= pr.expires || pr.y < this.map.blast.minY) {
+      this.events.push({ t: 'fizzle', tick: this.tick, id: pr.id, x: pr.x, y: pr.y, z: pr.z });
+      return true;
+    }
+    return false;
+  }
+
+  private detonate(pr: Projectile): void {
+    const U = BALANCE.utilities;
+    if (pr.weapon === PROJ_VACUUM) {
+      const until = this.time + U.vacuumGrenade.duration;
+      this.vacuums.push({ x: pr.x, y: pr.y, z: pr.z, owner: pr.owner, until });
+      this.events.push({ t: 'vacuum', tick: this.tick, id: pr.id, x: pr.x, y: pr.y, z: pr.z, until: Math.round(until / this.dt) });
+      return;
+    }
+    const G = U.airGrenade;
+    this.events.push({ t: 'boom', tick: this.tick, id: pr.id, x: pr.x, y: pr.y, z: pr.z, r: G.radius, power: 1.3, owner: pr.owner, k: pr.weapon });
+    this.blastAt(pr.x, pr.y, pr.z, G.radius, G.knockback, G.inflation, pr.owner);
+  }
+
+  /** Outward blast used by the Air Grenade: full power at the center, 30% at the edge. */
+  private blastAt(x: number, y: number, z: number, radius: number, knockback: number, inflation: number, owner: number): void {
+    for (const p of this.players.values()) {
+      const s = p.state;
+      if (s.mode === MODE_DEAD) continue;
+      const r = playerRadius(s);
+      const h = playerHeight(s);
+      const ay = Math.max(s.py + r, Math.min(s.py + h - r, y));
+      const d = Math.max(0, Math.hypot(x - s.px, y - ay, z - s.pz) - r);
+      if (d > radius) continue;
+      const falloff = 0.3 + 0.7 * (1 - d / radius);
+      let dx = s.px - x;
+      let dy = s.py + h * 0.5 - y;
+      let dz = s.pz - z;
+      const l = Math.hypot(dx, dy, dz) || 1;
+      dx /= l;
+      dy /= l;
+      dz /= l;
+      if (p.id === owner) this.blastJump(p, dx, dy, dz, falloff, 1);
+      else this.applyHit(p, owner, dx, dy, dz, knockback * falloff, inflation * falloff, { direct: false, low: false, x, y, z });
+    }
+  }
+
+  private stepVacuums(): void {
+    const V = BALANCE.utilities.vacuumGrenade;
+    for (let i = this.vacuums.length - 1; i >= 0; i--) {
+      const f = this.vacuums[i];
+      if (this.time >= f.until) {
+        this.vacuums.splice(i, 1);
+        continue;
+      }
+      for (const p of this.players.values()) {
+        const s = p.state;
+        if (p.id === f.owner || s.mode !== MODE_NORMAL || s.spawnProt > 0) continue;
+        const cy = s.py + playerHeight(s) * 0.5;
+        let dx = f.x - s.px;
+        let dy = f.y - cy;
+        let dz = f.z - s.pz;
+        const d = Math.hypot(dx, dy, dz);
+        if (d > V.radius || d < 0.6) continue;
+        dx /= d;
+        dy /= d;
+        dz /= d;
+        const accel = (V.pull * (1 - (d / V.radius) * 0.5)) / inflationMass(s.inflation);
+        s.vx += dx * accel * this.dt;
+        s.vy += (dy * accel + (dy > 0 ? 6 : 0)) * this.dt;
+        s.vz += dz * accel * this.dt;
+        s.blownTimer = 0.15;
+        if (f.owner >= 0) {
+          p.lastAttacker = f.owner;
+          p.lastAttackTime = this.time;
+        }
+      }
+    }
+  }
+
+  private deployPad(pr: Projectile): void {
+    const U = BALANCE.utilities.bouncePad;
+    const id = this.nextPadId++;
+    const until = this.time + U.lifetime;
+    const y = pr.y - pr.radius;
+    this.world.addPad({ x: pr.x, y, z: pr.z, half: U.half, strength: U.strength, owner: pr.owner, expires: until }, id);
+    this.events.push({ t: 'pad', tick: this.tick, id, x: pr.x, y, z: pr.z, half: U.half, strength: U.strength, until: Math.round(until / this.dt) });
+  }
+
+  private deployWall(pr: Projectile): void {
+    const W = BALANCE.utilities.inflatableWall;
+    const y = pr.y - pr.radius;
+    const alongX = Math.abs(pr.throwX) >= Math.abs(pr.throwZ);
+    const hx = alongX ? W.thickness / 2 : W.width / 2;
+    const hz = alongX ? W.width / 2 : W.thickness / 2;
+    this.addSolid([pr.x - hx, y, pr.z - hz], [pr.x + hx, y + W.height, pr.z + hz], W.lifetime, false);
+  }
+
+  private deployRaft(p: SimPlayer): void {
+    const W = BALANCE.utilities.inflatableWall;
+    const s = p.state;
+    const top = s.py - 0.05;
+    const h = W.raftSize / 2;
+    this.addSolid([s.px - h, top - W.thickness, s.pz - h], [s.px + h, top, s.pz + h], W.raftLifetime, true);
+    if (s.vy < -12) s.vy = -12;
+  }
+
+  private addSolid(min: [number, number, number], max: [number, number, number], life: number, raft: boolean): void {
+    const id = this.world.addDynamicSolid({ min, max, ledge: true });
+    const until = this.time + life;
+    this.dynamicSolids.set(id, { id, min, max, expires: until, raft });
+    this.events.push({ t: 'solid', tick: this.tick, id, min, max, until: Math.round(until / this.dt), raft });
+    // Anyone caught inside gets squeezed out.
+    for (const p of this.players.values()) if (p.state.mode === MODE_NORMAL) depenetrate(p.state, this.world);
+  }
+
+  private expireDynamics(): void {
+    for (const [id, d] of this.dynamicSolids) {
+      if (d.expires <= this.time) {
+        this.world.setSolidAt(id, null);
+        this.dynamicSolids.delete(id);
+        this.events.push({ t: 'solidGone', tick: this.tick, id });
+        for (const p of this.players.values()) {
+          if (p.state.groundId === id) p.state.onGround = 0;
+          if (p.state.hangId === id && (p.state.mode === MODE_HANG || p.state.mode === MODE_CLIMB)) releaseLedge(p.state, 0);
+        }
+      }
+    }
+    for (const pad of [...this.world.pads]) {
+      if (pad.expires <= this.time) {
+        this.world.removePad(pad.id);
+        this.events.push({ t: 'padGone', tick: this.tick, id: pad.id });
+      }
+    }
+  }
+
+  // --- Pickups ------------------------------------------------------------------------------
+
+  private scheduleNextPin(): void {
+    const P = BALANCE.pickups;
+    this.nextPinAt = this.time + P.pinIntervalMin + Math.random() * (P.pinIntervalMax - P.pinIntervalMin);
+  }
+
+  private stepPickups(): void {
+    const P = BALANCE.pickups;
+    if (this.time >= this.nextPinAt && this.pickups.length) {
+      const pinOut = this.pickups.some((k) => k.kind === 'pin' && k.active) || [...this.players.values()].some((p) => p.state.pinTimer > 0);
+      if (!pinOut) {
+        const k = this.pickups[Math.floor(Math.random() * this.pickups.length)];
+        k.kind = 'pin';
+        k.active = true;
+        this.events.push({ t: 'pickup', tick: this.tick, id: k.id, kind: 'pin', x: k.x, y: k.y, z: k.z, active: true, by: -1 });
+      }
+      this.scheduleNextPin();
+    }
+    for (const k of this.pickups) {
+      if (!k.active) {
+        if (this.time >= k.respawnAt) {
+          k.active = true;
+          k.kind = 'soda';
+          this.events.push({ t: 'pickup', tick: this.tick, id: k.id, kind: 'soda', x: k.x, y: k.y, z: k.z, active: true, by: -1 });
+        }
+        continue;
+      }
+      for (const p of this.players.values()) {
+        const s = p.state;
+        if (s.mode === MODE_DEAD || s.mode === MODE_HELD) continue;
+        if (Math.hypot(s.px - k.x, s.pz - k.z) > P.radius + playerRadius(s) || s.py > k.y + 1.6 || s.py + playerHeight(s) < k.y) continue;
+        if (k.kind === 'soda') {
+          s.dashCharges = BALANCE.dash.charges;
+          s.dashRecharge = 0;
+        } else {
+          s.pinTimer = P.pinDuration;
+        }
+        this.events.push({ t: 'pickup', tick: this.tick, id: k.id, kind: k.kind, x: k.x, y: k.y, z: k.z, active: false, by: p.id });
+        k.active = false;
+        k.kind = 'soda';
+        k.respawnAt = this.time + P.sodaRespawn;
+        break;
+      }
+    }
+  }
+
+  private resetEntities(): void {
+    this.vacuums.length = 0;
+    for (const id of this.dynamicSolids.keys()) {
+      this.world.setSolidAt(id, null);
+      this.events.push({ t: 'solidGone', tick: this.tick, id });
+    }
+    this.dynamicSolids.clear();
+    for (const pad of [...this.world.pads]) {
+      if (pad.owner >= 0) {
+        this.world.removePad(pad.id);
+        this.events.push({ t: 'padGone', tick: this.tick, id: pad.id });
+      }
+    }
+    for (const k of this.pickups) {
+      k.kind = 'soda';
+      k.active = true;
+      this.events.push({ t: 'pickup', tick: this.tick, id: k.id, kind: 'soda', x: k.x, y: k.y, z: k.z, active: true, by: -1 });
+    }
+    this.scheduleNextPin();
+  }
+
+  /** Everything a player joining mid-match needs to see the current world. */
+  entitySnapshot(): { pickups: Pickup[]; solids: DynamicSolidInfo[]; pads: { id: number; x: number; y: number; z: number; half: number; strength: number; until: number }[] } {
+    return {
+      pickups: this.pickups.map((k) => ({ ...k })),
+      solids: [...this.dynamicSolids.values()].map((d) => ({ ...d, expires: Math.round(d.expires / this.dt) })),
+      pads: this.world.pads.filter((p) => p.owner >= 0).map((p) => ({ id: p.id, x: p.x, y: p.y, z: p.z, half: p.half, strength: p.strength, until: Math.round(p.expires / this.dt) })),
+    };
+  }
+
   // --- Player interactions -----------------------------------------------------------------
 
   /** Grab key: stomp a hanging player's hands, or grab someone in front of you. */
@@ -681,6 +1296,14 @@ export class GameSim {
   private startGrab(p: SimPlayer, target: SimPlayer): void {
     const s = p.state;
     const t = target.state;
+    if (s.pinTimer > 0 && t.inflation >= BALANCE.inflation.max - 1e-6) {
+      s.pinTimer = 0;
+      target.lastAttacker = p.id;
+      target.lastAttackTime = this.time;
+      this.events.push({ t: 'pop', tick: this.tick, id: p.id, target: target.id, x: t.px, y: t.py + playerHeight(t) * 0.5, z: t.pz });
+      this.knockout(target, 'pin');
+      return;
+    }
     if (t.mode === MODE_HANG || t.mode === MODE_CLIMB) releaseLedge(t, 0);
     if (t.holding >= 0) this.releaseHold(target);
     t.mode = MODE_HELD;
@@ -954,13 +1577,13 @@ export class GameSim {
     }
   }
 
-  knockout(p: SimPlayer): void {
+  knockout(p: SimPlayer, tag?: string): void {
     const s = p.state;
     this.releaseInvolving(p);
     const credit = p.lastAttacker >= 0 && this.time - p.lastAttackTime <= BALANCE.knockback.creditWindow;
     const killer = credit ? this.players.get(p.lastAttacker) : undefined;
     let points = 0;
-    const tags: string[] = [];
+    const tags: string[] = tag ? [tag] : [];
     if (killer && this.phase === 'playing') {
       points = BALANCE.scoring.knockout;
       killer.score += points;
@@ -999,6 +1622,13 @@ export class GameSim {
     const keep = { cJump: s.cJump, cDash: s.cDash, cBrace: s.cBrace, cGrab: s.cGrab, cGrapple: s.cGrapple, cReload: s.cReload, cU1: s.cU1, cU2: s.cU2, cTaunt: s.cTaunt, yaw: s.yaw };
     const fresh = createPlayerState();
     Object.assign(s, fresh, keep);
+    if (p.pendingLoadout) {
+      p.loadout = p.pendingLoadout;
+      p.pendingLoadout = null;
+      this.emitLoadout(p);
+    }
+    p.weapon = computeWeaponStats(p.loadout.weapon, p.loadout.mods);
+    s.hoverTimer = p.weapon.hoverTime;
     const sp = this.pickSpawn(p.id);
     s.px = sp[0];
     s.py = sp[1] + 0.01;
@@ -1008,7 +1638,7 @@ export class GameSim {
     s.mode = MODE_NORMAL;
     s.onGround = 1;
     s.spawnProt = BALANCE.match.spawnProtection;
-    s.ammo = this.ctx.weapon.ammo;
+    s.ammo = p.weapon.ammo;
     p.lastAttacker = -1;
     p.launchBy = -1;
     this.events.push({ t: 'spawn', tick: this.tick, id: p.id, x: s.px, y: s.py, z: s.pz });
@@ -1053,6 +1683,7 @@ export class GameSim {
       this.respawn(p);
     }
     this.projectiles.length = 0;
+    this.resetEntities();
     this.onPhaseChange?.();
   }
 

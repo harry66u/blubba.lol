@@ -110,7 +110,9 @@ export const BALANCE = {
   },
 
   weapons: {
+    /** Balanced, medium range; charges into a heavy shot. */
     airCannon: {
+      kind: 'projectile',
       ammo: 5,
       reloadTime: 1.5,
       fireCooldown: 0.28,
@@ -125,7 +127,108 @@ export const BALANCE = {
       /** Inflation added by a full-power direct hit. */
       inflation: 0.14,
       knockback: 1.0,
+      range: 0,
+      cone: 0,
+      rayRadius: 0,
+      recoil: 0,
     },
+    /** Continuous stream that pushes; spins up while held. Aim at the ground to hover. */
+    leafBlower: {
+      kind: 'stream',
+      /** Seconds of blowing per tank. */
+      ammo: 3.5,
+      reloadTime: 2,
+      fireCooldown: 0.15,
+      /** Spin-up time to full strength. */
+      chargeTime: 0.8,
+      tapPower: 0.35,
+      range: 9,
+      /** Half-angle of the stream cone (radians). */
+      cone: 0.38,
+      /** Push acceleration at full strength on a fresh target (m/s²). */
+      knockback: 22,
+      /** Inflation per second of full-strength blowing. */
+      inflation: 0.07,
+      projSpeed: 0,
+      projRadius: 0,
+      projLifetime: 0,
+      projGravity: 0,
+      blastRadius: 0,
+      rayRadius: 0,
+      recoil: 0,
+      hoverLift: 2.5,
+      hoverTime: 1.2,
+    },
+    /** Close-range cone blast with a loud honk. */
+    airHorn: {
+      kind: 'cone',
+      ammo: 4,
+      reloadTime: 1.8,
+      fireCooldown: 0.45,
+      chargeTime: 0.6,
+      tapPower: 0.4,
+      range: 6.5,
+      cone: 0.62,
+      knockback: 1.45,
+      inflation: 0.13,
+      /** Push back on the shooter (lets you use it to recover). */
+      recoil: 7,
+      projSpeed: 0,
+      projRadius: 0,
+      projLifetime: 0,
+      projGravity: 0,
+      blastRadius: 0,
+      rayRadius: 0,
+    },
+    /** Long-range precise shots that add extra inflation. Rewards accurate aim. */
+    pumpRifle: {
+      kind: 'hitscan',
+      ammo: 3,
+      reloadTime: 2,
+      fireCooldown: 0.6,
+      chargeTime: 1.0,
+      tapPower: 0.3,
+      range: 90,
+      /** Tiny: this is the one weapon that doesn't forgive sloppy aim. */
+      rayRadius: 0.12,
+      knockback: 0.7,
+      inflation: 0.24,
+      projSpeed: 0,
+      projRadius: 0,
+      projLifetime: 0,
+      projGravity: 0,
+      blastRadius: 0,
+      cone: 0,
+      recoil: 0,
+    },
+  },
+
+  /** Every mod is a trade-off (multipliers on the weapon's stats). */
+  mods: {
+    wideNozzle: { radius: 1.35, blast: 1.25, cone: 1.35, range: 0.7 },
+    bigTank: { ammo: 1.6, reload: 1.4 },
+    chargeValve: { knockback: 1.2, inflation: 1.1, fireCooldown: 1.6, chargeTime: 1.2 },
+    quickValve: { fireCooldown: 0.6, chargeTime: 0.7, knockback: 0.82, inflation: 0.9 },
+    longBarrel: { range: 1.35, radius: 0.75, cone: 0.7, blast: 0.85 },
+  },
+
+  utilities: {
+    bouncePad: { cooldown: 12, throwSpeed: 14, lifetime: 10, strength: 19, half: 1.1 },
+    airGrenade: { cooldown: 10, throwSpeed: 18, fuse: 1.2, radius: 4.5, knockback: 0.95, inflation: 0.06 },
+    inflatableWall: { cooldown: 14, throwSpeed: 13, lifetime: 6, width: 4.5, height: 3, thickness: 0.6, raftLifetime: 3.5, raftSize: 3.6 },
+    vacuumGrenade: { cooldown: 12, throwSpeed: 18, fuse: 1.0, radius: 7, duration: 1.3, pull: 24 },
+    /** Thrown utilities fall with this gravity. */
+    gravity: 22,
+  },
+
+  pickups: {
+    radius: 1.2,
+    sodaRespawn: 15,
+    /** A pin appears somewhere on the map every this-many seconds (random within the range). */
+    pinIntervalMin: 70,
+    pinIntervalMax: 110,
+    /** How long you keep a pin once you grab it. */
+    pinDuration: 20,
   },
 
   brace: {
@@ -209,4 +312,4 @@ export const BALANCE = {
   },
 };
 
-export type WeaponId = 'airCannon';
+

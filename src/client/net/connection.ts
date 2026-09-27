@@ -1,4 +1,5 @@
 import type { InputFrame } from '../../shared/input';
+import type { Loadout } from '../../shared/loadout';
 import {
   type ClientMessage,
   type JoinRequest,
@@ -54,9 +55,9 @@ export class Connection {
     return this.openPromise;
   }
 
-  async join(name: string, guestId: string, join: JoinRequest): Promise<void> {
+  async join(name: string, guestId: string, join: JoinRequest, loadout?: Loadout): Promise<void> {
     await this.warm();
-    this.send({ type: 'hello', v: PROTOCOL_VERSION, name, guestId, join });
+    this.send({ type: 'hello', v: PROTOCOL_VERSION, name, guestId, join, loadout });
     if (this.pingTimer === null) {
       this.pingTimer = window.setInterval(() => this.send({ type: 'ping', t: performance.now() }), 2000);
       this.send({ type: 'ping', t: performance.now() });

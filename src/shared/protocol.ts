@@ -1,9 +1,10 @@
 import { INPUT_BYTES, type InputFrame, readInput, writeInput } from './input';
 import { type Features, MODE_DEAD, PLAYER_FIELDS, type PlayerState } from './player';
 import type { GameEvent } from './game/events';
-import type { MatchPhase, MatchResult, ModeId } from './game/sim';
+import type { DynamicSolidInfo, MatchPhase, MatchResult, ModeId, Pickup } from './game/sim';
+import type { Loadout } from './loadout';
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 // --- Binary message ids -------------------------------------------------------------------
 export const MSG_INPUTS = 1;
@@ -24,7 +25,8 @@ export interface RoomSettings {
 }
 
 export type ClientMessage =
-  | { type: 'hello'; v: number; name: string; guestId: string; join: JoinRequest }
+  | { type: 'hello'; v: number; name: string; guestId: string; join: JoinRequest; loadout?: Loadout }
+  | { type: 'loadout'; loadout: Loadout }
   | { type: 'ping'; t: number }
   | { type: 'name'; name: string }
   | { type: 'host'; action: 'kick'; id: number }
@@ -57,6 +59,12 @@ export type ServerMessage =
   | { type: 'roster'; players: RosterEntry[] }
   | { type: 'match'; phase: MatchPhase; endsAtTick: number; number: number; result: MatchResult | null }
   | { type: 'ev'; list: GameEvent[] }
+  | {
+      type: 'entities';
+      pickups: Pickup[];
+      solids: DynamicSolidInfo[];
+      pads: { id: number; x: number; y: number; z: number; half: number; strength: number; until: number }[];
+    }
   | { type: 'pong'; t: number; tick: number }
   | { type: 'error'; code: 'full' | 'not_found' | 'version' | 'kicked' | 'bad_name' | 'server'; message: string };
 
@@ -98,6 +106,9 @@ export const FLAG_SLIDING = 128;
 export const FLAG_RELOADING = 256;
 export const FLAG_HOVER = 512;
 export const FLAG_ZIP = 1024;
+export const FLAG_PIN = 2048;
+export const FLAG_STREAM = 4096;
+export const FLAG_BLOWN = 8192;
 
 /** What every client knows about every player (interpolated for rendering). */
 export interface PublicPlayer {
@@ -118,6 +129,7 @@ export interface PublicPlayer {
   holding: number;
   dashCharges: number;
   hangAngle: number;
+  weapon: number;
 }
 
 export interface Snapshot {
@@ -128,7 +140,7 @@ export interface Snapshot {
   players: PublicPlayer[];
 }
 
-const PUBLIC_BYTES = 1 + 12 + 6 + 2 + 2 + 2 + 1 + 2 + 1 + 1 + 1 + 1 + 1;
+const PUBLIC_BYTES = 1 + 12 + 6 + 2 + 2 + 2 + 1 + 2 + 1 + 1 + 1 + 1 + 1 + 1;
 const TWO_PI = Math.PI * 2;
 
 export function publicFlags(s: PlayerState): number {
@@ -142,8 +154,10 @@ export function publicFlags(s: PlayerState): number {
   if (s.dashTimer > 0) f |= FLAG_DASHING;
   if (s.slideTimer > 0) f |= FLAG_SLIDING;
   if (s.reloadTimer > 0) f |= FLAG_RELOADING;
-  if (s.hoverTimer > 0) f |= FLAG_HOVER;
+  if (s.hovering) f |= FLAG_HOVER;
   if (s.zipTimer > 0) f |= FLAG_ZIP;
+  if (s.pinTimer > 0) f |= FLAG_PIN;
+  if (s.blownTimer > 0) f |= FLAG_BLOWN;
   return f;
 }
 
@@ -156,7 +170,7 @@ export function encodeSnapshot(
   ackSeq: number,
   selfId: number,
   self: PlayerState | null,
-  players: { id: number; state: PlayerState }[],
+  players: { id: number; state: PlayerState; weapon: number; streaming: boolean }[],
 ): ArrayBuffer {
   const selfBytes = self ? PLAYER_FIELDS.length * 4 : 0;
   const buf = new ArrayBuffer(1 + 4 + 4 + 1 + 1 + selfBytes + 1 + players.length * PUBLIC_BYTES);
@@ -180,7 +194,7 @@ export function encodeSnapshot(
   }
   v.setUint8(o, players.length);
   o += 1;
-  for (const { id, state: s } of players) {
+  for (const { id, state: s, weapon, streaming } of players) {
     v.setUint8(o, id);
     o += 1;
     v.setFloat32(o, s.px);
@@ -200,7 +214,7 @@ export function encodeSnapshot(
     o += 2;
     v.setUint8(o, s.mode);
     o += 1;
-    v.setUint16(o, publicFlags(s));
+    v.setUint16(o, publicFlags(s) | (streaming ? FLAG_STREAM : 0));
     o += 2;
     v.setUint8(o, Math.round(Math.max(0, Math.min(1, s.charge)) * 255));
     o += 1;
@@ -212,6 +226,8 @@ export function encodeSnapshot(
     o += 1;
     const ha = Math.atan2(s.hangNx, s.hangNz);
     v.setUint8(o, Math.round((((ha % TWO_PI) + TWO_PI) % TWO_PI) / TWO_PI * 255) & 255);
+    o += 1;
+    v.setUint8(o, weapon & 255);
     o += 1;
   }
   return buf;
@@ -257,6 +273,7 @@ export function decodeSnapshot(v: DataView): Snapshot {
       holding: v.getUint8(o + 30) - 1,
       dashCharges: v.getUint8(o + 31),
       hangAngle: (v.getUint8(o + 32) / 255) * TWO_PI,
+      weapon: v.getUint8(o + 33),
     };
     o += PUBLIC_BYTES;
     players.push(p);

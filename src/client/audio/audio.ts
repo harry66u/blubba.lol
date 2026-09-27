@@ -564,6 +564,176 @@ export class Audio {
     osc.stop(t + 0.35);
   }
 
+  /** Air Horn: a big two-tone honk. Louder with more charge. */
+  honk(power: number, pos: [number, number, number] | null): void {
+    const out = this.out(pos, 0.5 + power * 0.4);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const dur = 0.35 + power * 0.35;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.7, t + 0.02);
+    g.gain.setValueAtTime(0.7, t + dur * 0.8);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    const lp = ctx.createBiquadFilter();
+    lp.frequency.value = 2400;
+    for (const f of [233, 311, 466]) {
+      const osc = ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(f * (0.97 + power * 0.03), t);
+      osc.connect(lp);
+      osc.start(t);
+      osc.stop(t + dur + 0.05);
+    }
+    lp.connect(g).connect(out);
+  }
+
+  /** Pump Rifle crack. */
+  pew(power: number, pos: [number, number, number] | null): void {
+    const out = this.out(pos, 0.6);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(1800 + power * 800, t);
+    osc.frequency.exponentialRampToValueAtTime(220, t + 0.14);
+    const g = ctx.createGain();
+    this.env(g, t, 0.002, 0.45, 0.16);
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 300;
+    osc.connect(hp).connect(g).connect(out);
+    osc.start(t);
+    osc.stop(t + 0.2);
+    const f = ctx.createBiquadFilter();
+    f.type = 'highpass';
+    f.frequency.value = 2500;
+    const ng = ctx.createGain();
+    this.env(ng, t, 0.001, 0.5, 0.08);
+    f.connect(ng).connect(out);
+    this.noise(f, t, 0.1);
+  }
+
+  private blowerNodes: { src: AudioBufferSourceNode; gain: GainNode; filter: BiquadFilterNode } | null = null;
+
+  /** Continuous leaf-blower roar for your own blower (0 = off). */
+  setBlower(strength: number): void {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    if (strength > 0 && !this.blowerNodes) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = this.noiseBuf;
+      src.loop = true;
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.Q.value = 0.9;
+      const gain = this.ctx.createGain();
+      gain.gain.value = 0;
+      src.connect(filter).connect(gain).connect(this.buses.effects);
+      src.start();
+      this.blowerNodes = { src, gain, filter };
+    }
+    if (!this.blowerNodes) return;
+    if (strength <= 0) {
+      this.blowerNodes.gain.gain.setTargetAtTime(0, t, 0.05);
+      const n = this.blowerNodes;
+      setTimeout(() => n.src.stop(), 300);
+      this.blowerNodes = null;
+      return;
+    }
+    this.blowerNodes.filter.frequency.setTargetAtTime(400 + strength * 900, t, 0.05);
+    this.blowerNodes.gain.gain.setTargetAtTime(0.18 + strength * 0.25, t, 0.05);
+  }
+
+  /** Short whoosh for other players' leaf blowers hitting someone. */
+  gust(pos: [number, number, number] | null): void {
+    if (!this.throttle('gust', 120)) return;
+    const out = this.out(pos, 0.3);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.setValueAtTime(700, t);
+    f.frequency.linearRampToValueAtTime(1200, t + 0.3);
+    const g = ctx.createGain();
+    this.env(g, t, 0.05, 0.6, 0.3);
+    f.connect(g).connect(out);
+    this.noise(f, t, 0.4);
+  }
+
+  /** Grenade tick and vacuum suck. */
+  beep(pos: [number, number, number] | null): void {
+    const out = this.out(pos, 0.25);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.frequency.value = 1500;
+    const g = ctx.createGain();
+    this.env(g, t, 0.002, 0.5, 0.05);
+    osc.connect(g).connect(out);
+    osc.start(t);
+    osc.stop(t + 0.08);
+  }
+
+  suck(pos: [number, number, number] | null): void {
+    const out = this.out(pos, 0.6);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.Q.value = 3;
+    f.frequency.setValueAtTime(2500, t);
+    f.frequency.exponentialRampToValueAtTime(200, t + 1.2);
+    const g = ctx.createGain();
+    this.env(g, t, 0.1, 0.9, 1.1);
+    f.connect(g).connect(out);
+    this.noise(f, t, 1.3);
+  }
+
+  /** Soda can crack. */
+  canOpen(pos: [number, number, number] | null): void {
+    const out = this.out(pos, 0.5);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const f = ctx.createBiquadFilter();
+    f.type = 'highpass';
+    f.frequency.value = 3000;
+    const g = ctx.createGain();
+    this.env(g, t, 0.001, 0.8, 0.25);
+    f.connect(g).connect(out);
+    this.noise(f, t, 0.3);
+  }
+
+  /** Big balloon pop (a pin popping someone). */
+  bigPop(pos: [number, number, number] | null): void {
+    const out = this.out(pos, 1);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.setValueAtTime(6000, t);
+    f.frequency.exponentialRampToValueAtTime(300, t + 0.2);
+    const g = ctx.createGain();
+    this.env(g, t, 0.001, 1.2, 0.25);
+    f.connect(g).connect(out);
+    this.noise(f, t, 0.3);
+    const osc = ctx.createOscillator();
+    osc.frequency.setValueAtTime(120, t);
+    osc.frequency.exponentialRampToValueAtTime(40, t + 0.2);
+    const og = ctx.createGain();
+    this.env(og, t, 0.001, 0.9, 0.2);
+    osc.connect(og).connect(out);
+    osc.start(t);
+    osc.stop(t + 0.25);
+  }
+
   /** Rising whine while charging a shot (only for your own weapon). */
   setCharge(charge: number): void {
     if (!this.ctx) return;

@@ -68,6 +68,17 @@ The spec leaves the tech stack and many details open. This file records what was
   with a well-timed dash.
 - **Ledges** can be caught by tapping grab up to 0.2 s early or by holding it, so catching a ledge
   is about positioning, not frame-perfect timing.
+- **Loadout changes apply on respawn**, so nobody swaps weapons mid-fight.
+- **Pump Rifle lag compensation:** each input carries the server tick the player was looking at,
+  and the server rewinds other players (up to 40 ticks) to check the shot. It's the only
+  hitscan weapon; the others are forgiving blasts where lag compensation isn't needed.
+- **Leaf Blower** pushes are continuous acceleration (scaled by the target's inflation and mass)
+  and make the target skid instead of gripping the ground; it counts as a hit for knockout credit.
+- **The Pin** lasts 20 seconds or one pop. It appears every 70-110 seconds at a pickup spot, and
+  everyone is told when it spawns and who grabbed it.
+- **Utilities** are thrown with a lob; pads and walls deploy where they land, grenades bounce and
+  go off after a fuse or on contact with a player. Walls and rafts are real solids mirrored to
+  every client so movement prediction stays exact.
 - **Grapple** targets players first (with a 0.5 m aim forgiveness for trackpads), then surfaces.
 
 ## Sound-off versions of every audio joke

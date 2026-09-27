@@ -90,4 +90,6 @@ export interface MapDef {
   blast: BlastZone;
   decor: DecorDef[];
   theme: MapTheme;
+  /** Spots where soda cans (and the rare pin) appear. */
+  pickups: [number, number, number][];
 }

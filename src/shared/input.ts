@@ -8,6 +8,8 @@ export interface InputFrame {
   seq: number;
   /** Server tick the client expects this input to run on (used for moving platforms). */
   tick: number;
+  /** Server tick of the world the player was looking at (for lag-compensated hitscan). */
+  viewTick: number;
   /** Strafe: -1 (left) .. 1 (right). */
   moveX: number;
   /** Forward: -1 (back) .. 1 (forward). */
@@ -38,6 +40,7 @@ export function emptyInput(): InputFrame {
   return {
     seq: 0,
     tick: 0,
+    viewTick: 0,
     moveX: 0,
     moveZ: 0,
     yaw: 0,
@@ -60,13 +63,15 @@ export function pressesSince(now: number, before: number): number {
   return (now - before + 256) & 255;
 }
 
-export const INPUT_BYTES = 4 + 4 + 1 + 1 + 2 + 2 + 1 + PRESS_KEYS.length;
+export const INPUT_BYTES = 4 + 4 + 4 + 1 + 1 + 2 + 2 + 1 + PRESS_KEYS.length;
 
 const TWO_PI = Math.PI * 2;
 
 export function writeInput(view: DataView, o: number, f: InputFrame): number {
   view.setUint32(o, f.seq >>> 0);
   view.setUint32(o + 4, f.tick >>> 0);
+  view.setUint32(o + 8, Math.max(0, Math.round(f.viewTick)) >>> 0);
+  o += 4;
   view.setInt8(o + 8, Math.round(Math.max(-1, Math.min(1, f.moveX)) * 127));
   view.setInt8(o + 9, Math.round(Math.max(-1, Math.min(1, f.moveZ)) * 127));
   const yaw = ((f.yaw % TWO_PI) + TWO_PI) % TWO_PI;
@@ -81,6 +86,8 @@ export function writeInput(view: DataView, o: number, f: InputFrame): number {
 export function readInput(view: DataView, o: number, f: InputFrame): number {
   f.seq = view.getUint32(o);
   f.tick = view.getUint32(o + 4);
+  f.viewTick = view.getUint32(o + 8);
+  o += 4;
   f.moveX = view.getInt8(o + 8) / 127;
   f.moveZ = view.getInt8(o + 9) / 127;
   f.yaw = (view.getUint16(o + 10) / 65535) * TWO_PI;

@@ -7,6 +7,7 @@ import type { Settings } from '../settings';
 import { clear, el, hexColor } from './dom';
 
 export interface MenuCallbacks {
+  onLoadout: () => void;
   onPlay: (name: string) => void;
   onCreate: (name: string) => void;
   onJoinCode: (name: string, code: string) => void;
@@ -112,6 +113,7 @@ export function buildMainMenu(name: string, cb: MenuCallbacks, notice?: string):
   const footer = el(
     'div',
     { class: 'menu-footer' },
+    el('button', { class: 'btn small ghost', text: 'Loadout', on: { click: cb.onLoadout } }),
     el('button', { class: 'btn small ghost', text: 'How to play', on: { click: cb.onHowTo } }),
     el('button', { class: 'btn small ghost', text: 'Settings', on: { click: cb.onSettings } }),
   );
@@ -157,6 +159,7 @@ export function buildClickToPlay(text: string, onClick: () => void): HTMLElement
 }
 
 export interface PauseCallbacks {
+  onLoadout: () => void;
   onResume: () => void;
   onLeave: () => void;
   onSettings: () => void;
@@ -202,6 +205,7 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
     el(
       'div',
       { class: 'row' },
+      el('button', { class: 'btn small ghost', text: 'Loadout', on: { click: cb.onLoadout } }),
       el('button', { class: 'btn small ghost', text: 'Settings', on: { click: cb.onSettings } }),
       el('button', { class: 'btn small ghost', text: 'How to play', on: { click: cb.onHowTo } }),
       el('div', { class: 'grow' }),

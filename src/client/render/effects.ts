@@ -167,6 +167,16 @@ export class Effects {
   readonly projectiles = new Map<number, Projectile3D>();
   private readonly airMat: THREE.ShaderMaterial;
   private readonly airGeo = new THREE.SphereGeometry(1, 20, 14);
+  private readonly tracers: { mesh: THREE.Mesh; life: number }[] = [];
+  private readonly tracerGeo = new THREE.CylinderGeometry(1, 1, 1, 6, 1, true).translate(0, 0.5, 0).rotateX(Math.PI / 2);
+  private readonly utilMats = [
+    null,
+    new THREE.MeshStandardMaterial({ color: 0x2ec5ff, emissive: 0x2ec5ff, emissiveIntensity: 0.4, roughness: 0.3 }),
+    new THREE.MeshStandardMaterial({ color: 0x9b4dff, emissive: 0x9b4dff, emissiveIntensity: 0.5, roughness: 0.3 }),
+    new THREE.MeshStandardMaterial({ color: 0xff4fa3, emissive: 0xff4fa3, emissiveIntensity: 0.3, roughness: 0.3 }),
+    new THREE.MeshStandardMaterial({ color: 0x8ee000, emissive: 0x8ee000, emissiveIntensity: 0.3, roughness: 0.3 }),
+  ];
+  private readonly utilGeos = [null, new THREE.IcosahedronGeometry(0.3, 1), new THREE.IcosahedronGeometry(0.3, 1), new THREE.CylinderGeometry(0.35, 0.35, 0.15, 16), new THREE.BoxGeometry(0.45, 0.45, 0.45)];
   private readonly ringGeo = new THREE.RingGeometry(0.8, 1, 40);
   private time = 0;
 
@@ -320,9 +330,10 @@ export class Effects {
 
   // --- Projectiles ------------------------------------------------------------------------
 
-  addProjectile(id: number, x: number, y: number, z: number, vx: number, vy: number, vz: number, r: number, muzzle?: THREE.Vector3): Projectile3D {
-    const mesh = new THREE.Mesh(this.airGeo, this.airMat);
-    mesh.scale.setScalar(r);
+  addProjectile(id: number, x: number, y: number, z: number, vx: number, vy: number, vz: number, r: number, muzzle?: THREE.Vector3, kind = 0): Projectile3D {
+    const mesh = kind > 0 ? new THREE.Mesh(this.utilGeos[kind]!, this.utilMats[kind]!) : new THREE.Mesh(this.airGeo, this.airMat);
+    if (kind === 0) mesh.scale.setScalar(r);
+    mesh.castShadow = kind > 0;
     mesh.renderOrder = 2;
     this.root.add(mesh);
     const p: Projectile3D = { id, mesh, x, y, z, vx, vy, vz, r, ox: 0, oy: 0, oz: 0, trail: 0 };
@@ -354,8 +365,9 @@ export class Effects {
     p.z = z;
     p.mesh.position.set(x + p.ox, y + p.oy, z + p.oz);
     p.mesh.rotation.y += dt * 8;
+    p.mesh.rotation.x += dt * 5;
     p.trail += dt;
-    if (p.trail > 0.03) {
+    if (p.trail > 0.03 && p.mesh.material === this.airMat) {
       p.trail = 0;
       this.puffs.spawn({ x: p.mesh.position.x, y: p.mesh.position.y, z: p.mesh.position.z, size: p.r * 0.35, grow: 0.8, max: 0.35, drag: 5, vx: (Math.random() - 0.5), vy: Math.random() * 0.5, vz: (Math.random() - 0.5) }, 0xe8fbff);
     }
@@ -369,8 +381,104 @@ export class Effects {
     this.ropes.push({ mesh, from, to, life, max: life });
   }
 
+  /** Pump Rifle beam. */
+  tracer(x: number, y: number, z: number, x2: number, y2: number, z2: number, color = 0xfff3a0): void {
+    const mesh = new THREE.Mesh(this.tracerGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, depthWrite: false }));
+    const a = new THREE.Vector3(x, y, z);
+    const b = new THREE.Vector3(x2, y2, z2);
+    mesh.position.copy(a);
+    mesh.lookAt(b);
+    mesh.scale.set(0.04, 0.04, a.distanceTo(b));
+    mesh.frustumCulled = false;
+    this.root.add(mesh);
+    this.tracers.push({ mesh, life: 0.25 });
+    this.airPuff(x2, y2, z2, 5, 2, 0.15, 0xfff3a0);
+  }
+
+  /** Air Horn: a cone of air bursting forward. */
+  honkBlast(x: number, y: number, z: number, dx: number, dy: number, dz: number, range: number, cone: number, power: number): void {
+    const n = 14 + Math.round(power * 10);
+    for (let i = 0; i < n; i++) {
+      // Random direction inside the cone.
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.random() * Math.tan(cone) * 0.9;
+      const ux = Math.abs(dy) < 0.9 ? 0 : 1;
+      const uy = Math.abs(dy) < 0.9 ? 1 : 0;
+      // Two axes perpendicular to the aim.
+      let px = uy * dz - 0 * dy;
+      let py = 0 * dx - ux * dz;
+      let pz = ux * dy - uy * dx;
+      const pl = Math.hypot(px, py, pz) || 1;
+      px /= pl;
+      py /= pl;
+      pz /= pl;
+      const qx = dy * pz - dz * py;
+      const qy = dz * px - dx * pz;
+      const qz = dx * py - dy * px;
+      const vx = dx + (px * Math.cos(a) + qx * Math.sin(a)) * r;
+      const vy = dy + (py * Math.cos(a) + qy * Math.sin(a)) * r;
+      const vz = dz + (pz * Math.cos(a) + qz * Math.sin(a)) * r;
+      const sp = range * (2.2 + Math.random());
+      this.puffs.spawn({ x: x + dx * 0.8, y: y + dy * 0.8, z: z + dz * 0.8, vx: vx * sp, vy: vy * sp, vz: vz * sp, size: 0.15 + power * 0.1, grow: 2.5, max: 0.4, drag: 5 }, 0xfff6c8);
+    }
+  }
+
+  /** Leaves and air streaming out of a leaf blower (call every frame while blowing). */
+  leafStream(x: number, y: number, z: number, dx: number, dy: number, dz: number, strength: number, dt: number): void {
+    const n = Math.max(1, Math.round(dt * 60 * (1 + strength * 2)));
+    const colors = [0x6fbf3a, 0xd98e2b, 0xc2d43a, 0xffffff];
+    for (let i = 0; i < n; i++) {
+      const sp = 12 + strength * 8;
+      const j = 0.35;
+      const c = colors[Math.floor(Math.random() * colors.length)];
+      const pool = c === 0xffffff ? this.puffs : this.confetti;
+      pool.spawn(
+        {
+          x,
+          y,
+          z,
+          vx: (dx + (Math.random() - 0.5) * j) * sp,
+          vy: (dy + (Math.random() - 0.5) * j) * sp,
+          vz: (dz + (Math.random() - 0.5) * j) * sp,
+          size: c === 0xffffff ? 0.12 : 0.9,
+          grow: c === 0xffffff ? 2 : 0,
+          max: 0.5,
+          drag: 2.5,
+          spin: 12,
+        },
+        c,
+      );
+    }
+  }
+
+  /** Swirl for a vacuum grenade's pull field. */
+  vacuumSwirl(x: number, y: number, z: number, radius: number, dt: number): void {
+    const n = Math.max(1, Math.round(dt * 90));
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = radius * (0.6 + Math.random() * 0.4);
+      const px = x + Math.cos(a) * r;
+      const pz = z + Math.sin(a) * r;
+      const py = y + (Math.random() - 0.5) * 2;
+      // Inward and around.
+      const vx = (x - px) * 2 - Math.sin(a) * 6;
+      const vz = (z - pz) * 2 + Math.cos(a) * 6;
+      this.puffs.spawn({ x: px, y: py, z: pz, vx, vy: (y - py) * 2, vz, size: 0.14, grow: -0.5, max: 0.45, drag: 0.5 }, 0xd6b8ff);
+    }
+  }
+
   update(dt: number): void {
     this.time += dt;
+    for (let i = this.tracers.length - 1; i >= 0; i--) {
+      const t = this.tracers[i];
+      t.life -= dt;
+      (t.mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, t.life / 0.25);
+      if (t.life <= 0) {
+        this.root.remove(t.mesh);
+        (t.mesh.material as THREE.Material).dispose();
+        this.tracers.splice(i, 1);
+      }
+    }
     for (let i = this.ropes.length - 1; i >= 0; i--) {
       const r = this.ropes[i];
       r.life -= dt;

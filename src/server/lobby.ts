@@ -134,7 +134,7 @@ export class Lobby {
     } else {
       room = this.findPublicRoom();
     }
-    const conn = room.join(ws, name, guestId);
+    const conn = room.join(ws, name, guestId, msg.loadout);
     if (!conn) return fail('full', 'That room is full (10 players).');
     this.connRoom.set(ws, { room, conn });
   }

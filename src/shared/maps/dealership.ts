@@ -126,6 +126,14 @@ export const DEALERSHIP: MapDef = {
     [-2, 0, 1.5, 0],
   ],
   blast: { minX: -72, maxX: 72, minY: -32, maxY: 60, minZ: -68, maxZ: 68 },
+  pickups: [
+    [-10, 0, 1],
+    [12, 0, 0],
+    [21.5, 5, -12.5],
+    [0, 1.2, -31],
+    [0, 0.4, 35],
+    [36, 1, 8],
+  ],
   decor,
   theme: {
     skyTop: 0x4a9ff5,

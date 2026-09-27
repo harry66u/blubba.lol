@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { inflationScale } from '../../shared/player';
+import type { WeaponId } from '../../shared/loadout';
 import { FlexTube, noise1 } from './flexTube';
+import { type WeaponModel, buildWeaponModel } from './weapons';
 
 export interface TubeManPose {
   time: number;
@@ -21,6 +23,10 @@ export interface TubeManPose {
   protected: boolean;
   holding: boolean;
   held: boolean;
+  /** Aim pitch, used to point the weapon. */
+  pitch: number;
+  streaming: boolean;
+  hasPin: boolean;
 }
 
 export function defaultPose(): TubeManPose {
@@ -42,6 +48,9 @@ export function defaultPose(): TubeManPose {
     protected: false,
     holding: false,
     held: false,
+    pitch: 0,
+    streaming: false,
+    hasPin: false,
   };
 }
 
@@ -118,6 +127,10 @@ export class TubeMan {
   private flail = 1;
   private lastVy = 0;
   private color = new THREE.Color();
+  private readonly gunMount = new THREE.Group();
+  private gun: WeaponModel | null = null;
+  private gunId: WeaponId | null = null;
+  private readonly pin: THREE.Group;
 
   constructor(colorHex: number, opts: { physical?: boolean; seed?: number } = {}) {
     this.seed = opts.seed ?? Math.random() * 100;
@@ -171,7 +184,10 @@ export class TubeMan {
     this.bubble = new THREE.Mesh(sharedGeo.bubble, sharedMat.bubble);
     this.bubble.visible = false;
 
-    this.rig.add(this.base, this.body.mesh, this.arms[0].mesh, this.arms[1].mesh, this.face, this.hair, this.bubble);
+    this.gunMount.rotation.order = 'YXZ';
+    this.pin = makePin();
+    this.pin.visible = false;
+    this.rig.add(this.base, this.body.mesh, this.arms[0].mesh, this.arms[1].mesh, this.face, this.hair, this.bubble, this.gunMount, this.pin);
     this.group.add(this.rig);
   }
 
@@ -179,6 +195,28 @@ export class TubeMan {
     this.color.set(hex);
     this.bodyMat.color.set(hex);
     this.bodyMat.emissive.set(hex);
+    this.gun?.setColor(hex);
+  }
+
+  setWeapon(id: WeaponId | null): void {
+    if (id === this.gunId) return;
+    if (this.gun) {
+      this.gunMount.remove(this.gun.root);
+      this.gun.dispose();
+      this.gun = null;
+    }
+    this.gunId = id;
+    if (id) {
+      this.gun = buildWeaponModel(id, this.color.getHex());
+      this.gun.root.scale.setScalar(0.9);
+      this.gunMount.add(this.gun.root);
+    }
+  }
+
+  /** World position of the weapon's muzzle (for streams, honks and tracers). */
+  muzzleWorld(out: THREE.Vector3): THREE.Vector3 | null {
+    if (!this.gun || !this.group.visible) return null;
+    return this.gun.muzzle.getWorldPosition(out);
   }
 
   /** Height of the top of the head above the feet, in world units, for name tags. */
@@ -373,6 +411,21 @@ export class TubeMan {
     this.bodyMat.emissiveIntensity = glow;
     this.bodyMat.metalness = p.bracing ? 0.6 : 0.0;
 
+    // Weapon held out in front of the chest, pointing where the player aims.
+    if (this.gun) {
+      const gi = Math.round(n * 0.5);
+      const gr = radii[gi] + 0.12;
+      this.gunMount.position.set(spine[gi * 3] + N[gi * 3] * gr, spine[gi * 3 + 1] + N[gi * 3 + 1] * gr, spine[gi * 3 + 2] + N[gi * 3 + 2] * gr);
+      this.gunMount.rotation.set(p.pitch - this.rig.rotation.x, Math.PI, 0);
+      this.gun.root.visible = !p.held && !p.holding;
+      this.gun.setCharge(p.charge, t, p.streaming);
+    }
+    this.pin.visible = p.hasPin;
+    if (p.hasPin) {
+      this.pin.position.set(spine[(n - 1) * 3], spine[(n - 1) * 3 + 1] + 0.55, spine[(n - 1) * 3 + 2]);
+      this.pin.rotation.y = t * 3;
+    }
+
     this.bubble.visible = p.protected;
     if (p.protected) {
       this.bubble.position.set(0, BASE_H + BODY_LEN * 0.55, 0);
@@ -389,4 +442,16 @@ export class TubeMan {
     for (const a of this.arms) a.dispose();
     this.bodyMat.dispose();
   }
+}
+
+/** A giant sewing pin that floats over whoever is carrying one. */
+function makePin(): THREE.Group {
+  const g = new THREE.Group();
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.005, 0.7, 8), new THREE.MeshStandardMaterial({ color: 0xdfe6f3, metalness: 0.8, roughness: 0.2 }));
+  shaft.position.y = -0.35;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 12), new THREE.MeshStandardMaterial({ color: 0xff2d55, emissive: 0xff2d55, emissiveIntensity: 0.5, roughness: 0.2 }));
+  g.add(shaft, head);
+  const holder = new THREE.Group();
+  holder.add(g);
+  return holder;
 }
