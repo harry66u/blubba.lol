@@ -46,6 +46,10 @@ export type GameEvent =
   | { t: 'solidGone'; tick: number; id: number }
   | { t: 'pad'; tick: number; id: number; x: number; y: number; z: number; half: number; strength: number; until: number }
   | { t: 'padGone'; tick: number; id: number }
+  | { t: 'chaos'; tick: number; kind: 'fan' | 'lowGravity' | 'ice' | 'maxInflate'; announceTick: number; startTick: number; endTick: number; dirX: number; dirZ: number }
+  | { t: 'chain'; tick: number; id: number; target: number; by: number; x: number; y: number; z: number }
+  | { t: 'crown'; tick: number; id: number }
+  | { t: 'final'; tick: number }
   | { t: 'loadout'; tick: number; id: number; weapon: string; mods: string[]; utils: string[] }
   | { t: 'pickup'; tick: number; id: number; kind: 'soda' | 'pin'; x: number; y: number; z: number; active: boolean; by: number };
 

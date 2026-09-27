@@ -306,6 +306,54 @@ export const BALANCE = {
     zipMaxTime: 0.8,
   },
 
+  chaos: {
+    /** Average seconds between random events (host setting scales this). */
+    eventInterval: 60,
+    eventJitter: 10,
+    firstEventAfter: 40,
+    /** Events are announced this long before they start. */
+    warning: 4,
+    fan: { duration: 10, accel: 12, airMult: 1.3, frictionMult: 0.3 },
+    lowGravity: { duration: 12, gravityMult: 0.5 },
+    ice: { duration: 12, frictionMult: 0.07, accelMult: 0.35 },
+    maxInflate: { duration: 8 },
+    /** No new events once the match is this close to ending. */
+    quietEnd: 36,
+  },
+
+  chain: {
+    /** A launched player moving at least this fast knocks back anyone they crash into. */
+    minSpeed: 11,
+    /** Knockback power per m/s of the crashing player's speed. */
+    powerPerSpeed: 0.045,
+    inflation: 0.05,
+    /** The crashing player keeps this much of their speed. */
+    keep: 0.6,
+    /** The same pair can't chain-hit each other again for this long. */
+    cooldown: 0.6,
+  },
+
+  crown: {
+    /** Knockouts in a row (without being knocked out) needed to wear the crown. */
+    minStreak: 2,
+    multiplier: 3,
+  },
+
+  final: {
+    seconds: 30,
+    multiplier: 2,
+    /** Islands (collapse >= 2) start sinking at these times after the final countdown begins. */
+    islandDelay: { 3: 0, 2: 7, 1: 14 } as Record<number, number>,
+    sinkAccel: 3,
+    /** The main deck crumbles inward by this fraction per side over the last seconds. */
+    deckShrink: 0.3,
+    deckShrinkStart: 10,
+  },
+
+  revenge: { bonus: 1 },
+
+  multiKo: { window: 4 },
+
   combo: {
     /** Hits within this long of the previous hit, before the target lands, extend a combo. */
     window: 1.2,

@@ -13,6 +13,7 @@ import {
   type RoomSettings,
   type RosterEntry,
   type ServerMessage,
+  EVENT_MULT,
   decodeInputs,
   encodeSnapshot,
 } from '../shared/protocol';
@@ -32,6 +33,7 @@ const DEFAULT_SETTINGS: RoomSettings = {
   mapId: 'dealership',
   durationSec: BALANCE.match.durationSec,
   bots: true,
+  events: 'normal',
 };
 
 /** One match room: a GameSim plus the sockets of the humans playing in it. */
@@ -61,6 +63,7 @@ export class Room {
       mode: this.settings.mode,
       durationSec: this.settings.durationSec,
     });
+    sim.eventMult = EVENT_MULT[this.settings.events];
     sim.onPhaseChange = () => {
       this.broadcastJson(this.matchMessage());
       this.rosterDirty = true;
@@ -202,6 +205,7 @@ export class Room {
       }
     } else {
       this.sim.durationSec = next.durationSec;
+      this.sim.eventMult = EVENT_MULT[next.events];
     }
     this.balanceBots();
     this.broadcastJson({ type: 'room', room: this.info() });
@@ -229,7 +233,8 @@ export class Room {
       this.rosterDirty = false;
       this.lastRosterAt = now;
     }
-    const all = [...this.sim.players.values()].map((p) => ({ id: p.id, state: p.state, weapon: weaponIndex(p.loadout.weapon), streaming: p.streaming }));
+    const crown = this.sim.crownId;
+    const all = [...this.sim.players.values()].map((p) => ({ id: p.id, state: p.state, weapon: weaponIndex(p.loadout.weapon), streaming: p.streaming, crowned: p.id === crown }));
     for (const conn of this.conns.values()) {
       conn.inputMsgs = Math.max(0, conn.inputMsgs - Math.round(BALANCE.tickRate / BALANCE.snapshotRate) * 1.25);
       const me = this.sim.players.get(conn.playerId);
@@ -287,5 +292,6 @@ export function sanitizeSettings(raw: Partial<RoomSettings>): Partial<RoomSettin
     out.durationSec = Math.round(Math.max(BALANCE.match.minDurationSec, Math.min(BALANCE.match.maxDurationSec, raw.durationSec)) / 30) * 30;
   }
   if (typeof raw.bots === 'boolean') out.bots = raw.bots;
+  if (typeof raw.events === 'string' && raw.events in EVENT_MULT) out.events = raw.events;
   return out;
 }

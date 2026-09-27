@@ -1,6 +1,7 @@
 import { BALANCE } from './balance';
 import { BTN_FIRE, BTN_GRAB, type InputFrame, pressesSince } from './input';
 import type { WeaponStats } from './loadout';
+import { type Environment, NORMAL_ENV } from './game/chaos';
 import type { World } from './world';
 
 export type { WeaponStats } from './loadout';
@@ -161,6 +162,8 @@ export interface StepContext {
   weapon: WeaponStats;
   /** Feature switches so earlier build phases can be played without later mechanics. */
   features: Features;
+  /** Random-event modifiers (gravity, ice, wind). */
+  env?: Environment;
 }
 
 const tmpSweep = { d: 0, hit: -1 };
@@ -281,6 +284,7 @@ function stepMove(
   const K = BALANCE.knockback;
   const dt = ctx.dt;
   const world = ctx.world;
+  const env = ctx.env ?? NORMAL_ENV;
 
   // Ride moving platforms.
   if (p.onGround && p.groundId >= 0) {
@@ -424,7 +428,7 @@ function stepMove(
   if (p.onGround && !jumpedNow) {
     const sliding = p.slideTimer > 0;
     // Caught in a leaf blower's stream: you skid instead of gripping the ground.
-    const fr = sliding || p.blownTimer > 0 ? D.slideFriction : P.groundFriction;
+    const fr = (sliding || p.blownTimer > 0 ? D.slideFriction : P.groundFriction) * env.frictionMult;
     const speed = Math.hypot(p.vx, p.vz);
     if (speed > 1e-4) {
       const control = Math.max(speed, P.stopSpeed);
@@ -438,7 +442,7 @@ function stepMove(
       p.slideTimer = Math.max(0, p.slideTimer - dt);
       if (Math.hypot(p.vx, p.vz) < D.speed * 0.3) p.slideTimer = 0;
     } else {
-      accelerate(p, wx, wz, P.walkSpeed * wishLen * moveMult, P.groundAccel, dt);
+      accelerate(p, wx, wz, P.walkSpeed * wishLen * moveMult, P.groundAccel * env.accelMult, dt);
     }
   } else if (p.dashTimer > 0) {
     p.dashTimer -= dt;
@@ -467,9 +471,16 @@ function stepMove(
     p.vz *= f;
   }
 
+  // --- Wind (giant fan event) -----------------------------------------------------------
+  if (env.windX !== 0 || env.windZ !== 0) {
+    const k = p.onGround ? 1 : env.windAirMult;
+    p.vx += env.windX * k * dt;
+    p.vz += env.windZ * k * dt;
+  }
+
   // --- Gravity ---------------------------------------------------------------------------
   if (p.dashTimer <= 0) {
-    p.vy -= P.gravity * dt;
+    p.vy -= P.gravity * env.gravityMult * dt;
     if (p.vy < -P.maxFallSpeed) p.vy = -P.maxFallSpeed;
   }
 

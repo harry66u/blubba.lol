@@ -1,4 +1,5 @@
 import { BALANCE } from './balance';
+import { deckShrink, islandSink } from './game/chaos';
 import type { BouncePadDef, MapDef, MoverDef } from './maps/types';
 
 /** Axis-aligned solid in the collision world. Movers update their bounds every tick. */
@@ -24,10 +25,8 @@ export interface Solid {
   dX: number;
   dY: number;
   dZ: number;
-  /** Extra vertical offset used when the piece is collapsing (final 30 seconds). */
-  sink: number;
-  /** Current sinking speed (m/s) of a collapsing piece. */
-  sinkRate: number;
+  /** Collapse order for the final 30 seconds (-1 = never collapses, 0 = crumbles inward). */
+  collapse: number;
 }
 
 export interface RayHit {
@@ -69,6 +68,8 @@ export class World {
   time = 0;
   /** Solids with an id at or above this were added during play (walls, rafts). */
   readonly staticCount: number;
+  /** Time (s) the final-30-seconds collapse began; Infinity when it hasn't. */
+  collapseStart = Infinity;
 
   constructor(readonly map: MapDef) {
     map.solids.forEach((def, i) => {
@@ -92,8 +93,7 @@ export class World {
         dX: 0,
         dY: 0,
         dZ: 0,
-        sink: 0,
-        sinkRate: 0,
+        collapse: def.collapse ?? -1,
       };
       this.solids.push(s);
     });
@@ -102,37 +102,54 @@ export class World {
     this.setTime(0);
   }
 
+  private readonly off = { ox: 0, oy: 0, oz: 0, shrink: 0 };
+
+  private offsetAt(s: Solid, time: number): { ox: number; oy: number; oz: number; shrink: number } {
+    const o = this.off;
+    o.ox = o.oy = o.oz = o.shrink = 0;
+    if (s.mover) {
+      const k = moverOffset(s.mover, time);
+      o.ox = s.mover.dx * k;
+      o.oy = s.mover.dy * k;
+      o.oz = s.mover.dz * k;
+    }
+    if (s.collapse >= 0 && time > this.collapseStart) {
+      const e = time - this.collapseStart;
+      if (s.collapse === 0) o.shrink = deckShrink(e);
+      else o.oy -= islandSink(s.collapse, e);
+    }
+    return o;
+  }
+
   /**
-   * Moves every mover to its position at `time` and records each one's displacement over the
-   * previous fixed step, so riders are carried the same way no matter how often this is called.
+   * Moves every mover (and collapsing piece) to where it is at `time` and records each one's
+   * displacement over the previous fixed step, so riders are carried the same way no matter how
+   * often this is called.
    */
   setTime(time: number): void {
     this.time = time;
     const dt = 1 / BALANCE.tickRate;
-    for (const s of this.solids) {
-      if (!s.mover && s.sink === 0 && s.sinkRate === 0) continue;
-      let ox = 0;
-      let oy = -s.sink;
-      let oz = 0;
-      s.dX = 0;
-      s.dY = -s.sinkRate * dt;
-      s.dZ = 0;
-      if (s.mover) {
-        const k = moverOffset(s.mover, time);
-        const k0 = moverOffset(s.mover, time - dt);
-        ox = s.mover.dx * k;
-        oy += s.mover.dy * k;
-        oz = s.mover.dz * k;
-        s.dX = s.mover.dx * (k - k0);
-        s.dY += s.mover.dy * (k - k0);
-        s.dZ = s.mover.dz * (k - k0);
-      }
-      s.minX = s.baseMinX + ox;
-      s.minY = s.baseMinY + oy;
-      s.minZ = s.baseMinZ + oz;
-      s.maxX = s.baseMaxX + ox;
-      s.maxY = s.baseMaxY + oy;
-      s.maxZ = s.baseMaxZ + oz;
+    for (let i = 0; i < this.staticCount; i++) {
+      const s = this.solids[i];
+      if (!s.mover && s.collapse < 0) continue;
+      const b = this.offsetAt(s, time - dt);
+      const bx = b.ox;
+      const by = b.oy;
+      const bz = b.oz;
+      const a = this.offsetAt(s, time);
+      s.dX = a.ox - bx;
+      s.dY = a.oy - by;
+      s.dZ = a.oz - bz;
+      const hw = ((s.baseMaxX - s.baseMinX) / 2) * a.shrink;
+      const hd = ((s.baseMaxZ - s.baseMinZ) / 2) * a.shrink;
+      s.minX = s.baseMinX + a.ox + hw;
+      s.maxX = s.baseMaxX + a.ox - hw;
+      s.minY = s.baseMinY + a.oy;
+      s.maxY = s.baseMaxY + a.oy;
+      s.minZ = s.baseMinZ + a.oz + hd;
+      s.maxZ = s.baseMaxZ + a.oz - hd;
+      // Pieces that have fallen far away stop existing.
+      if (s.collapse >= 0) s.enabled = a.oy > -70;
     }
   }
 
@@ -376,7 +393,7 @@ export class World {
       const n = this.solids.length;
       this.solids.push({
         id: n, minX: 0, minY: -9999, minZ: 0, maxX: 0, maxY: -9999, maxZ: 0, ledge: false, enabled: false, mover: null,
-        baseMinX: 0, baseMinY: 0, baseMinZ: 0, baseMaxX: 0, baseMaxY: 0, baseMaxZ: 0, dX: 0, dY: 0, dZ: 0, sink: 0, sinkRate: 0,
+        baseMinX: 0, baseMinY: 0, baseMinZ: 0, baseMaxX: 0, baseMaxY: 0, baseMaxZ: 0, dX: 0, dY: 0, dZ: 0, collapse: -1,
       });
     }
     const s = this.solids[id];

@@ -26,6 +26,7 @@ import {
 import { World } from '../world';
 import { DEFAULT_LOADOUT, type Loadout, MOD_IDS, UTILITY_IDS, type UtilityId, WEAPON_IDS, computeWeaponStats, sanitizeLoadout, utilityCooldown } from '../loadout';
 import { BOT_NAMES, BotBrain } from './bot';
+import { CHAOS_KINDS, type ChaosEvent, type ChaosKind, type Environment, NORMAL_ENV, chaosDuration, envAt } from './chaos';
 import type { GameEvent } from './events';
 
 export type ModeId = 'knockout';
@@ -76,6 +77,17 @@ export interface SimPlayer {
   weapon: WeaponStats;
   /** Recent positions for lag-compensated hitscan (ring buffer indexed by tick). */
   history: { tick: number; px: number; py: number; pz: number; inflation: number; mode: number }[];
+  /** Knockouts in a row without being knocked out (for the crown). */
+  streak: number;
+  /** Whoever last knocked this player out (revenge target). */
+  nemesis: number;
+  /** Chain reaction credit: who started the chain that last hit this player. */
+  chainBy: number;
+  chainTime: number;
+  chainCool: Map<number, number>;
+  koTimes: number[];
+  /** Inflation before a max-pressure event (-1 when not in one). */
+  savedInflation: number;
   /** Last time each target got a "blow" event from this player's leaf blower. */
   blowEvents: Map<number, number>;
   streaming: boolean;
@@ -199,6 +211,17 @@ export class GameSim {
   readonly dynamicSolids = new Map<number, DynamicSolidInfo>();
   private nextPinAt = 0;
   private nextPadId = 1000;
+  /** Random events: the one running now and the one announced next. */
+  chaosCurrent: ChaosEvent | null = null;
+  chaosNext: ChaosEvent | null = null;
+  private nextChaosAt = Infinity;
+  private lastChaosKind: ChaosKind | null = null;
+  /** 0 = off, 0.5 = rare, 1 = normal, 2 = frequent (private room hosts pick). */
+  eventMult = 1;
+  crownId = -1;
+  private finalAnnounced = false;
+  private firstKo = false;
+  private readonly env: Environment = { ...NORMAL_ENV };
   /** Center of the main play area; bots recover toward it. */
   readonly homePoint: { x: number; y: number; z: number };
 
@@ -254,6 +277,13 @@ export class GameSim {
       history: [],
       blowEvents: new Map(),
       streaming: false,
+      streak: 0,
+      nemesis: -1,
+      chainBy: -1,
+      chainTime: -999,
+      chainCool: new Map(),
+      koTimes: [],
+      savedInflation: -1,
     };
     p.weapon = computeWeaponStats(p.loadout.weapon, p.loadout.mods);
     this.players.set(id, p);
@@ -346,6 +376,8 @@ export class GameSim {
     this.world.setTime(this.time);
 
     this.stepMatch();
+    this.updateChaos();
+    this.ctx.env = envAt([this.chaosCurrent, this.chaosNext], this.tick, this.env);
 
     for (const [id, brain] of this.bots) {
       const p = this.players.get(id);
@@ -365,6 +397,7 @@ export class GameSim {
 
     this.updateHolds();
     this.separatePlayers();
+    this.chainReactions();
     this.stepProjectiles();
     this.stepVacuums();
     this.stepPickups();
@@ -1247,8 +1280,16 @@ export class GameSim {
   }
 
   /** Everything a player joining mid-match needs to see the current world. */
-  entitySnapshot(): { pickups: Pickup[]; solids: DynamicSolidInfo[]; pads: { id: number; x: number; y: number; z: number; half: number; strength: number; until: number }[] } {
+  entitySnapshot(): {
+    pickups: Pickup[];
+    solids: DynamicSolidInfo[];
+    pads: { id: number; x: number; y: number; z: number; half: number; strength: number; until: number }[];
+    chaos: (ChaosEvent | null)[];
+    crownId: number;
+  } {
     return {
+      chaos: [this.chaosCurrent, this.chaosNext],
+      crownId: this.crownId,
       pickups: this.pickups.map((k) => ({ ...k })),
       solids: [...this.dynamicSolids.values()].map((d) => ({ ...d, expires: Math.round(d.expires / this.dt) })),
       pads: this.world.pads.filter((p) => p.owner >= 0).map((p) => ({ id: p.id, x: p.x, y: p.y, z: p.z, half: p.half, strength: p.strength, until: Math.round(p.expires / this.dt) })),
@@ -1584,16 +1625,45 @@ export class GameSim {
     const killer = credit ? this.players.get(p.lastAttacker) : undefined;
     let points = 0;
     const tags: string[] = tag ? [tag] : [];
-    if (killer && this.phase === 'playing') {
+    if (killer && killer !== p && this.phase === 'playing') {
       points = BALANCE.scoring.knockout;
+      if (this.crownId === p.id) {
+        points *= BALANCE.crown.multiplier;
+        tags.push('crown');
+      }
+      if (this.isFinal()) {
+        points *= BALANCE.final.multiplier;
+        tags.push('final');
+      }
+      if (killer.nemesis === p.id) {
+        points += BALANCE.revenge.bonus;
+        tags.push('revenge');
+        killer.nemesis = -1;
+      }
+      if (p.chainBy === killer.id && this.time - p.chainTime < 4) {
+        tags.push('chain');
+        killer.stats.chainKos++;
+      }
+      killer.koTimes = killer.koTimes.filter((t) => t > this.time - BALANCE.multiKo.window);
+      killer.koTimes.push(this.time);
+      const n = killer.koTimes.length;
+      if (n === 2) tags.push('double');
+      else if (n === 3) tags.push('triple');
+      else if (n >= 4) tags.push('multi');
+      if (!this.firstKo) {
+        this.firstKo = true;
+        tags.push('first');
+      }
       killer.score += points;
       killer.stats.kos++;
+      killer.streak++;
+      p.nemesis = killer.id;
     }
-    if (killer) {
-      if (p.launchBy === killer.id) this.finishLaunch(p, true);
-    }
+    if (killer && p.launchBy === killer.id) this.finishLaunch(p, true);
     p.stats.deaths++;
+    p.stats.timesPopped++;
     if (!killer) p.stats.falls++;
+    p.streak = 0;
     this.events.push({
       t: 'ko',
       tick: this.tick,
@@ -1615,6 +1685,144 @@ export class GameSim {
     p.respawnAt = this.time + BALANCE.match.respawnDelay;
     p.lastAttacker = -1;
     p.launchBy = -1;
+    p.chainBy = -1;
+    p.savedInflation = -1;
+    this.updateCrown();
+  }
+
+  private updateCrown(): void {
+    const min = BALANCE.crown.minStreak;
+    const holder = this.players.get(this.crownId);
+    let best = holder && holder.streak >= min && holder.state.mode !== MODE_DEAD ? holder : null;
+    for (const p of this.players.values()) {
+      if (p.streak >= min && (!best || p.streak > best.streak)) best = p;
+    }
+    const id = best ? best.id : -1;
+    if (id !== this.crownId) {
+      this.crownId = id;
+      this.events.push({ t: 'crown', tick: this.tick, id });
+    }
+  }
+
+  isFinal(): boolean {
+    return this.phase === 'playing' && this.time >= this.phaseEndsAt - BALANCE.final.seconds;
+  }
+
+  // --- Chaos ---------------------------------------------------------------------------------
+
+  private scheduleChaos(first: boolean): void {
+    const C = BALANCE.chaos;
+    if (this.eventMult <= 0) {
+      this.nextChaosAt = Infinity;
+      return;
+    }
+    const base = first ? C.firstEventAfter : C.eventInterval;
+    this.nextChaosAt = this.time + (base + (Math.random() * 2 - 1) * C.eventJitter) / this.eventMult;
+  }
+
+  /** Forces the next random event (host "chaos now" button and tests). */
+  triggerChaos(kind: ChaosKind, dirX = 1, dirZ = 0): void {
+    const ticks = (sec: number) => Math.round(sec * BALANCE.tickRate);
+    const start = this.tick + ticks(BALANCE.chaos.warning);
+    this.chaosNext = { kind, announceTick: this.tick, startTick: start, endTick: start + ticks(chaosDuration(kind)), dirX, dirZ };
+    this.events.push({ t: 'chaos', tick: this.tick, ...this.chaosNext });
+  }
+
+  private updateChaos(): void {
+    const C = BALANCE.chaos;
+    if (this.phase !== 'playing') {
+      if (this.chaosCurrent) this.endChaos(this.chaosCurrent);
+      this.chaosCurrent = null;
+      this.chaosNext = null;
+      return;
+    }
+    if (!this.chaosNext && !this.chaosCurrent && this.time >= this.nextChaosAt - C.warning && this.time < this.phaseEndsAt - C.quietEnd) {
+      const kinds = CHAOS_KINDS.filter((k) => k !== this.lastChaosKind);
+      const kind = kinds[Math.floor(Math.random() * kinds.length)];
+      const dirs: [number, number][] = [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ];
+      const [dirX, dirZ] = dirs[Math.floor(Math.random() * 4)];
+      this.lastChaosKind = kind;
+      this.triggerChaos(kind, dirX, dirZ);
+    }
+    if (this.chaosNext && this.tick >= this.chaosNext.startTick) {
+      this.chaosCurrent = this.chaosNext;
+      this.chaosNext = null;
+      if (this.chaosCurrent.kind === 'maxInflate') {
+        for (const p of this.players.values()) {
+          if (p.state.mode === MODE_DEAD) continue;
+          p.savedInflation = p.state.inflation;
+          p.state.inflation = BALANCE.inflation.max;
+          depenetrate(p.state, this.world);
+        }
+      }
+    }
+    if (this.chaosCurrent && this.tick >= this.chaosCurrent.endTick) {
+      this.endChaos(this.chaosCurrent);
+      this.chaosCurrent = null;
+      this.scheduleChaos(false);
+    }
+    if (!this.finalAnnounced && this.isFinal()) {
+      this.finalAnnounced = true;
+      this.events.push({ t: 'final', tick: this.tick });
+    }
+  }
+
+  private endChaos(e: ChaosEvent): void {
+    if (e.kind !== 'maxInflate') return;
+    for (const p of this.players.values()) {
+      if (p.savedInflation >= 0) {
+        p.state.inflation = p.savedInflation;
+        p.savedInflation = -1;
+      }
+    }
+  }
+
+  /** A launched player crashing into someone launches them too; the original shooter gets credit. */
+  private chainReactions(): void {
+    const C = BALANCE.chain;
+    const list = [...this.players.values()].filter((p) => p.state.mode === MODE_NORMAL || p.state.mode === MODE_HANG || p.state.mode === MODE_CLIMB);
+    for (const a of list) {
+      const sa = a.state;
+      if (sa.mode !== MODE_NORMAL) continue;
+      const speed = Math.hypot(sa.vx, sa.vy, sa.vz);
+      if (speed < C.minSpeed || !(sa.launchTimer > 0 || (a.launchBy >= 0 && !sa.onGround))) continue;
+      const ra = playerRadius(sa);
+      const ha = playerHeight(sa);
+      for (const b of list) {
+        if (b === a) continue;
+        const sb = b.state;
+        if (sb.spawnProt > 0) continue;
+        if ((a.chainCool.get(b.id) ?? -1) > this.time) continue;
+        const dx = sb.px - sa.px;
+        const dz = sb.pz - sa.pz;
+        const d = Math.hypot(dx, dz);
+        if (d > ra + playerRadius(sb) + 0.15) continue;
+        if (sa.py + ha < sb.py || sb.py + playerHeight(sb) < sa.py) continue;
+        const owner = a.launchBy >= 0 && a.launchBy !== b.id ? a.launchBy : a.id;
+        a.chainCool.set(b.id, this.time + C.cooldown);
+        b.chainCool.set(a.id, this.time + C.cooldown);
+        let hx = (sa.vx / speed) * 0.7 + (d > 0.01 ? (dx / d) * 0.3 : 0);
+        let hy = (sa.vy / speed) * 0.7;
+        let hz = (sa.vz / speed) * 0.7 + (d > 0.01 ? (dz / d) * 0.3 : 0);
+        const hl = Math.hypot(hx, hy, hz) || 1;
+        hx /= hl;
+        hy /= hl;
+        hz /= hl;
+        const power = Math.min(1.5, speed * C.powerPerSpeed);
+        sa.vx *= C.keep;
+        sa.vy *= C.keep;
+        sa.vz *= C.keep;
+        this.events.push({ t: 'chain', tick: this.tick, id: a.id, target: b.id, by: owner, x: (sa.px + sb.px) / 2, y: sa.py + ha * 0.5, z: (sa.pz + sb.pz) / 2 });
+        this.applyHit(b, owner, hx, hy, hz, power, C.inflation, { direct: false, low: false, x: sb.px - hx * 0.4, y: sb.py + playerHeight(sb) * 0.5, z: sb.pz - hz * 0.4 });
+        b.chainBy = owner;
+        b.chainTime = this.time;
+      }
+    }
   }
 
   respawn(p: SimPlayer): void {
@@ -1669,6 +1877,7 @@ export class GameSim {
     if (this.phase === 'waiting' && this.players.size >= 2) this.startMatch();
     else if (this.phase === 'playing' && this.players.size < 2) {
       this.phase = 'waiting';
+      this.world.collapseStart = Infinity;
       this.onPhaseChange?.();
     }
   }
@@ -1677,9 +1886,22 @@ export class GameSim {
     this.phase = 'playing';
     this.matchNumber++;
     this.phaseEndsAt = this.time + this.durationSec;
+    this.world.collapseStart = this.phaseEndsAt - BALANCE.final.seconds;
+    this.world.setTime(this.time);
+    this.chaosCurrent = null;
+    this.chaosNext = null;
+    this.lastChaosKind = null;
+    this.scheduleChaos(true);
+    this.crownId = -1;
+    this.finalAnnounced = false;
+    this.firstKo = false;
     for (const p of this.players.values()) {
       p.score = 0;
       p.stats = newStats();
+      p.streak = 0;
+      p.nemesis = -1;
+      p.koTimes = [];
+      p.savedInflation = -1;
       this.respawn(p);
     }
     this.projectiles.length = 0;
@@ -1691,6 +1913,7 @@ export class GameSim {
     if (this.phase === 'playing' && this.time >= this.phaseEndsAt) {
       this.endMatch();
     } else if (this.phase === 'results' && this.time >= this.phaseEndsAt) {
+      this.world.collapseStart = Infinity;
       if (this.players.size >= 2) this.startMatch();
       else {
         this.phase = 'waiting';

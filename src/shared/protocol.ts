@@ -3,6 +3,7 @@ import { type Features, MODE_DEAD, PLAYER_FIELDS, type PlayerState } from './pla
 import type { GameEvent } from './game/events';
 import type { DynamicSolidInfo, MatchPhase, MatchResult, ModeId, Pickup } from './game/sim';
 import type { Loadout } from './loadout';
+import type { ChaosEvent } from './game/chaos';
 
 export const PROTOCOL_VERSION = 2;
 
@@ -17,11 +18,15 @@ export type JoinRequest =
   | { kind: 'create'; settings?: Partial<RoomSettings> }
   | { kind: 'code'; code: string };
 
+export type EventFrequency = 'off' | 'rare' | 'normal' | 'frequent';
+export const EVENT_MULT: Record<EventFrequency, number> = { off: 0, rare: 0.5, normal: 1, frequent: 2 };
+
 export interface RoomSettings {
   mode: ModeId;
   mapId: string;
   durationSec: number;
   bots: boolean;
+  events: EventFrequency;
 }
 
 export type ClientMessage =
@@ -64,6 +69,8 @@ export type ServerMessage =
       pickups: Pickup[];
       solids: DynamicSolidInfo[];
       pads: { id: number; x: number; y: number; z: number; half: number; strength: number; until: number }[];
+      chaos: (ChaosEvent | null)[];
+      crownId: number;
     }
   | { type: 'pong'; t: number; tick: number }
   | { type: 'error'; code: 'full' | 'not_found' | 'version' | 'kicked' | 'bad_name' | 'server'; message: string };
@@ -109,6 +116,7 @@ export const FLAG_ZIP = 1024;
 export const FLAG_PIN = 2048;
 export const FLAG_STREAM = 4096;
 export const FLAG_BLOWN = 8192;
+export const FLAG_CROWN = 16384;
 
 /** What every client knows about every player (interpolated for rendering). */
 export interface PublicPlayer {
@@ -170,7 +178,7 @@ export function encodeSnapshot(
   ackSeq: number,
   selfId: number,
   self: PlayerState | null,
-  players: { id: number; state: PlayerState; weapon: number; streaming: boolean }[],
+  players: { id: number; state: PlayerState; weapon: number; streaming: boolean; crowned: boolean }[],
 ): ArrayBuffer {
   const selfBytes = self ? PLAYER_FIELDS.length * 4 : 0;
   const buf = new ArrayBuffer(1 + 4 + 4 + 1 + 1 + selfBytes + 1 + players.length * PUBLIC_BYTES);
@@ -194,7 +202,7 @@ export function encodeSnapshot(
   }
   v.setUint8(o, players.length);
   o += 1;
-  for (const { id, state: s, weapon, streaming } of players) {
+  for (const { id, state: s, weapon, streaming, crowned } of players) {
     v.setUint8(o, id);
     o += 1;
     v.setFloat32(o, s.px);
@@ -214,7 +222,7 @@ export function encodeSnapshot(
     o += 2;
     v.setUint8(o, s.mode);
     o += 1;
-    v.setUint16(o, publicFlags(s) | (streaming ? FLAG_STREAM : 0));
+    v.setUint16(o, publicFlags(s) | (streaming ? FLAG_STREAM : 0) | (crowned ? FLAG_CROWN : 0));
     o += 2;
     v.setUint8(o, Math.round(Math.max(0, Math.min(1, s.charge)) * 255));
     o += 1;
