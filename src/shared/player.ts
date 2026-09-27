@@ -24,6 +24,8 @@ export const PLAYER_FIELDS = [
   'ammo', 'reloadTimer', 'fireCool', 'charge', 'charging',
   'u1Cool', 'u2Cool', 'u1Uses', 'u2Uses',
   'cJump', 'cDash', 'cBrace', 'cGrab', 'cGrapple', 'cReload', 'cU1', 'cU2', 'cTaunt',
+  // Hit-stop: frozen for a moment on impact, then the stored knockback plays out.
+  'hitStop', 'hsVx', 'hsVy', 'hsVz',
 ] as const;
 
 export type PlayerField = (typeof PLAYER_FIELDS)[number];
@@ -176,6 +178,22 @@ function clamp(v: number, lo: number, hi: number): number {
 export function stepPlayer(p: PlayerState, inp: InputFrame, ctx: StepContext, out: StepResult): void {
   out.reset();
   const dt = ctx.dt;
+
+  // Hit-stop: hold still for a beat after being hit, then launch. Button presses made during the
+  // freeze aren't lost (their counters are read on the next real step).
+  if (p.hitStop > 0 && p.mode !== MODE_DEAD) {
+    p.yaw = inp.yaw;
+    p.pitch = clamp(inp.pitch, -1.55, 1.55);
+    p.hitStop -= dt;
+    if (p.hitStop <= 1e-6) {
+      p.hitStop = 0;
+      p.vx += p.hsVx;
+      p.vy += p.hsVy;
+      p.vz += p.hsVz;
+      p.hsVx = p.hsVy = p.hsVz = 0;
+    }
+    return;
+  }
 
   const jumpP = pressesSince(inp.jump, p.cJump) > 0;
   const dashP = pressesSince(inp.dash, p.cDash) > 0;

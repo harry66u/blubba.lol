@@ -88,6 +88,10 @@ export const BALANCE = {
     minUp: 0.45,
     /** Fraction of the target's previous velocity kept on a new hit. */
     keepVelocity: 0.15,
+    /** Hit-stop: the target freezes this long on impact (longer for harder hits), then launches. */
+    hitStopBase: 0.045,
+    hitStopPerSpeed: 0.0008,
+    hitStopMax: 0.09,
     hitstunPerSpeed: 0.03,
     hitstunMin: 0.15,
     hitstunMax: 1.0,

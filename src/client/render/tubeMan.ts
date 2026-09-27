@@ -331,6 +331,21 @@ export class TubeMan {
     this.mouthSmile.scale.setScalar(f === 'grin' ? 1.45 : 1);
   }
 
+  private impactT = 0;
+
+  /** Got hit: a squash, a jolt away from the hit, and a white flash. `dx/dz` in world space. */
+  impact(strength: number, dx: number, dz: number): void {
+    const k = Math.min(1, strength / 25);
+    this.squashV -= 3 + k * 7;
+    // Into the tube's local frame (+z forward, +x left).
+    const yaw = this.group.rotation.y;
+    const lx = dx * Math.cos(yaw) - dz * Math.sin(yaw);
+    const lz = dx * Math.sin(yaw) + dz * Math.cos(yaw);
+    this.leanVX += lx * (4 + k * 8);
+    this.leanVZ += lz * (4 + k * 8);
+    this.impactT = 0.1;
+  }
+
   /** Plays a taunt animation (visual only). */
   taunt(style: string): void {
     this.tauntStyle = style;
@@ -607,6 +622,12 @@ export class TubeMan {
       this.bodyMat.emissive.setHex(0xff2a2a);
     } else {
       this.bodyMat.emissive.copy(this.color);
+    }
+    if (this.impactT > 0) {
+      // Hit flash.
+      this.impactT -= dt;
+      this.bodyMat.emissive.setHex(0xffffff);
+      glow = Math.max(glow, 0.9 * (this.impactT / 0.1));
     }
     this.bodyMat.emissiveIntensity = glow;
     this.crown.visible = p.crowned;

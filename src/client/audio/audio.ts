@@ -848,6 +848,53 @@ export class Audio {
     }
   }
 
+  /**
+   * A landed hit: a sub-bass thump (the weight), a rubbery pitch-dropping "bwomp" (the tube man),
+   * and a bright slap transient (the contact). Louder and lower for harder hits.
+   */
+  impact(strength: number, pos: [number, number, number] | null): void {
+    if (!this.throttle('impact', 40)) return;
+    const k = Math.min(1, strength / 30);
+    const out = this.out(pos, 0.45 + k * 0.4);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    // Thump.
+    const sub = ctx.createOscillator();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(120 - k * 30, t);
+    sub.frequency.exponentialRampToValueAtTime(38, t + 0.18);
+    const sg = ctx.createGain();
+    this.env(sg, t, 0.002, 1, 0.22 + k * 0.1);
+    sub.connect(sg).connect(out);
+    sub.start(t);
+    sub.stop(t + 0.4);
+    // Rubber bwomp: a buzzy tone through a resonant filter that closes as the pitch drops.
+    const rub = ctx.createOscillator();
+    rub.type = 'sawtooth';
+    const f0 = 260 - k * 90 + Math.random() * 30;
+    rub.frequency.setValueAtTime(f0, t);
+    rub.frequency.exponentialRampToValueAtTime(f0 * 0.45, t + 0.16);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'lowpass';
+    bp.Q.value = 9;
+    bp.frequency.setValueAtTime(1400, t);
+    bp.frequency.exponentialRampToValueAtTime(260, t + 0.18);
+    const rg = ctx.createGain();
+    this.env(rg, t, 0.003, 0.45, 0.2);
+    rub.connect(bp).connect(rg).connect(out);
+    rub.start(t);
+    rub.stop(t + 0.3);
+    // Slap.
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 1800;
+    const ng = ctx.createGain();
+    this.env(ng, t, 0.0005, 0.7, 0.035);
+    this.noise(hp, t, 0.06);
+    hp.connect(ng).connect(out);
+  }
+
   /** Stadium horn plus a crowd roar (noise swell) for goals and giant tube men filling up. */
   goalHorn(): void {
     const out = this.out(null, 0.35);

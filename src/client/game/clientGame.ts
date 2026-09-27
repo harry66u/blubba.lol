@@ -656,8 +656,11 @@ export class ClientGame {
         } else {
           const p3 = fx.addProjectile(e.id, e.x, e.y, e.z, e.vx, e.vy, e.vz, e.r, undefined, e.w);
           this.remoteShots.set(e.id, { id: e.id, g: e.g ?? 0, tick: e.tick, x: e.x, y: e.y, z: e.z, vx: e.vx, vy: e.vy, vz: e.vz, p3 });
-          if (e.w === 0) a.shoot(e.power, [e.x, e.y, e.z]);
-          else a.whoosh(0.3, e.owner === you ? null : [e.x, e.y, e.z]);
+          if (e.w === 0) {
+            a.shoot(e.power, [e.x, e.y, e.z]);
+            const sp = Math.hypot(e.vx, e.vy, e.vz) || 1;
+            fx.muzzleFlash(e.x, e.y, e.z, e.vx / sp, e.vy / sp, e.vz / sp, e.power);
+          } else a.whoosh(0.3, e.owner === you ? null : [e.x, e.y, e.z]);
           const rv = this.remotes.get(e.owner);
           if (rv) rv.man.group.userData.kick = 1;
         }
@@ -699,6 +702,7 @@ export class ClientGame {
       case 'honk': {
         if (e.id !== you) {
           fx.honkBlast(e.x, e.y, e.z, e.dx, e.dy, e.dz, e.range, e.cone, e.power);
+          fx.muzzleFlash(e.x, e.y, e.z, e.dx, e.dy, e.dz, e.power);
           a.honk(e.power, [e.x, e.y, e.z]);
           this.hud.popup(tmpV.set(e.x + e.dx * 2, e.y + e.dy * 2 + 0.5, e.z + e.dz * 2), 'HONK!', '#ffd60a', 0.8 + e.power * 0.6, 0.8);
         }
@@ -709,6 +713,8 @@ export class ClientGame {
           const rv = this.remotes.get(e.id);
           const from = rv?.man.muzzleWorld(new THREE.Vector3()) ?? new THREE.Vector3(e.x, e.y, e.z);
           fx.tracer(from.x, from.y, from.z, e.x2, e.y2, e.z2);
+          const tl = Math.hypot(e.x2 - from.x, e.y2 - from.y, e.z2 - from.z) || 1;
+          fx.muzzleFlash(from.x, from.y, from.z, (e.x2 - from.x) / tl, (e.y2 - from.y) / tl, (e.z2 - from.z) / tl, e.power * 0.7);
           a.pew(e.power, [e.x, e.y, e.z]);
         }
         break;
@@ -869,9 +875,17 @@ export class ClientGame {
       case 'hit': {
         const pos: [number, number, number] = [e.x, e.y, e.z];
         a.squeak(e.infl, e.target === you ? null : pos);
+        a.impact(e.speed, e.target === you || e.attacker === you ? null : pos);
+        if (!e.braced) {
+          fx.impactBurst(e.x, e.y, e.z, e.dx, e.dy, e.dz, e.speed, this.colorOf(e.target), this.r.camera.position);
+          this.remotes.get(e.target)?.man.impact(e.speed, e.dx, e.dz);
+        }
         if (e.attacker === you && e.target !== you) {
           this.hud.hitMarker();
           a.hitConfirm();
+          // Your shot landed: shake and a beat of hit-stop on your gun, scaled by how hard it hit.
+          this.trauma = Math.min(1, this.trauma + 0.12 + Math.min(0.45, e.speed * 0.012));
+          this.viewModel.hitStop(Math.min(0.09, 0.045 + e.speed * 0.0008));
           if (e.combo >= 2) this.hud.callout(`${e.combo}x COMBO!`, e.combo >= 3 ? 'Juggle master!' : 'Keep them in the air!', 1.2, e.combo >= 3 ? '#ff5fd2' : '#ffd60a');
           this.hud.popup(tmpV.set(e.x, e.y + 0.6, e.z), `+${Math.round(e.infl * 100)}%`, '#ffd60a', 0.8, 0.8);
         }
@@ -1255,6 +1269,7 @@ export class ClientGame {
       this.trauma = Math.min(1, this.trauma + 0.1 + f.power * 0.15);
       this.viewModel.muzzle.getWorldPosition(tmpV);
       this.effects.honkBlast(tmpV.x, tmpV.y, tmpV.z, f.dx, f.dy, f.dz, w.range, w.cone, f.power);
+      this.effects.muzzleFlash(tmpV.x, tmpV.y, tmpV.z, f.dx, f.dy, f.dz, f.power * 0.6);
       this.hud.popup(tmpV3.set(tmpV.x + f.dx * 2.5, tmpV.y + f.dy * 2.5 + 0.4, tmpV.z + f.dz * 2.5), 'HONK!', '#ffd60a', 0.9 + f.power * 0.5, 0.6);
       return;
     }
@@ -1264,6 +1279,7 @@ export class ClientGame {
       this.viewModel.muzzle.getWorldPosition(tmpV);
       const end = this.localRay(f.ox, f.oy, f.oz, f.dx, f.dy, f.dz, w.range, w.rayRadius);
       this.effects.tracer(tmpV.x, tmpV.y, tmpV.z, end.x, end.y, end.z);
+      this.effects.muzzleFlash(tmpV.x, tmpV.y, tmpV.z, f.dx, f.dy, f.dz, f.power * 0.5);
       return;
     }
     this.viewModel.kick(f.power);
@@ -1271,6 +1287,7 @@ export class ClientGame {
     this.trauma = Math.min(1, this.trauma + 0.05 + f.power * 0.1);
     const key = -this.seq;
     this.viewModel.muzzle.getWorldPosition(tmpV);
+    this.effects.muzzleFlash(tmpV.x, tmpV.y, tmpV.z, f.dx, f.dy, f.dz, f.power * 0.6);
     const r = w.projRadius * (0.75 + 0.25 * f.power);
     this.localBlast = w.blastRadius;
     const p3 = this.effects.addProjectile(key, f.ox, f.oy, f.oz, f.dx * w.projSpeed, f.dy * w.projSpeed, f.dz * w.projSpeed, r, tmpV);

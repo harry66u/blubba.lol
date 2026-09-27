@@ -825,6 +825,14 @@ export class GameSim {
     }
     // Getting hit breaks any grab you're part of.
     this.releaseInvolving(target);
+    // Hit again mid-freeze: the first hit's knockback lands now and this one stacks on top.
+    if (s.hitStop > 0) {
+      s.vx += s.hsVx;
+      s.vy += s.hsVy;
+      s.vz += s.hsVz;
+      s.hsVx = s.hsVy = s.hsVz = 0;
+      s.hitStop = 0;
+    }
     const wasAirborne = !s.onGround;
     if (attackerId >= 0 && attackerId !== target.id && target.comboBy === attackerId && wasAirborne && this.time - target.comboTime <= BALANCE.combo.window) {
       target.comboCount++;
@@ -879,6 +887,13 @@ export class GameSim {
     s.launchTimer = Math.min(K.hitstunMax, Math.max(K.hitstunMin, speed * K.hitstunPerSpeed));
     s.launchElapsed = 0;
     s.sinceHit = 0;
+    if (K.hitStopBase > 0) {
+      s.hsVx = s.vx;
+      s.hsVy = s.vy;
+      s.hsVz = s.vz;
+      s.vx = s.vy = s.vz = 0;
+      s.hitStop = Math.min(K.hitStopMax, K.hitStopBase + speed * K.hitStopPerSpeed);
+    }
     if (info.low) {
       s.doubledTimer = K.doubleOverTime;
       s.charging = 0;

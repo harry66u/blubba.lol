@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { WeaponId } from '../../shared/loadout';
 import { type WeaponModel, buildWeaponModel } from './weapons';
 import { applyFinish } from './looks';
+import { starTexture } from './effects';
 
 /** First-person weapon held in the lower right of the screen. */
 export class ViewModel {
@@ -19,6 +20,11 @@ export class ViewModel {
   private time = 0;
   /** World-space muzzle marker (follows the current weapon). */
   readonly muzzle = new THREE.Object3D();
+  private readonly flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: starTexture(), color: 0xfff3b0, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false }));
+  private flashT = 0;
+  private flashSize = 1;
+  /** Brief freeze of the gun's motion when your shot lands (hit-stop). */
+  private freezeT = 0;
 
   constructor(color: number) {
     this.color = color;
@@ -29,6 +35,9 @@ export class ViewModel {
     this.root.scale.setScalar(0.38);
     this.root.position.set(0.21, -0.19, -0.34);
     this.markLayer();
+    this.flash.visible = false;
+    this.flash.renderOrder = 12;
+    this.muzzle.add(this.flash);
   }
 
   private markLayer(): void {
@@ -74,6 +83,14 @@ export class ViewModel {
 
   kick(power: number): void {
     this.recoilV += 3 + power * 6;
+    this.flashT = 0.07 + power * 0.03;
+    this.flashSize = 0.9 + power * 1.3;
+    this.flash.material.rotation = Math.random() * Math.PI;
+  }
+
+  /** Your shot landed: hold the gun still for a beat. */
+  hitStop(seconds: number): void {
+    this.freezeT = Math.max(this.freezeT, seconds);
   }
 
   startReload(_duration: number): void {
@@ -82,6 +99,16 @@ export class ViewModel {
 
   update(dt: number, opts: { speed: number; charge: number; onGround: boolean; lookDX: number; lookDY: number; ammoFrac: number; reloading: boolean; active: boolean }): void {
     this.time += dt;
+    this.flash.visible = this.flashT > 0;
+    if (this.flashT > 0) {
+      this.flashT -= dt;
+      const s = this.flashSize * (1 + Math.random() * 0.2);
+      this.flash.scale.set(s, s, 1);
+    }
+    if (this.freezeT > 0) {
+      this.freezeT -= dt;
+      return;
+    }
     this.recoilV += (-80 * this.recoil - 12 * this.recoilV) * dt;
     this.recoil += this.recoilV * dt;
     if (opts.onGround) this.bobT += dt * Math.min(12, opts.speed * 1.2);

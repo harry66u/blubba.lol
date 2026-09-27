@@ -90,6 +90,41 @@ class ParticlePool {
   }
 }
 
+let starTex: THREE.Texture | null = null;
+/** Soft star-burst texture for muzzle flashes and impacts. */
+export function starTexture(): THREE.Texture {
+  if (starTex) return starTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d')!;
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.25, 'rgba(255,250,220,0.9)');
+  grad.addColorStop(1, 'rgba(255,240,200,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  g.translate(64, 64);
+  for (let i = 0; i < 8; i++) {
+    g.rotate(Math.PI / 4);
+    g.fillStyle = 'rgba(255,255,255,0.85)';
+    g.beginPath();
+    g.moveTo(0, -6);
+    g.lineTo(i % 2 ? 44 : 62, 0);
+    g.lineTo(0, 6);
+    g.fill();
+  }
+  starTex = new THREE.CanvasTexture(c);
+  starTex.colorSpace = THREE.SRGBColorSpace;
+  return starTex;
+}
+
+interface Flash {
+  sprite: THREE.Sprite;
+  life: number;
+  max: number;
+  size: number;
+}
+
 interface Ring {
   mesh: THREE.Mesh;
   life: number;
@@ -160,6 +195,7 @@ export class Effects {
   private readonly puffs: ParticlePool;
   private readonly confetti: ParticlePool;
   private readonly rings: Ring[] = [];
+  private readonly flashes: Flash[] = [];
   private readonly balloons: Balloon[] = [];
   private readonly ropes: Rope[] = [];
   private readonly ropeGeo = new THREE.CylinderGeometry(0.045, 0.045, 1, 6, 1, true).translate(0, 0.5, 0).rotateX(Math.PI / 2);
@@ -201,6 +237,73 @@ export class Effects {
       mesh.visible = false;
       this.root.add(mesh);
       this.rings.push({ mesh, life: 0, max: 1, size: 1 });
+    }
+  }
+
+  /** Bright star flash (muzzle flashes, impacts). Additive, so it pops against anything. */
+  flash(x: number, y: number, z: number, size: number, color = 0xfff3b0, life = 0.08): void {
+    let f = this.flashes.find((q) => q.life <= 0);
+    if (!f) {
+      if (this.flashes.length >= 16) f = this.flashes[0];
+      else {
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: starTexture(), color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+        sprite.renderOrder = 5;
+        this.root.add(sprite);
+        f = { sprite, life: 0, max: 1, size: 1 };
+        this.flashes.push(f);
+      }
+    }
+    f.life = f.max = life;
+    f.size = size;
+    f.sprite.visible = true;
+    f.sprite.position.set(x, y, z);
+    f.sprite.material.color.setHex(color);
+    f.sprite.material.rotation = Math.random() * Math.PI;
+  }
+
+  /** Muzzle flash for a shot fired along (dx, dy, dz). */
+  muzzleFlash(x: number, y: number, z: number, dx: number, dy: number, dz: number, power: number): void {
+    this.flash(x + dx * 0.25, y + dy * 0.25, z + dz * 0.25, 0.9 + power * 1.4, 0xfff3b0, 0.07 + power * 0.03);
+    for (let i = 0; i < 4 + Math.round(power * 5); i++) {
+      this.puffs.spawn(
+        {
+          x: x + dx * 0.3,
+          y: y + dy * 0.3,
+          z: z + dz * 0.3,
+          vx: dx * (4 + Math.random() * 6) + (Math.random() - 0.5) * 2,
+          vy: dy * (4 + Math.random() * 6) + (Math.random() - 0.5) * 2,
+          vz: dz * (4 + Math.random() * 6) + (Math.random() - 0.5) * 2,
+          size: 0.12 + power * 0.1,
+          grow: 1.5,
+          max: 0.3 + Math.random() * 0.2,
+          drag: 6,
+        },
+        0xffffff,
+      );
+    }
+  }
+
+  /** A landed hit: flash, a ring, and a spray of air and confetti along the knockback. */
+  impactBurst(x: number, y: number, z: number, dx: number, dy: number, dz: number, strength: number, color: number, camPos: THREE.Vector3): void {
+    const k = Math.min(1, strength / 30);
+    this.flash(x, y, z, 1.4 + k * 2.2, 0xffffff, 0.09 + k * 0.05);
+    this.shockwave(x, y, z, 1.4 + k * 2.4, 0.28, 0xffffff, false, camPos);
+    const n = 10 + Math.round(k * 18);
+    for (let i = 0; i < n; i++) {
+      const spread = 0.7;
+      const vx = dx + (Math.random() - 0.5) * spread;
+      const vy = dy + (Math.random() - 0.5) * spread + 0.2;
+      const vz = dz + (Math.random() - 0.5) * spread;
+      const sp = 4 + Math.random() * (6 + k * 10);
+      this.puffs.spawn({ x, y, z, vx: vx * sp, vy: vy * sp, vz: vz * sp, size: 0.18 + k * 0.18, grow: 1.4, max: 0.4 + Math.random() * 0.3, drag: 4 }, i % 3 === 0 ? color : 0xffffff);
+    }
+    for (let i = 0; i < 6 + Math.round(k * 14); i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 3 + Math.random() * (4 + k * 6);
+      this.confetti.spawn(
+        { x, y, z, vx: dx * sp + Math.cos(a) * 2, vy: dy * sp + 2 + Math.random() * 3, vz: dz * sp + Math.sin(a) * 2, size: 0.8, grow: 0, max: 0.9 + Math.random() * 0.5, drag: 2, gravity: 8, spin: 10 },
+        [color, 0xffd60a, 0xffffff][i % 3],
+      );
     }
   }
 
@@ -543,6 +646,18 @@ export class Effects {
 
   update(dt: number): void {
     this.time += dt;
+    for (const f of this.flashes) {
+      if (f.life <= 0) continue;
+      f.life -= dt;
+      if (f.life <= 0) {
+        f.sprite.visible = false;
+        continue;
+      }
+      const t = 1 - f.life / f.max;
+      const s = f.size * (0.6 + 0.8 * Math.min(1, t * 4));
+      f.sprite.scale.set(s, s, 1);
+      f.sprite.material.opacity = 1 - t * t;
+    }
     for (let i = this.tracers.length - 1; i >= 0; i--) {
       const t = this.tracers[i];
       t.life -= dt;

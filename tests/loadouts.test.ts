@@ -85,7 +85,8 @@ describe('loadouts', () => {
     place(far, 0.5, 0, -12, 0);
     charged(sim, ds[0], 40);
     run(sim, ds, 2);
-    expect(near.state.vz).toBeLessThan(-7);
+    // (Still in hit-stop, so part of the knockback is waiting in hsVz.)
+    expect(near.state.vz + near.state.hsVz).toBeLessThan(-7);
     expect(near.state.inflation).toBeGreaterThan(0.1);
     expect(far.state.inflation).toBe(0);
     // Recoil pushed the shooter backwards.

@@ -90,4 +90,23 @@ describe('balance', () => {
     run(sim, [da, db], 400);
     expect(b.stats.deaths).toBe(0);
   });
+
+  it('hit-stop freezes the target for a beat, then the full knockback plays out', () => {
+    const sim = new GameSim({ map: DEALERSHIP });
+    const a = sim.addPlayer('a');
+    const b = sim.addPlayer('b');
+    Object.assign(b.state, { px: 0, py: 0, pz: 0, spawnProt: 0 });
+    const da = new Driver(sim, a);
+    const db = new Driver(sim, b);
+    run(sim, [da, db], 5);
+    sim.applyHit(b, a.id, 1, 0, 0, 1, 0.15, { direct: true, low: false, x: -0.4, y: 1, z: 0 });
+    const x0 = b.state.px;
+    expect(b.state.hitStop).toBeGreaterThanOrEqual(0.045);
+    run(sim, [da, db], 2);
+    expect(b.state.px).toBe(x0); // frozen
+    run(sim, [da, db], 30);
+    expect(b.state.hitStop).toBe(0);
+    expect(b.state.px - x0).toBeGreaterThan(1);
+  });
 });
+
