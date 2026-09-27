@@ -734,6 +734,29 @@ export class Audio {
     osc.stop(t + 0.25);
   }
 
+  /** Two-tone alert for random events and the final countdown. */
+  siren(): void {
+    const out = this.out(null, 0.25);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    for (let i = 0; i < 4; i++) {
+      osc.frequency.setValueAtTime(i % 2 ? 660 : 880, t + i * 0.18);
+    }
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.5, t + 0.02);
+    g.gain.setValueAtTime(0.5, t + 0.65);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.75);
+    const lp = ctx.createBiquadFilter();
+    lp.frequency.value = 2200;
+    osc.connect(lp).connect(g).connect(out);
+    osc.start(t);
+    osc.stop(t + 0.8);
+  }
+
   /** Rising whine while charging a shot (only for your own weapon). */
   setCharge(charge: number): void {
     if (!this.ctx) return;

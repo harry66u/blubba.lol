@@ -50,3 +50,23 @@ Phases follow spec §14. Each phase is committed separately and playable on its 
 - Pickups: Soda Cans refill dash charges (with a burp); a rare Pin pops anyone at 100% inflation.
 - Loadout screen from the main menu and pause menu; changes apply on your next respawn.
 - Bots bring random loadouts and use utilities; `scripts/weapon-soak.ts` compares weapons.
+
+## Phase 4: Chaos ✅
+
+- Random events about once a minute (host can set Off/Rare/Normal/Frequent), announced 4 seconds
+  ahead with a siren, big text, and the announcer, plus a countdown banner:
+  - **Giant Fan**: a huge fan appears at one edge and blows everyone toward the other side.
+  - **Low Gravity**: half gravity, with floating sparkles.
+  - **Ice Rink**: the decks turn icy and slippery.
+  - **Max Pressure**: everyone inflates to 100% for 8 seconds, then deflates back.
+  Event effects on movement are shared code, so client prediction stays exact during events.
+- Chain reactions: launched players knock back anyone they crash into; the original shooter gets
+  credit for every knockout in the chain.
+- Crown: the player on the longest streak (2+) wears a crown and glows gold; knocking them off
+  is worth 3x.
+- Revenge: whoever last knocked you out glows red with a ⚔️ on their tag; knocking them off is
+  worth +1.
+- Final 30 seconds: islands sink one after another, the main deck crumbles inward, and
+  knockouts count double.
+- Callouts: FIRST POP, DOUBLE/TRIPLE POP, CHAIN REACTION, CROWN SNATCHED, REVENGE, PINNED, with a
+  hype announcer (browser speech synthesis) and kill-feed icons.

@@ -181,6 +181,7 @@ function applySettings(s: Settings): void {
   saveSettings(s);
   input.applySettings(s);
   audio.setVolumes(s.volumes);
+  game.announcer.setVolume(s.volumes.muted ? 0 : s.volumes.master * s.volumes.announcer);
   const q = qualityFor(s);
   if (q !== renderer.quality) renderer.setQuality(q);
   fpsEl.classList.toggle('hidden', !s.showFps);

@@ -164,6 +164,17 @@ export class Room {
       case 'ping':
         if (typeof msg.t === 'number') this.send(conn, { type: 'pong', t: msg.t, tick: this.sim.tick });
         break;
+      case 'debug':
+        if (process.env.BUBBA_DEBUG !== '1') return;
+        if (msg.action === 'chaos' && ['fan', 'lowGravity', 'ice', 'maxInflate'].includes(msg.kind)) {
+          this.sim.triggerChaos(msg.kind as 'fan', 1, 0);
+        } else if (msg.action === 'endIn' && typeof msg.seconds === 'number') {
+          // Jump the match clock forward (to see the final 30 seconds).
+          this.sim.phaseEndsAt = this.sim.time + msg.seconds;
+          this.sim.world.collapseStart = this.sim.phaseEndsAt - BALANCE.final.seconds;
+          this.broadcastJson(this.matchMessage());
+        }
+        break;
       case 'loadout':
         this.sim.setLoadout(conn.playerId, msg.loadout);
         break;

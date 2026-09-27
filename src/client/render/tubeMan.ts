@@ -27,6 +27,9 @@ export interface TubeManPose {
   pitch: number;
   streaming: boolean;
   hasPin: boolean;
+  crowned: boolean;
+  /** This player last knocked you out (drawn with a red revenge glow). */
+  nemesis: boolean;
 }
 
 export function defaultPose(): TubeManPose {
@@ -51,6 +54,8 @@ export function defaultPose(): TubeManPose {
     pitch: 0,
     streaming: false,
     hasPin: false,
+    crowned: false,
+    nemesis: false,
   };
 }
 
@@ -131,6 +136,7 @@ export class TubeMan {
   private gun: WeaponModel | null = null;
   private gunId: WeaponId | null = null;
   private readonly pin: THREE.Group;
+  private readonly crown: THREE.Group;
 
   constructor(colorHex: number, opts: { physical?: boolean; seed?: number } = {}) {
     this.seed = opts.seed ?? Math.random() * 100;
@@ -187,6 +193,9 @@ export class TubeMan {
     this.gunMount.rotation.order = 'YXZ';
     this.pin = makePin();
     this.pin.visible = false;
+    this.crown = makeCrown();
+    this.crown.visible = false;
+    this.rig.add(this.crown);
     this.rig.add(this.base, this.body.mesh, this.arms[0].mesh, this.arms[1].mesh, this.face, this.hair, this.bubble, this.gunMount, this.pin);
     this.group.add(this.rig);
   }
@@ -406,9 +415,21 @@ export class TubeMan {
       arm.update(0, 1, 0);
     }
 
-    // Glow while charging, flash while braced.
-    const glow = p.charge * 0.55 + (p.bracing ? 0.6 : 0);
+    // Glow while charging, flash while braced; the crown wearer glows gold, your nemesis red.
+    let glow = p.charge * 0.55 + (p.bracing ? 0.6 : 0);
+    if (p.crowned) glow += 0.35 + Math.sin(t * 5) * 0.15;
+    if (p.nemesis) {
+      glow += 0.45 + Math.sin(t * 8) * 0.25;
+      this.bodyMat.emissive.setHex(0xff2040);
+    } else {
+      this.bodyMat.emissive.copy(this.color);
+    }
     this.bodyMat.emissiveIntensity = glow;
+    this.crown.visible = p.crowned;
+    if (p.crowned) {
+      this.crown.position.set(spine[(n - 1) * 3], spine[(n - 1) * 3 + 1] + 0.1, spine[(n - 1) * 3 + 2]);
+      this.crown.rotation.y = t * 1.5;
+    }
     this.bodyMat.metalness = p.bracing ? 0.6 : 0.0;
 
     // Weapon held out in front of the chest, pointing where the player aims.
@@ -454,4 +475,23 @@ function makePin(): THREE.Group {
   const holder = new THREE.Group();
   holder.add(g);
   return holder;
+}
+
+/** A chunky golden crown for the player on the longest streak. */
+function makeCrown(): THREE.Group {
+  const g = new THREE.Group();
+  const gold = new THREE.MeshStandardMaterial({ color: 0xffc933, metalness: 0.8, roughness: 0.25, emissive: 0xffa000, emissiveIntensity: 0.35 });
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.3, 0.2, 20, 1, true), gold);
+  band.material.side = THREE.DoubleSide;
+  g.add(band);
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const spike = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.24, 8), gold);
+    spike.position.set(Math.cos(a) * 0.3, 0.2, Math.sin(a) * 0.3);
+    const gem = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), new THREE.MeshStandardMaterial({ color: [0xff2d55, 0x2ec5ff, 0x8ee000][i % 3], emissive: 0xffffff, emissiveIntensity: 0.2 }));
+    gem.position.set(Math.cos(a) * 0.31, 0.02, Math.sin(a) * 0.31);
+    g.add(spike, gem);
+  }
+  g.traverse((o) => ((o as THREE.Mesh).castShadow = true));
+  return g;
 }

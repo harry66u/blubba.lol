@@ -2,7 +2,7 @@
 import { spawn } from 'node:child_process';
 
 const procs = [
-  spawn('npx', ['tsx', 'watch', 'src/server/index.ts'], { stdio: 'inherit', env: { ...process.env, BUBBA_DEV: '1' } }),
+  spawn('npx', ['tsx', 'watch', 'src/server/index.ts'], { stdio: 'inherit', env: { ...process.env, BUBBA_DEV: '1', BUBBA_DEBUG: '1' } }),
   spawn('npx', ['vite'], { stdio: 'inherit' }),
 ];
 const stop = () => { for (const p of procs) p.kill('SIGTERM'); process.exit(0); };

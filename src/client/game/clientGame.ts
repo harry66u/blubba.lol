@@ -25,6 +25,7 @@ import {
 import {
   FLAG_BRACING,
   FLAG_CHARGING,
+  FLAG_CROWN,
   FLAG_DASHING,
   FLAG_DOUBLED,
   FLAG_GROUND,
@@ -42,6 +43,8 @@ import { type MatchPhase, type MatchResult, rayCapsule } from '../../shared/game
 import { World } from '../../shared/world';
 import { DEFAULT_LOADOUT, type Loadout, UTILITY_INFO, WEAPON_IDS, WEAPON_INFO, type WeaponStats, computeWeaponStats, sanitizeLoadout } from '../../shared/loadout';
 import { EntityView } from '../render/entities';
+import { CHAOS_INFO, type ChaosEvent, type Environment, NORMAL_ENV, envAt } from '../../shared/game/chaos';
+import { Announcer } from '../audio/announcer';
 import type { Audio } from '../audio/audio';
 import { type Action, type InputManager, codeLabel } from '../input/input';
 import type { Connection } from '../net/connection';
@@ -137,6 +140,15 @@ export class ClientGame {
   loadout: Loadout = { ...DEFAULT_LOADOUT };
   weapon: WeaponStats = computeWeaponStats('airCannon', []);
   private streamStrength = 0;
+  readonly announcer = new Announcer();
+  /** Random events we know about (current and announced), for prediction and visuals. */
+  private chaos: ChaosEvent[] = [];
+  private readonly envTmp: Environment = { ...NORMAL_ENV };
+  crownId = -1;
+  /** Whoever last knocked you out. */
+  nemesisId = -1;
+  private debrisTimer = 0;
+  private lastChaosShown: ChaosEvent | null = null;
   readonly clock = new ServerClock();
   pred: PlayerState = createPlayerState();
   private havePred = false;
@@ -292,7 +304,18 @@ export class ClientGame {
         break;
       }
       case 'match':
+        if (msg.number !== this.match.number) {
+          this.chaos = [];
+          this.crownId = -1;
+          this.nemesisId = -1;
+        }
         this.match = { phase: msg.phase, endsAtTick: msg.endsAtTick, number: msg.number, result: msg.result };
+        this.world.collapseStart = msg.phase === 'playing' ? msg.endsAtTick * DT - BALANCE.final.seconds : Infinity;
+        if (msg.phase === 'playing') this.announcer.say('Go!', 2);
+        if (msg.phase === 'results' && msg.result) {
+          const w = msg.result.standings[0];
+          this.announcer.say(w ? `Time's up! ${w.id === this.youId ? 'You win!' : `${w.name} wins!`}` : "Time's up!", 3);
+        }
         this.onMatchChange?.(this.match);
         break;
       case 'room':
@@ -314,6 +337,8 @@ export class ClientGame {
           this.world.addPad({ x: p.x, y: p.y, z: p.z, half: p.half, strength: p.strength, owner: 0, expires: Infinity }, p.id);
           this.entities.addPad(p.id, p.x, p.y, p.z, p.half);
         }
+        this.chaos = msg.chaos.filter((c): c is ChaosEvent => !!c);
+        this.crownId = msg.crownId;
         break;
       case 'error':
         if (msg.code === 'kicked') this.onKicked?.(msg.message);
@@ -345,6 +370,7 @@ export class ClientGame {
     while (this.history.length && this.history[0].seq <= snap.ackSeq) this.history.shift();
     for (const h of this.history) {
       this.world.setTime(h.tick * DT);
+      this.ctx.env = envAt(this.chaos, h.tick, this.envTmp);
       stepPlayer(this.pred, h.input, this.ctx, this.replayOut);
     }
     this.world.setTime(this.predTick() * DT);
@@ -406,6 +432,9 @@ export class ClientGame {
       case 'honk':
       case 'tracer':
         return e.id === you;
+      case 'chaos':
+      case 'crown':
+      case 'final':
       case 'solid':
       case 'solidGone':
       case 'pad':
@@ -419,7 +448,9 @@ export class ClientGame {
       case 'hit':
         return e.target === you;
       case 'ko':
-        return e.victim === you;
+        return e.victim === you || e.killer === you;
+      case 'chain':
+        return e.id === you || e.target === you;
       case 'spawn':
         return e.id === you;
       case 'move':
@@ -602,6 +633,43 @@ export class ClientGame {
       case 'loadout':
         if (e.id === you) this.applyWeapon(sanitizeLoadout(e));
         break;
+      case 'chaos': {
+        this.chaos = this.chaos.filter((c) => c.endTick > e.tick);
+        this.chaos.push({ kind: e.kind, announceTick: e.announceTick, startTick: e.startTick, endTick: e.endTick, dirX: e.dirX, dirZ: e.dirZ });
+        const info = CHAOS_INFO[e.kind];
+        this.hud.callout(info.title, `${info.sub} (in ${Math.round((e.startTick - e.tick) * DT)}s)`, 3, '#ff9f1c');
+        a.siren();
+        const lines: Record<string, string> = { fan: 'Giant fan incoming!', lowGravity: 'Low gravity!', ice: 'Ice rink!', maxInflate: 'Maximum pressure!' };
+        this.announcer.say(lines[e.kind], 3);
+        break;
+      }
+      case 'chain': {
+        this.hud.popup(tmpV.set(e.x, e.y + 1, e.z), 'CHAIN!', '#ff5fd2', 1.2, 0.9);
+        a.thud(e.id === you || e.target === you ? null : [e.x, e.y, e.z], 12);
+        a.squeak(0.6, e.id === you || e.target === you ? null : [e.x, e.y, e.z]);
+        fx.airPuff(e.x, e.y, e.z, 8, 4, 0.2);
+        if (e.target === you) this.trauma = Math.min(1, this.trauma + 0.3);
+        break;
+      }
+      case 'crown': {
+        const prev = this.crownId;
+        this.crownId = e.id;
+        if (e.id === you) {
+          this.hud.callout('YOU HAVE THE CROWN!', `You're worth ${BALANCE.crown.multiplier}x points now. Stay on!`, 2.2, '#ffc933');
+          this.announcer.say('New champion!', 2);
+        } else if (e.id >= 0) {
+          this.hud.toast(`👑 ${this.nameOf(e.id)} has the crown! Knock them off for ${BALANCE.crown.multiplier}x points.`, 3000);
+        } else if (prev === you) {
+          this.hud.toast('You lost the crown!', 2000);
+        }
+        break;
+      }
+      case 'final':
+        this.hud.callout('FINAL 30 SECONDS!', 'The map is collapsing! Knockouts count DOUBLE!', 3, '#ff3b5c');
+        a.siren();
+        this.announcer.say('Final thirty seconds! Knockouts count double!', 4);
+        this.trauma = Math.min(1, this.trauma + 0.3);
+        break;
       case 'fizzle': {
         const localKey = this.localByServer.get(e.id);
         if (localKey !== undefined) {
@@ -650,9 +718,11 @@ export class ClientGame {
         const killerName = e.killer >= 0 ? this.nameOf(e.killer) : '';
         const vc = hexColor(this.colorOf(e.victim));
         const kc = e.killer >= 0 ? hexColor(this.colorOf(e.killer)) : '';
+        const icons: Record<string, string> = { crown: ' 👑', chain: ' ⛓️', revenge: ' ⚔️', final: ' ×2', pin: ' 📌', double: ' ✌️', triple: ' 🔥', multi: ' 🔥🔥' };
+        const suffix = e.tags.map((t) => icons[t] ?? '').join('') + (e.points > 1 ? ` <b>+${e.points}</b>` : '');
         const html =
           e.killer >= 0
-            ? `<b style="color:${kc}">${esc(killerName)}</b> popped <b style="color:${vc}">${esc(victimName)}</b>`
+            ? `<b style="color:${kc}">${esc(killerName)}</b> popped <b style="color:${vc}">${esc(victimName)}</b>${suffix}`
             : `<b style="color:${vc}">${esc(victimName)}</b> fell off`;
         this.hud.addKill(html, e.killer === you || e.victim === you);
         a.squeal(e.victim === you ? null : [e.x, Math.max(e.y, -10), e.z]);
@@ -664,10 +734,9 @@ export class ClientGame {
           this.deathPos.set(e.x, Math.max(e.y, -6), e.z);
           this.audio.setCharge(0);
         }
-        if (e.killer === you && e.victim !== you) {
-          a.koConfirm();
-          this.hud.callout('POPPED!', victimName, 1.8);
-        }
+        if (e.victim === you && e.killer >= 0) this.nemesisId = e.killer;
+        if (e.killer === you && e.victim === this.nemesisId) this.nemesisId = -1;
+        this.koCallout(e, killerName, victimName);
         const rv = this.remotes.get(e.victim);
         if (rv) rv.man.setVisible(false);
         break;
@@ -751,6 +820,114 @@ export class ClientGame {
         break;
     }
     void immediate;
+  }
+
+  /** Big text and announcer lines for knockouts worth shouting about. */
+  private koCallout(e: Extract<GameEvent, { t: 'ko' }>, killerName: string, victimName: string): void {
+    const you = this.youId;
+    const tags = e.tags;
+    const pts = e.points > 1 ? ` +${e.points}` : '';
+    let main = '';
+    let sub = '';
+    let line = '';
+    let color = '#ffd60a';
+    let priority = 1;
+    if (tags.includes('multi')) {
+      main = 'POP-TASTIC!';
+      line = 'Unstoppable!';
+      priority = 4;
+    } else if (tags.includes('triple')) {
+      main = 'TRIPLE POP!';
+      line = 'Triple pop!';
+      priority = 4;
+    } else if (tags.includes('double')) {
+      main = 'DOUBLE POP!';
+      line = 'Double pop!';
+      priority = 3;
+    } else if (tags.includes('chain')) {
+      main = 'CHAIN REACTION!';
+      line = 'Chain reaction!';
+      color = '#ff5fd2';
+      priority = 3;
+    } else if (tags.includes('crown')) {
+      main = 'CROWN SNATCHED!';
+      line = 'The crown has fallen!';
+      color = '#ffc933';
+      priority = 3;
+    } else if (tags.includes('revenge') && (e.killer === you || e.victim === you)) {
+      main = 'REVENGE!';
+      line = 'Sweet revenge!';
+      color = '#ff3b5c';
+      priority = 2;
+    } else if (tags.includes('pin')) {
+      main = 'PINNED!';
+      line = 'Pop!';
+      color = '#ff2d55';
+      priority = 2;
+    } else if (tags.includes('first')) {
+      main = 'FIRST POP!';
+      line = 'First pop!';
+      priority = 2;
+    }
+    if (main) {
+      sub = e.killer === you ? `You popped ${victimName}${pts}` : `${killerName} popped ${victimName}`;
+      this.hud.callout(main, sub, 2, color);
+      this.announcer.say(line, priority);
+      this.audio.koConfirm();
+    } else if (e.killer === you && e.victim !== you) {
+      this.audio.koConfirm();
+      this.hud.callout('POPPED!', `${victimName}${pts}`, 1.8);
+    }
+  }
+
+  /** Per-frame visuals for random events and the final collapse. */
+  private updateChaos(dt: number): void {
+    const tick = this.clock.tickAt(performance.now());
+    const active = this.chaos.find((c) => tick >= c.startTick && tick < c.endTick) ?? null;
+    const upcoming = this.chaos.find((c) => tick < c.startTick) ?? null;
+    this.mapView.setFan(active?.kind === 'fan', active?.dirX ?? 0, active?.dirZ ?? 0);
+    this.mapView.setIce(active?.kind === 'ice' ? Math.min(1, (tick - active.startTick) / 30) : 0);
+    if (active?.kind === 'fan') {
+      // Wind streaks racing across the map.
+      for (let i = 0; i < 3; i++) {
+        const side = (Math.random() - 0.5) * 50;
+        const x = -active.dirX * 30 + active.dirZ * side;
+        const z = -active.dirZ * 30 + active.dirX * side;
+        this.effects.windStreak(x, 1 + Math.random() * 8, z, active.dirX, active.dirZ);
+      }
+    } else if (active?.kind === 'lowGravity' && Math.random() < 0.5) {
+      const c = this.r.camera.position;
+      this.effects.sparkle(c.x + (Math.random() - 0.5) * 30, c.y - 2 + Math.random() * 6, c.z + (Math.random() - 0.5) * 30);
+    }
+    if (active !== this.lastChaosShown) {
+      this.lastChaosShown = active;
+      if (active?.kind === 'maxInflate') {
+        this.audio.whoosh(1, null);
+        this.hud.popup(tmpV.set(this.pred.px, this.pred.py + 3, this.pred.pz), 'PSSSHHH!', '#ffffff', 1.4, 1.2);
+      }
+    }
+    let banner = '';
+    if (active) banner = `${CHAOS_INFO[active.kind].title.replace('!', '')} · ${Math.ceil((active.endTick - tick) * DT)}s`;
+    else if (upcoming) banner = `${CHAOS_INFO[upcoming.kind].title.replace('!', '')} in ${Math.ceil((upcoming.startTick - tick) * DT)}...`;
+    this.hud.setEvent(banner);
+
+    // Crumbling edges during the final collapse.
+    const elapsed = tick * DT - this.world.collapseStart;
+    if (elapsed > 0 && this.match.phase === 'playing') {
+      this.debrisTimer -= dt;
+      if (this.debrisTimer <= 0) {
+        this.debrisTimer = 0.08;
+        for (const s of this.world.solids) {
+          if (s.collapse < 0 || !s.enabled) continue;
+          if (s.collapse === 0 && s.maxX - s.minX >= this.map.solids[s.id].max[0] - this.map.solids[s.id].min[0] - 0.01) continue;
+          const edge = Math.floor(Math.random() * 4);
+          const u = Math.random();
+          const x = edge < 2 ? s.minX + u * (s.maxX - s.minX) : edge === 2 ? s.minX : s.maxX;
+          const z = edge >= 2 ? s.minZ + u * (s.maxZ - s.minZ) : edge === 0 ? s.minZ : s.maxZ;
+          this.effects.debris(x, s.maxY, z);
+        }
+      }
+    }
   }
 
   /** Where a player's grapple line starts (your gun muzzle, or another player's chest). */
@@ -949,6 +1126,7 @@ export class ClientGame {
     this.updateShots(dt);
     this.updateCamera(dt);
     this.updateLocalFeedback(dt);
+    this.updateChaos(dt);
     this.mapView.update(dt, this.time);
     this.effects.update(dt);
     this.updateCircles();
@@ -970,6 +1148,7 @@ export class ClientGame {
     this.prevY = this.pred.py;
     this.prevZ = this.pred.pz;
     this.world.setTime(f.tick * DT);
+    this.ctx.env = envAt(this.chaos, f.tick, this.envTmp);
     stepPlayer(this.pred, f, this.ctx, this.stepOut);
     this.localStepFx(this.stepOut);
   }
@@ -1089,6 +1268,8 @@ export class ClientGame {
     p.pitch = c.pitch;
     p.streaming = (c.flags & FLAG_STREAM) !== 0;
     p.hasPin = (c.flags & FLAG_PIN) !== 0;
+    p.crowned = (c.flags & FLAG_CROWN) !== 0;
+    p.nemesis = rv.id === this.nemesisId;
     rv.man.setWeapon(WEAPON_IDS[c.weapon] ?? 'airCannon');
     p.dashing = (c.flags & FLAG_DASHING) !== 0;
     p.protected = (c.flags & FLAG_PROTECTED) !== 0;
@@ -1112,7 +1293,7 @@ export class ClientGame {
     const scale = Math.max(0.55, Math.min(1.1, 14 / Math.max(1, dist)));
     rv.tag.el.style.transform = `translate(-50%, -100%) translate(${x}px, ${y}px) scale(${scale})`;
     const pct = Math.round(c.inflation * 100);
-    const text = `${pct}%`;
+    const text = `${p.crowned ? '👑 ' : ''}${pct}%${p.nemesis ? ' ⚔️' : ''}`;
     if (text !== rv.lastTagText) {
       rv.lastTagText = text;
       rv.tag.pct.textContent = text;

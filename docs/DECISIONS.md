@@ -79,6 +79,20 @@ The spec leaves the tech stack and many details open. This file records what was
 - **Utilities** are thrown with a lob; pads and walls deploy where they land, grenades bounce and
   go off after a fuse or on contact with a player. Walls and rafts are real solids mirrored to
   every client so movement prediction stays exact.
+- **Random events are scheduled by the server in ticks** and sent when announced, so the start
+  and end line up exactly on every client. Movement effects (gravity, friction, wind) come from
+  one shared `envAt()` function used by both the server and client prediction.
+- **Max Pressure** restores everyone's previous inflation when it ends, so it's a burst of chaos
+  rather than a permanent reset of the match.
+- **Chain reactions** trigger when a launched player moving faster than 11 m/s overlaps someone.
+  The same pair can't chain again for 0.6 s (no ping-pong), and credit goes to whoever launched
+  the first player.
+- **Scoring:** 1 point per knockout, x3 for the crown wearer, x2 in the final 30 seconds, +1 for
+  revenge. Self-knockouts score nothing.
+- **Final collapse** is deterministic from the match end time: islands sink with constant
+  acceleration in order, and the main deck shrinks 30% per side over the last 10 seconds.
+- **Announcer** uses the browser's speech synthesis (no downloads) at the announcer volume; every
+  line is also shown as on-screen text.
 - **Grapple** targets players first (with a 0.5 m aim forgiveness for trackpads), then surfaces.
 
 ## Sound-off versions of every audio joke

@@ -132,6 +132,9 @@ export class MapView {
   private readonly clouds = new THREE.Group();
   private readonly balloons: THREE.Object3D[] = [];
   private readonly solidMeshes = new Map<number, THREE.Object3D>();
+  private readonly deckTops: THREE.MeshStandardMaterial[] = [];
+  private fan: THREE.Group | null = null;
+  private fanBlades: THREE.Object3D | null = null;
   private time = 0;
 
   constructor(
@@ -186,6 +189,7 @@ export class MapView {
       if (isDeck) {
         // Top slab with painted texture, then a chunky floating-rock underside.
         const topMat = new THREE.MeshStandardMaterial({ map: deckTexture(w, d, def.kind), roughness: 0.85 });
+        this.deckTops.push(topMat);
         const slab = new THREE.Mesh(new RoundedBoxGeometry(w, 0.6, d, 2, 0.12), matFor(def.kind));
         slab.position.set(cx, def.max[1] - 0.3, cz);
         slab.receiveShadow = true;
@@ -263,8 +267,16 @@ export class MapView {
         this.movers.push({ solidId: id, mesh: holder, def });
         this.solidMeshes.set(id, holder);
       } else if (def.collapse !== undefined) {
-        this.root.add(group);
-        this.solidMeshes.set(id, group);
+        // Pivot at the piece's center so it can sink and crumble (scale) in the final 30 seconds.
+        const pivot = new THREE.Group();
+        pivot.position.set(cx, 0, cz);
+        for (const child of [...group.children]) {
+          child.position.x -= cx;
+          child.position.z -= cz;
+          pivot.add(child);
+        }
+        this.root.add(pivot);
+        this.solidMeshes.set(id, pivot);
       } else {
         // Merge static meshes by material to save draw calls.
         group.updateMatrixWorld(true);
@@ -483,9 +495,19 @@ export class MapView {
     for (const [id, obj] of this.solidMeshes) {
       const s = this.world.solid(id);
       if (!s) continue;
-      if (!this.movers.some((m) => m.solidId === id)) obj.position.y = s.minY - this.map.solids[id].min[1];
+      const def = this.map.solids[id];
+      if (!this.movers.some((m) => m.solidId === id)) {
+        obj.position.y = s.minY - def.min[1];
+        const w = def.max[0] - def.min[0];
+        const d = def.max[2] - def.min[2];
+        obj.scale.x = (s.maxX - s.minX) / w;
+        obj.scale.z = (s.maxZ - s.minZ) / d;
+        // A little wobble while sinking sells the collapse.
+        obj.rotation.z = s.minY < def.min[1] - 0.05 ? Math.sin(this.time * 7 + id) * 0.02 : 0;
+      }
       obj.visible = s.enabled;
     }
+    if (this.fan && this.fanBlades) this.fanBlades.rotation.z += dt * 14;
     for (const t of this.tubeMen) {
       t.pose.time = time + t.man.group.position.x;
       t.pose.dt = dt;
@@ -507,6 +529,52 @@ export class MapView {
       b.position.set(base.x + Math.sin(this.time * 1.3 + b.userData.phase) * 0.12, base.y + Math.sin(this.time * 1.7 + b.userData.phase) * 0.1, base.z);
     }
     this.clouds.rotation.y += dt * 0.004;
+  }
+
+  /** Tints the decks icy (0..1) during the ice rink event. */
+  setIce(k: number): void {
+    for (const m of this.deckTops) {
+      m.color.setRGB(1 - 0.28 * k, 1 - 0.08 * k, 1);
+      m.roughness = 0.85 - 0.75 * k;
+      m.metalness = 0.25 * k;
+    }
+  }
+
+  /** Shows (or hides) a giant box fan blowing along (dirX, dirZ). */
+  setFan(on: boolean, dirX = 1, dirZ = 0): void {
+    if (!on) {
+      if (this.fan) this.root.remove(this.fan);
+      this.fan = null;
+      this.fanBlades = null;
+      return;
+    }
+    if (this.fan) return;
+    const g = new THREE.Group();
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0x3d6bff, roughness: 0.35 });
+    const grillMat = new THREE.MeshStandardMaterial({ color: 0xe8ecf5, metalness: 0.6, roughness: 0.3 });
+    const frame = new THREE.Mesh(new THREE.TorusGeometry(9, 1.2, 12, 40), frameMat);
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 1.2, 20), grillMat);
+    hub.rotation.x = Math.PI / 2;
+    const blades = new THREE.Group();
+    for (let i = 0; i < 4; i++) {
+      const b = new THREE.Mesh(new THREE.BoxGeometry(1.8, 7.5, 0.3), new THREE.MeshStandardMaterial({ color: 0xffd60a, roughness: 0.4 }));
+      b.position.y = 4.2;
+      const holder = new THREE.Group();
+      holder.rotation.z = (i / 4) * Math.PI * 2;
+      b.rotation.y = 0.4;
+      holder.add(b);
+      blades.add(holder);
+    }
+    const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 1.6, 16, 12), frameMat);
+    stand.position.y = -12;
+    g.add(frame, hub, blades, stand);
+    g.traverse((o) => ((o as THREE.Mesh).castShadow = true));
+    // Stand upwind, facing where the wind goes.
+    g.position.set(-dirX * 40, 8, -dirZ * 40);
+    g.lookAt(new THREE.Vector3(0, 8, 0));
+    this.root.add(g);
+    this.fan = g;
+    this.fanBlades = blades;
   }
 
   dispose(): void {

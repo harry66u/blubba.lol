@@ -467,6 +467,22 @@ export class Effects {
     }
   }
 
+  /** A streak of wind for the giant fan. */
+  windStreak(x: number, y: number, z: number, dx: number, dz: number): void {
+    this.puffs.spawn({ x, y, z, vx: dx * 40, vy: 0, vz: dz * 40, size: 0.12, grow: 0.5, max: 1.4, drag: 0 }, 0xe8f6ff);
+  }
+
+  /** Floaty sparkle for low gravity. */
+  sparkle(x: number, y: number, z: number): void {
+    this.confetti.spawn({ x, y, z, vx: 0, vy: 0.6, vz: 0, size: 0.6, grow: 0, max: 2, drag: 0.5, gravity: -0.3, spin: 3 }, [0xc49bff, 0x9fe8ff, 0xffffff][Math.floor(Math.random() * 3)]);
+  }
+
+  /** A chunk crumbling off a collapsing edge. */
+  debris(x: number, y: number, z: number): void {
+    this.puffs.spawn({ x, y, z, vx: (Math.random() - 0.5) * 2, vy: -1, vz: (Math.random() - 0.5) * 2, size: 0.3 + Math.random() * 0.3, grow: 0, max: 1.6, drag: 0.2, gravity: 14, spin: 4 }, 0x8a7aa8);
+    if (Math.random() < 0.3) this.puffs.spawn({ x, y: y + 0.2, z, vx: 0, vy: 1, vz: 0, size: 0.25, grow: 2, max: 0.6, drag: 3 }, 0xd8d0e8);
+  }
+
   update(dt: number): void {
     this.time += dt;
     for (let i = this.tracers.length - 1; i >= 0; i--) {

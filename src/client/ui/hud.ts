@@ -73,6 +73,7 @@ export class Hud {
   private readonly tankFill: HTMLElement;
   private readonly utilEls: { box: HTMLElement; cool: HTMLElement; icon: HTMLElement }[] = [];
   private readonly pinBadge: HTMLElement;
+  private readonly eventBanner: HTMLElement;
   private readonly clock: HTMLElement;
   private readonly sub: HTMLElement;
   private readonly killfeed: HTMLElement;
@@ -139,6 +140,7 @@ export class Hud {
       this.utilEls.push({ box, cool, icon });
     }
     this.pinBadge = el('div', { class: 'pin-badge hidden', text: '📌 PIN' });
+    this.eventBanner = el('div', { class: 'event-banner hidden' });
 
     this.dashPips = el('div', { class: 'pips' });
     const ability = (label: string): [HTMLElement, HTMLElement] => {
@@ -163,7 +165,7 @@ export class Hud {
 
     this.clock = el('div', { class: 'clock', text: '4:00' });
     this.sub = el('div', { class: 'sub' });
-    const timer = el('div', { class: 'timer' }, this.clock, this.sub);
+    const timer = el('div', { class: 'timer' }, this.clock, this.sub, this.eventBanner);
 
     this.killfeed = el('div', { class: 'killfeed' });
     this.nametags = el('div', { class: 'nametags' });
@@ -251,6 +253,13 @@ export class Hud {
       this.calloutTimer -= dt;
       if (this.calloutTimer <= 0) clear(this.calloutBox);
     }
+  }
+
+  setEvent(text: string): void {
+    this.setIf('event', text, () => {
+      this.eventBanner.textContent = text;
+      this.eventBanner.classList.toggle('hidden', !text);
+    });
   }
 
   setUtilities(names: string[]): void {

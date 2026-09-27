@@ -1,7 +1,7 @@
 import { PLAYER_COLORS } from '../../shared/colors';
 import type { MatchResult } from '../../shared/game/sim';
 import { checkName, randomGuestName } from '../../shared/names';
-import type { RoomInfo, RosterEntry } from '../../shared/protocol';
+import type { EventFrequency, RoomInfo, RosterEntry } from '../../shared/protocol';
 import { ACTION_LABELS, type Action, DEFAULT_BINDINGS, codeLabel } from '../input/input';
 import type { Settings } from '../settings';
 import { clear, el, hexColor } from './dom';
@@ -165,7 +165,7 @@ export interface PauseCallbacks {
   onSettings: () => void;
   onHowTo: () => void;
   onCopyLink: () => void;
-  onHost: (action: 'restart' | { durationSec?: number; bots?: boolean }) => void;
+  onHost: (action: 'restart' | { durationSec?: number; bots?: boolean; events?: EventFrequency }) => void;
 }
 
 export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCallbacks): HTMLElement {
@@ -192,9 +192,22 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
       const bots = el('input', { attrs: { type: 'checkbox' } });
       bots.checked = room.settings.bots;
       bots.addEventListener('change', () => cb.onHost({ bots: bots.checked }));
+      const events = el('select', { class: 'field', style: 'font-size:16px;padding:6px' });
+      for (const [v, l] of [
+        ['off', 'Off'],
+        ['rare', 'Rare'],
+        ['normal', 'Normal'],
+        ['frequent', 'Frequent'],
+      ] as [EventFrequency, string][]) {
+        const o = el('option', { text: l, attrs: { value: v } });
+        if (v === room.settings.events) o.selected = true;
+        events.append(o);
+      }
+      events.addEventListener('change', () => cb.onHost({ events: events.value as EventFrequency }));
       panel.append(
         el('div', { class: 'label', text: 'Host controls' }),
         el('div', { class: 'row' }, el('span', { text: 'Match length' }), time, el('label', { class: 'row', style: 'font-size:16px' }, bots, 'Bots')),
+        el('div', { class: 'row' }, el('span', { text: 'Random events' }), events),
         el('button', { class: 'btn small yellow', text: 'Restart match', on: { click: () => cb.onHost('restart') } }),
       );
     }
