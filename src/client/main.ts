@@ -439,6 +439,9 @@ input.onLockChange = (locked) => {
 };
 
 input.onChatWheel = (open, slot) => hud.showChatWheel(open, slot);
+input.onCameraToggle = () => {
+  if (screen === 'playing') game.toggleCamera();
+};
 input.onChat = (slot) => game.sendChat(slot);
 
 input.onScoreboard = (show) => {

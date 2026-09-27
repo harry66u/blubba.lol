@@ -59,11 +59,13 @@ import { BeachBall } from '../render/beachBall';
 import type { Renderer } from '../render/renderer';
 import { type Look, TubeMan, defaultPose, type TubeManPose } from '../render/tubeMan';
 import { ViewModel } from '../render/viewModel';
-import type { Settings } from '../settings';
+import { type Settings, saveSettings } from '../settings';
 import { esc, hexColor } from '../ui/dom';
 import type { Hud, Nametag } from '../ui/hud';
 import type { TeamView } from '../ui/menus';
+import { CHASE, aimFromCamera, chaseCamera, rebaseMove } from './chaseCam';
 import { ServerClock } from './clock';
+import { TipCoach } from '../ui/tips';
 
 interface HistoryEntry {
   seq: number;
@@ -208,6 +210,19 @@ export class ClientGame {
   private pendingSend: InputFrame[] = [];
   private launchTips = 0;
   private wasLaunched = false;
+  /** Your own character, drawn when the third-person camera is on. */
+  private selfMan: TubeMan | null = null;
+  private readonly selfPose = defaultPose();
+  private selfLookKey = '';
+  /** Where the camera sat last frame: third-person shots aim along its center ray. */
+  private readonly camPos = new THREE.Vector3();
+  /** Current chase-camera distance (pulls in instantly on walls, eases back out). */
+  private camDist = 0;
+  /** camPos follows you (false while spectating, until the first frame after respawning). */
+  private camLive = false;
+  private readonly aimOut = { yaw: 0, pitch: 0 };
+  /** First-use tooltips for the less obvious controls. */
+  private readonly tips = new TipCoach((t, done) => this.hud.showTip(t, done));
   onMatchChange: ((m: MatchInfo) => void) | null = null;
   onRosterChange: (() => void) | null = null;
   onRoomChange: ((room: RoomInfo) => void) | null = null;
@@ -238,6 +253,7 @@ export class ClientGame {
     this.replay = new ReplayView(r.scene, this.effects);
     this.viewModel.root.visible = false;
     r.setTheme(this.map.theme);
+    input.onAnyPress = (a) => this.tips.used(a);
   }
 
   private makeCtx(features: StepContext['features']): StepContext {
@@ -359,6 +375,12 @@ export class ClientGame {
     this.modeState = null;
     this.hud.setTeamBar(null);
     this.viewModel.root.visible = false;
+    if (this.selfMan) {
+      this.r.scene.remove(this.selfMan.group);
+      this.selfMan.dispose();
+      this.selfMan = null;
+    }
+    this.camLive = false;
     this.hud.show(false);
     this.audio.setCharge(0);
     this.audio.setBlower(0);
@@ -890,6 +912,7 @@ export class ClientGame {
         if (!e.braced) {
           fx.impactBurst(e.x, e.y, e.z, e.dx, e.dy, e.dz, e.speed, this.colorOf(e.target), this.r.camera.position);
           this.remotes.get(e.target)?.man.impact(e.speed, e.dx, e.dz);
+          if (e.target === you) this.selfMan?.impact(e.speed, e.dx, e.dz);
         }
         if (e.attacker === you && e.target !== you) {
           this.hud.hitMarker();
@@ -985,6 +1008,7 @@ export class ClientGame {
         const style = cosmeticKey(cos, 'taunt');
         const pack = cosmeticKey(cos, 'sound');
         this.remotes.get(e.id)?.man.taunt(style);
+        if (e.id === this.youId) this.selfMan?.taunt(style);
         if (p) {
           const at: [number, number, number] | null = e.id === you ? null : [p.x, p.y, p.z];
           // Burp is the classic taunt sound; other packs replace it.
@@ -1163,8 +1187,8 @@ export class ClientGame {
   /** Where a player's grapple line starts (your gun muzzle, or another player's chest). */
   private handPos(id: number): THREE.Vector3 | null {
     if (id === this.youId) {
-      if (!this.viewModel.root.visible) return null;
-      return this.viewModel.muzzle.getWorldPosition(new THREE.Vector3());
+      if (!this.viewModel.root.visible && !this.selfMan?.group.visible) return null;
+      return this.muzzlePos(new THREE.Vector3());
     }
     const rv = this.remotes.get(id);
     if (!rv?.cur || rv.cur.mode === MODE_DEAD) return null;
@@ -1278,7 +1302,7 @@ export class ClientGame {
       this.viewModel.kick(f.power * 1.5);
       this.audio.honk(f.power, null);
       this.trauma = Math.min(1, this.trauma + 0.1 + f.power * 0.15);
-      this.viewModel.muzzle.getWorldPosition(tmpV);
+      this.muzzlePos(tmpV);
       this.effects.honkBlast(tmpV.x, tmpV.y, tmpV.z, f.dx, f.dy, f.dz, w.range, w.cone, f.power);
       this.effects.muzzleFlash(tmpV.x, tmpV.y, tmpV.z, f.dx, f.dy, f.dz, f.power * 0.6);
       this.hud.popup(tmpV3.set(tmpV.x + f.dx * 2.5, tmpV.y + f.dy * 2.5 + 0.4, tmpV.z + f.dz * 2.5), 'HONK!', '#ffd60a', 0.9 + f.power * 0.5, 0.6);
@@ -1287,7 +1311,7 @@ export class ClientGame {
     if (w.kind === 'hitscan') {
       this.viewModel.kick(f.power);
       this.audio.pew(f.power, null);
-      this.viewModel.muzzle.getWorldPosition(tmpV);
+      this.muzzlePos(tmpV);
       const end = this.localRay(f.ox, f.oy, f.oz, f.dx, f.dy, f.dz, w.range, w.rayRadius);
       this.effects.tracer(tmpV.x, tmpV.y, tmpV.z, end.x, end.y, end.z);
       this.effects.muzzleFlash(tmpV.x, tmpV.y, tmpV.z, f.dx, f.dy, f.dz, f.power * 0.5);
@@ -1297,7 +1321,7 @@ export class ClientGame {
     this.audio.shoot(f.power, null);
     this.trauma = Math.min(1, this.trauma + 0.05 + f.power * 0.1);
     const key = -this.seq;
-    this.viewModel.muzzle.getWorldPosition(tmpV);
+    this.muzzlePos(tmpV);
     this.effects.muzzleFlash(tmpV.x, tmpV.y, tmpV.z, f.dx, f.dy, f.dz, f.power * 0.6);
     const r = w.projRadius * (0.75 + 0.25 * f.power);
     this.localBlast = w.blastRadius;
@@ -1364,6 +1388,7 @@ export class ClientGame {
         rv.tag.el.style.display = 'none';
       }
       this.viewModel.root.visible = false;
+      this.selfMan?.setVisible(false);
       this.replay.update(dt, this.r.camera);
     } else {
       this.updateCamera(dt);
@@ -1382,6 +1407,7 @@ export class ClientGame {
   private predictStep(): void {
     const f = emptyInput();
     this.input.sample(f);
+    if (this.thirdPersonLive) this.thirdPersonAim(f);
     f.seq = ++this.seq;
     f.tick = this.predTick();
     f.viewTick = Math.max(0, Math.round(this.renderTick));
@@ -1666,6 +1692,105 @@ export class ClientGame {
     }
   }
 
+  /** Third-person camera is on and you're alive (so shots aim along the camera's center ray). */
+  private get thirdPersonLive(): boolean {
+    return this.settings.thirdPerson && this.camLive && this.havePred && this.pred.mode !== MODE_DEAD && !this.replay.active;
+  }
+
+  /** Flips between first and third person and remembers the choice. */
+  toggleCamera(): void {
+    this.settings.thirdPerson = !this.settings.thirdPerson;
+    saveSettings(this.settings);
+    this.camDist = 0;
+    this.hud.toast(this.settings.thirdPerson ? 'Third-person camera' : 'First-person camera', 1400);
+  }
+
+  /**
+   * In third person the reticle sits on the camera's center ray, not your eye's. Aim the frame
+   * from your eye at whatever that ray hits, and keep movement relative to the camera.
+   */
+  private thirdPersonAim(f: InputFrame): void {
+    const p = this.pred;
+    tmpV2.set(p.px, p.py + eyeHeight(p), p.pz);
+    aimFromCamera(this.world, this.camPos, f.yaw, f.pitch, tmpV2, (ox, oy, oz, dx, dy, dz, max) => this.rayPlayers(ox, oy, oz, dx, dy, dz, max), this.aimOut);
+    if (f.moveX !== 0 || f.moveZ !== 0) [f.moveX, f.moveZ] = rebaseMove(f.moveX, f.moveZ, f.yaw, this.aimOut.yaw);
+    f.yaw = this.aimOut.yaw;
+    f.pitch = this.aimOut.pitch;
+  }
+
+  /** Distance along a ray to the nearest other player, or null. */
+  private rayPlayers(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, max: number): number | null {
+    let best: number | null = null;
+    for (const rv of this.remotes.values()) {
+      const c = rv.cur;
+      if (!c || c.mode === MODE_DEAD) continue;
+      const tmp = this.scratch;
+      tmp.px = c.px;
+      tmp.py = c.py;
+      tmp.pz = c.pz;
+      tmp.inflation = c.inflation;
+      const t = rayCapsule(ox, oy, oz, dx, dy, dz, tmp, playerRadius(tmp));
+      if (t !== null && t < max && (best === null || t < best)) best = t;
+    }
+    return best;
+  }
+
+  /** Your own tube man, shown in third person at your predicted position. */
+  private poseSelf(dt: number, x: number, y: number, z: number, visible: boolean): void {
+    if (!visible) {
+      this.selfMan?.setVisible(false);
+      return;
+    }
+    const entry = this.roster.get(this.youId);
+    const color = this.colorOf(this.youId);
+    const look = lookOf(entry?.cos);
+    const key = `${color}|${JSON.stringify(look)}|${this.r.profile.physical}`;
+    if (!this.selfMan || key !== this.selfLookKey) {
+      if (this.selfMan) {
+        this.r.scene.remove(this.selfMan.group);
+        this.selfMan.dispose();
+      }
+      this.selfMan = new TubeMan(color, { physical: this.r.profile.physical, seed: this.youId * 13.7, look });
+      this.r.scene.add(this.selfMan.group);
+      this.selfLookKey = key;
+    }
+    const man = this.selfMan;
+    const p = this.pred;
+    const pose = this.selfPose;
+    man.setVisible(true);
+    man.group.position.set(x, y, z);
+    pose.time = this.time;
+    pose.dt = dt;
+    pose.inflation = p.inflation;
+    pose.vx = p.vx;
+    pose.vy = p.vy;
+    pose.vz = p.vz;
+    pose.yaw = p.mode === MODE_HANG ? Math.atan2(p.hangNx, p.hangNz) + Math.PI : p.yaw;
+    pose.pitch = p.pitch;
+    pose.onGround = p.onGround === 1;
+    pose.launched = p.launchTimer > 0;
+    pose.doubled = p.doubledTimer > 0;
+    pose.bracing = p.braceTimer > 0;
+    pose.charge = p.charging ? p.charge : 0;
+    pose.hanging = p.mode === MODE_HANG;
+    pose.holding = p.holding >= 0;
+    pose.held = p.mode === MODE_HELD;
+    pose.streaming = p.charging === 1 && this.weapon.kind === 'stream';
+    pose.hasPin = p.pinTimer > 0;
+    pose.crowned = this.crownId === this.youId;
+    pose.nemesis = false;
+    pose.dashing = p.dashTimer > 0;
+    pose.protected = p.spawnProt > 0;
+    man.setWeapon(this.weapon.id);
+    man.update(pose);
+  }
+
+  /** Where your shots visibly leave from: your character's gun in third person, else the view model. */
+  private muzzlePos(out: THREE.Vector3): THREE.Vector3 {
+    if (this.selfMan?.group.visible && this.selfMan.muzzleWorld(out)) return out;
+    return this.viewModel.muzzle.getWorldPosition(out);
+  }
+
   private updateCamera(dt: number): void {
     const cam = this.r.camera;
     const p = this.pred;
@@ -1678,14 +1803,27 @@ export class ClientGame {
     this.fovKick *= Math.exp(-dt * 6);
     const shake = this.trauma * this.trauma;
     const alive = p.mode !== MODE_DEAD && this.havePred;
-    this.viewModel.root.visible = alive;
+    const third = alive && this.settings.thirdPerson;
+    this.viewModel.root.visible = alive && !third;
     let fov = this.settings.fov + this.fovKick + (p.launchTimer > 0 ? 6 : 0);
     if (alive) {
       const x = this.prevX + (p.px - this.prevX) * alpha + this.errX;
       const y = this.prevY + (p.py - this.prevY) * alpha + this.errY;
       const z = this.prevZ + (p.pz - this.prevZ) * alpha + this.errZ;
       cam.position.set(x, y + eyeHeight(p), z);
-      cam.rotation.set(this.input.pitch + (Math.random() - 0.5) * shake * 0.08, this.input.yaw + (Math.random() - 0.5) * shake * 0.08, (Math.random() - 0.5) * shake * 0.1 + (p.launchTimer > 0 ? Math.sin(this.time * 6) * 0.04 : 0));
+      let roll = (Math.random() - 0.5) * shake * 0.1;
+      if (third) {
+        const scale = inflationScale(p.inflation);
+        const want = this.camDist + (CHASE.back * scale - this.camDist) * Math.min(1, dt * 5);
+        this.camDist = chaseCamera(this.world, cam.position, this.input.yaw, this.input.pitch, scale, cam.position, want);
+      } else {
+        this.camDist = 0;
+        if (p.launchTimer > 0) roll += Math.sin(this.time * 6) * 0.04;
+      }
+      this.camPos.copy(cam.position);
+      this.camLive = true;
+      cam.rotation.set(this.input.pitch + (Math.random() - 0.5) * shake * 0.08, this.input.yaw + (Math.random() - 0.5) * shake * 0.08, roll);
+      this.poseSelf(dt, x, y, z, third && this.camDist > 0.7 * inflationScale(p.inflation));
     } else {
       // Spectate: watch the balloon fly off, then look at whoever popped you.
       const since = this.time - this.deathAt;
@@ -1702,6 +1840,9 @@ export class ClientGame {
       const m = new THREE.Matrix4().lookAt(cam.position, target, new THREE.Vector3(0, 1, 0));
       const q = new THREE.Quaternion().setFromRotationMatrix(m);
       cam.quaternion.slerp(q, Math.min(1, dt * 4));
+      this.selfMan?.setVisible(false);
+      this.camDist = 0;
+      this.camLive = false;
     }
     if (Math.abs(cam.fov - fov) > 0.01) {
       cam.fov += (fov - cam.fov) * Math.min(1, dt * 12);
@@ -1731,8 +1872,8 @@ export class ClientGame {
       this.streamStrength = blow;
     }
     if (streaming) {
-      this.viewModel.muzzle.getWorldPosition(tmpV3);
-      const d = lookDir(this.input.yaw, this.input.pitch, tmpDir);
+      this.muzzlePos(tmpV3);
+      const d = lookDir(p.yaw, p.pitch, tmpDir);
       this.effects.leafStream(tmpV3.x, tmpV3.y, tmpV3.z, d.x, d.y, d.z, blow, dt);
       if (p.hovering) this.effects.airPuff(p.px, p.py, p.pz, 1, 3, 0.2);
     }
@@ -1799,6 +1940,17 @@ export class ClientGame {
       this.hud.setRespawn(null);
     }
     if (p.reloadTimer <= 0) this.hud.setNote(alive && p.spawnProt > 0 ? 'Spawn shield: fire to drop it' : '');
+    const k = (a: Action) => this.key(a);
+    this.hud.setKeys(
+      { dash: k('dash'), brace: k('brace'), grab: k('grab'), grapple: k('grapple'), reload: k('reload'), camera: k('camera'), util1: k('util1'), util2: k('util2') },
+      this.settings.thirdPerson,
+    );
+    this.tips.update(dt, {
+      active: alive && this.input.enabled && this.match.phase !== 'results' && !this.replay.active,
+      features: this.ctx.features,
+      keyOf: k,
+      utilName: (i) => UTILITY_INFO[this.loadout.utils[i]].name,
+    });
     this.hud.ping.textContent = `${Math.round(this.net.rtt)} ms`;
   }
 

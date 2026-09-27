@@ -536,7 +536,7 @@ export function buildHowTo(onClose: () => void, bindings: Record<Action, string[
   const row = (keys: string[], what: string) => grid.append(el('div', {}, ...keys.map((k) => el('span', { class: 'key', text: k, style: 'margin-right:4px' }))), el('div', { text: what }));
   row(['W', 'A', 'S', 'D'], 'Move');
   row(['Trackpad'], 'Aim (or mouse)');
-  for (const a of ['fire', 'jump', 'dash', 'brace', 'grapple', 'grab', 'reload', 'util1', 'util2', 'taunt', 'chat', 'scoreboard'] as Action[]) {
+  for (const a of ['fire', 'jump', 'dash', 'brace', 'grapple', 'grab', 'reload', 'util1', 'util2', 'camera', 'taunt', 'chat', 'scoreboard'] as Action[]) {
     row(bindings[a].slice(0, 2).map(codeLabel), ACTION_LABELS[a]);
   }
   row(['Esc'], 'Menu');
@@ -628,6 +628,7 @@ export function buildSettings(s: Settings, cb: SettingsCallbacks, tab: 'controls
       slider('Controller aim assist', 0, 1, 0.05, () => s.aimAssist, (v) => (s.aimAssist = v), (v) => (v === 0 ? 'Off' : `${Math.round(v * 100)}%`));
       check('Invert Y', () => s.invertY, (v) => (s.invertY = v));
       slider('Field of view', 65, 105, 1, () => s.fov, (v) => (s.fov = v), (v) => `${v}°`);
+      check('Third-person camera', () => s.thirdPerson, (v) => (s.thirdPerson = v));
       body.append(grid);
       if (cb.onRebind) body.append(buildBindings(s, cb));
       if (cb.onRebindPad && cb.padLabels) body.append(buildPadBindings(s, cb));
@@ -676,6 +677,7 @@ const PAD_ACTION_LABELS: Record<string, string> = {
   util1: 'Utility 1',
   util2: 'Utility 2',
   taunt: 'Taunt',
+  camera: 'Camera: first / third person',
   chat: 'Quick chat (hold, aim with R-stick)',
   scoreboard: 'Scoreboard',
   menu: 'Menu',

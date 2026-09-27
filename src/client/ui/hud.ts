@@ -82,7 +82,10 @@ export class Hud {
   private readonly flashEl: HTMLElement;
   private readonly tank: HTMLElement;
   private readonly tankFill: HTMLElement;
-  private readonly utilEls: { box: HTMLElement; cool: HTMLElement; icon: HTMLElement }[] = [];
+  private readonly utilEls: { box: HTMLElement; cool: HTMLElement; icon: HTMLElement; k: HTMLElement }[] = [];
+  /** Key labels next to each ability, so every control is discoverable on screen. */
+  private readonly keyChips: Record<string, HTMLElement> = {};
+  private readonly tipEl: HTMLElement;
   private readonly pinBadge: HTMLElement;
   private readonly eventBanner: HTMLElement;
   private readonly clock: HTMLElement;
@@ -146,14 +149,22 @@ export class Hud {
     this.weaponName = el('div', { class: 'weapon-name', text: 'AIR CANNON' });
     this.tankFill = el('div');
     this.tank = el('div', { class: 'tank hidden' }, this.tankFill);
-    const ammo = el('div', { class: 'ammo' }, this.weaponName, this.ammoPips, this.tank, this.reloadBar);
+    const chip = (id: string) => (this.keyChips[id] = el('span', { class: 'kc' }));
+    const keyLine = (id: string, label: string) => {
+      const name = el('span', { text: label });
+      this.keyChips[`${id}Label`] = name;
+      return el('div', {}, chip(id), name);
+    };
+    const ammoKeys = el('div', { class: 'ammo-keys' }, keyLine('reload', 'RELOAD'), keyLine('camera', '3RD PERSON'));
+    const ammo = el('div', { class: 'ammo' }, ammoKeys, this.weaponName, this.ammoPips, this.tank, this.reloadBar);
     const utils = el('div', { class: 'utils' });
-    for (const k of ['C', 'V']) {
+    for (const k of ['C', 'G']) {
       const cool = el('div', { class: 'cool' });
       const icon = el('div', { text: '?' });
-      const box = el('div', { class: 'util' }, el('div', { class: 'k', text: k }), icon, cool);
+      const key = el('div', { class: 'k', text: k });
+      const box = el('div', { class: 'util' }, key, icon, cool);
       utils.append(box);
-      this.utilEls.push({ box, cool, icon });
+      this.utilEls.push({ box, cool, icon, k: key });
     }
     this.pinBadge = el('div', { class: 'pin-badge hidden', text: '📌 PIN' });
     this.eventBanner = el('div', { class: 'event-banner hidden' });
@@ -161,13 +172,14 @@ export class Hud {
     this.dashPips = el('div', { class: 'pips' });
     const ability = (label: string): [HTMLElement, HTMLElement] => {
       const fill = el('div', { class: 'fill' });
-      const wrap = el('div', { class: 'group hidden' }, el('div', { class: 'pips' }, el('div', { class: 'pip' }, fill)), el('div', { text: label }));
+      const wrap = el('div', { class: 'group hidden' }, el('div', { class: 'pips' }, el('div', { class: 'pip' }, fill)), el('div', {}, label, chip(label.toLowerCase())));
       return [wrap, fill];
     };
     [this.braceWrap, this.braceFill] = ability('BRACE');
     [this.grabWrap, this.grabFill] = ability('GRAB');
     [this.grappleWrap, this.grappleFill] = ability('GRAPPLE');
-    const movement = el('div', { class: 'movement' }, el('div', { class: 'group' }, this.dashPips, el('div', { text: 'DASH' })), this.braceWrap, this.grabWrap, this.grappleWrap);
+    const movement = el('div', { class: 'movement' }, el('div', { class: 'group' }, this.dashPips, el('div', {}, 'DASH', chip('dash'))), this.braceWrap, this.grabWrap, this.grappleWrap);
+    this.tipEl = el('div', { class: 'tip off' });
     this.hintEl = el('div', { class: 'hint hidden' });
     this.escapeMarker = el('div', { class: 'marker' });
     this.escapeLabel = el('div', { class: 'lbl', text: 'DASH TO BREAK FREE!' });
@@ -203,7 +215,32 @@ export class Hud {
     this.chatWheel = el('div', { class: 'chat-wheel hidden' }, el('div', { class: 'hub', text: 'QUICK CHAT' }));
     this.chatFeed = el('div', { class: 'chat-feed' });
 
-    this.root.append(this.flashEl, this.nametags, this.popups, this.damage, this.crosshair, this.hitmarker, inflation, movement, ammo, utils, this.pinBadge, timer, this.killfeed, this.calloutBox, this.respawnBox, this.note, this.hintEl, this.escapeBox, this.ping, this.chatFeed, this.chatWheel);
+    this.root.append(this.flashEl, this.nametags, this.popups, this.damage, this.crosshair, this.hitmarker, inflation, movement, ammo, utils, this.pinBadge, timer, this.killfeed, this.calloutBox, this.respawnBox, this.note, this.hintEl, this.escapeBox, this.ping, this.chatFeed, this.chatWheel, this.tipEl);
+  }
+
+  /** Current key (or controller button) for each ability, shown next to it. */
+  setKeys(keys: Record<'dash' | 'brace' | 'grab' | 'grapple' | 'reload' | 'camera' | 'util1' | 'util2', string>, thirdPerson: boolean): void {
+    this.setIf('keys', `${Object.values(keys).join('|')}|${thirdPerson}`, () => {
+      for (const id of ['dash', 'brace', 'grab', 'grapple', 'reload', 'camera'] as const) this.keyChips[id].textContent = keys[id];
+      this.keyChips.cameraLabel.textContent = thirdPerson ? '1ST PERSON' : '3RD PERSON';
+      this.utilEls[0].k.textContent = keys.util1;
+      this.utilEls[1].k.textContent = keys.util2;
+    });
+  }
+
+  /** First-use tooltip card (null hides it). `done` flashes it green once you've tried it. */
+  showTip(tip: { key: string; title: string; text: string } | null, done: boolean): void {
+    const key = tip ? `${tip.key}|${tip.title}|${tip.text}|${done}` : '';
+    this.setIf('tip', key, () => {
+      this.tipEl.classList.toggle('off', !tip);
+      this.tipEl.classList.toggle('done', done);
+      if (!tip) return;
+      clear(this.tipEl);
+      this.tipEl.append(
+        el('span', { class: 'key', text: tip.key }),
+        el('div', {}, el('div', { class: 't', text: done ? `${tip.title} ✓` : tip.title }), el('div', { class: 'd', text: done ? 'Nice!' : tip.text })),
+      );
+    });
   }
 
   /** Builds the wheel's labels (slot 0 at the top, clockwise). */

@@ -12,6 +12,8 @@ export interface Settings {
   aimAssist: number;
   quality: QualitySetting;
   fov: number;
+  /** Third-person chase camera instead of first person (toggled in game, default key V). */
+  thirdPerson: boolean;
   volumes: VolumeSettings;
   colorblindTeams: boolean;
   /** Show other players' quick-chat messages. */
@@ -30,6 +32,7 @@ export const DEFAULT_SETTINGS: Settings = {
   aimAssist: 0.5,
   quality: 'auto',
   fov: 80,
+  thirdPerson: false,
   volumes: { master: 0.8, effects: 0.9, announcer: 0.9, music: 0.4, muted: false },
   colorblindTeams: false,
   showQuickChat: true,

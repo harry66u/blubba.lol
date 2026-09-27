@@ -17,6 +17,7 @@ export type Action =
   | 'util1'
   | 'util2'
   | 'taunt'
+  | 'camera'
   | 'chat'
   | 'scoreboard';
 
@@ -35,6 +36,7 @@ export const ACTION_LABELS: Record<Action, string> = {
   util1: 'Utility 1',
   util2: 'Utility 2',
   taunt: 'Taunt',
+  camera: 'Camera: first / third person',
   chat: 'Quick chat (hold)',
   scoreboard: 'Scoreboard',
 };
@@ -53,8 +55,9 @@ export const DEFAULT_BINDINGS: Record<Action, string[]> = {
   grab: ['KeyF'],
   reload: ['KeyR'],
   util1: ['KeyC'],
-  util2: ['KeyV'],
+  util2: ['KeyG'],
   taunt: ['KeyT'],
+  camera: ['KeyV'],
   chat: ['KeyZ'],
   scoreboard: ['Tab'],
 };
@@ -119,6 +122,8 @@ export class InputManager {
   onScoreboard: ((show: boolean) => void) | null = null;
   onLockChange: ((locked: boolean) => void) | null = null;
   onAnyPress: ((action: Action) => void) | null = null;
+  /** The camera toggle was pressed (client-only, never sent to the server). */
+  onCameraToggle: (() => void) | null = null;
   /** When set, the next key/button press is captured for rebinding instead of played. */
   captureNext: ((code: string) => void) | null = null;
   /** When set, the next controller button press is captured for rebinding. */
@@ -324,6 +329,7 @@ export class InputManager {
       if (a === 'fire') this.fireLatch = true;
       if (a === 'scoreboard') this.onScoreboard?.(true);
       if (a === 'chat') this.openWheel();
+      if (a === 'camera') this.onCameraToggle?.();
       this.onAnyPress?.(a);
     }
   }
@@ -469,6 +475,7 @@ export class InputManager {
     const pk = PRESS_ACTIONS[a];
     if (pk) this.counters[pk] = (this.counters[pk] + 1) & 255;
     if (a === 'fire') this.fireLatch = true;
+    if (a === 'camera') this.onCameraToggle?.();
     this.onAnyPress?.(a);
   }
 
