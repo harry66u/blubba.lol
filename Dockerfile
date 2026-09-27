@@ -11,7 +11,7 @@ ENV NODE_ENV=production PORT=8080 BUBBA_DB=/data/bubba.db
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
-# Accounts, progress and reports live in SQLite here; mount a volume to keep them.
-VOLUME /data
+# Accounts, progress and reports live in SQLite at /data; attach a persistent disk there to keep
+# them across restarts (set it up in your host's dashboard).
 EXPOSE 8080
 CMD ["node", "--disable-warning=ExperimentalWarning", "dist/server/index.js"]
