@@ -314,9 +314,10 @@ export const BALANCE = {
 
   chaos: {
     /** Average seconds between random events (host setting scales this). */
-    eventInterval: 60,
+    eventInterval: 55,
     eventJitter: 10,
-    firstEventAfter: 40,
+    /** Early enough that everyone sees one in their first match. */
+    firstEventAfter: 22,
     /** Events are announced this long before they start. */
     warning: 4,
     fan: { duration: 10, accel: 12, airMult: 1.3, frictionMult: 0.3 },

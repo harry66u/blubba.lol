@@ -13,6 +13,7 @@ import { Driver, run } from './helpers';
  */
 function hitsToKnockout(startX: number, startZ: number, dirX: number, dirZ: number): number {
   const sim = new GameSim({ map: DEALERSHIP });
+  sim.eventMult = 0; // measure knockback alone, no random events
   const shooter = sim.addPlayer('shooter');
   const target = sim.addPlayer('target');
   const ds = new Driver(sim, shooter);
@@ -61,6 +62,7 @@ describe('balance', () => {
 
   it('after five hits, one well-placed hit near an edge knocks a player off', () => {
     const sim = new GameSim({ map: DEALERSHIP });
+    sim.eventMult = 0; // measure knockback alone, no random events
     const a = sim.addPlayer('a');
     const b = sim.addPlayer('b');
     b.state.spawnProt = 0;
@@ -78,6 +80,7 @@ describe('balance', () => {
 
   it('a fresh player hit near the same edge survives', () => {
     const sim = new GameSim({ map: DEALERSHIP });
+    sim.eventMult = 0; // measure knockback alone, no random events
     const a = sim.addPlayer('a');
     const b = sim.addPlayer('b');
     b.state.spawnProt = 0;
@@ -93,6 +96,7 @@ describe('balance', () => {
 
   it('hit-stop freezes the target for a beat, then the full knockback plays out', () => {
     const sim = new GameSim({ map: DEALERSHIP });
+    sim.eventMult = 0; // measure knockback alone, no random events
     const a = sim.addPlayer('a');
     const b = sim.addPlayer('b');
     Object.assign(b.state, { px: 0, py: 0, pz: 0, spawnProt: 0 });

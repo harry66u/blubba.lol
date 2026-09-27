@@ -196,6 +196,7 @@ export class ClientGame {
   active = false;
   private renderTick = 0;
   private trauma = 0;
+  private lastChainCallout = -99;
   private fovKick = 0;
   private deathAt = 0;
   private killerId = -1;
@@ -795,6 +796,16 @@ export class ClientGame {
       }
       case 'chain': {
         this.hud.popup(tmpV.set(e.x, e.y + 1, e.z), 'CHAIN!', '#ff5fd2', 1.2, 0.9);
+        fx.shockwave(e.x, e.y + 0.8, e.z, 3.5, 0.35, 0xff5fd2, false, this.r.camera.position);
+        // Big moment for whoever started it (and whoever got bowled over).
+        if (e.by === you && e.target !== you && this.time - this.lastChainCallout > 2.5) {
+          this.lastChainCallout = this.time;
+          this.hud.callout('CHAIN REACTION!', `${this.nameOf(e.id)} bowled into ${this.nameOf(e.target)}. You get the credit!`, 1.8, '#ff5fd2');
+          this.announcer.say('Chain reaction!', 2);
+        } else if (e.target === you && this.time - this.lastChainCallout > 2.5) {
+          this.lastChainCallout = this.time;
+          this.hud.callout('BOWLED OVER!', `${this.nameOf(e.id)} crashed into you`, 1.4, '#ff5fd2');
+        }
         a.thud(e.id === you || e.target === you ? null : [e.x, e.y, e.z], 12);
         a.squeak(0.6, e.id === you || e.target === you ? null : [e.x, e.y, e.z]);
         fx.airPuff(e.x, e.y, e.z, 8, 4, 0.2);

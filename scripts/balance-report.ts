@@ -10,6 +10,7 @@ const lanes: [string, number, number, number, number][] = [
 ];
 for (const [label, sx, sz, dx, dz] of lanes) {
   const sim = new GameSim({ map: DEALERSHIP });
+  sim.eventMult = 0;
   const shooter = sim.addPlayer('shooter');
   const target = sim.addPlayer('target');
   const ds = new Driver(sim, shooter);
