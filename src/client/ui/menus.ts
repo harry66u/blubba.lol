@@ -334,7 +334,7 @@ export function buildResults(result: MatchResult, roster: Map<number, RosterEntr
   );
 }
 
-export function buildHowTo(onClose: () => void, bindings: Record<Action, string[]> = DEFAULT_BINDINGS): HTMLElement {
+export function buildHowTo(onClose: () => void, bindings: Record<Action, string[]> = DEFAULT_BINDINGS, padLabels?: Record<string, string>): HTMLElement {
   const grid = el('div', { class: 'controls-grid' });
   const row = (keys: string[], what: string) => grid.append(el('div', {}, ...keys.map((k) => el('span', { class: 'key', text: k, style: 'margin-right:4px' }))), el('div', { text: what }));
   row(['W', 'A', 'S', 'D'], 'Move');
@@ -355,6 +355,8 @@ export function buildHowTo(onClose: () => void, bindings: Record<Action, string[
         html: 'No health bars here. Every hit <b>inflates</b> you: bigger, lighter, and easier to launch. The only way out is off the edge! Hold fire to <b>charge</b> big shots. Aim at feet to pop people <b>up</b>, at their side to push them <b>sideways</b>. Shoot the ground near you to <b>blast jump</b>.',
       }),
       grid,
+      padLabels ? el('div', { class: 'label', style: 'margin-top:16px', text: 'Controller' }) : null,
+      padLabels ? buildPadGrid(padLabels) : null,
       el('div', { style: 'text-align:center;margin-top:16px' }, el('button', { class: 'btn', text: 'GOT IT', on: { click: onClose } })),
     ),
   );
@@ -364,6 +366,9 @@ export interface SettingsCallbacks {
   onChange: (s: Settings) => void;
   onClose: () => void;
   onRebind?: (action: Action, done: () => void) => void;
+  /** Controller remapping: current button names per action, and a capture hook. */
+  padLabels?: () => Record<string, string>;
+  onRebindPad?: (action: string, done: () => void) => void;
 }
 
 export function buildSettings(s: Settings, cb: SettingsCallbacks, tab: 'controls' | 'audio' | 'graphics' = 'controls'): HTMLElement {
@@ -428,6 +433,7 @@ export function buildSettings(s: Settings, cb: SettingsCallbacks, tab: 'controls
       slider('Field of view', 65, 105, 1, () => s.fov, (v) => (s.fov = v), (v) => `${v}°`);
       body.append(grid);
       if (cb.onRebind) body.append(buildBindings(s, cb));
+      if (cb.onRebindPad && cb.padLabels) body.append(buildPadBindings(s, cb));
     } else if (t === 'audio') {
       check('Mute everything', () => s.volumes.muted, (v) => (s.volumes.muted = v));
       const pct = (v: number) => `${Math.round(v * 100)}%`;
@@ -451,6 +457,61 @@ export function buildSettings(s: Settings, cb: SettingsCallbacks, tab: 'controls
   render(tab);
   panel.append(el('h2', { text: 'Settings' }), tabs, body, el('div', { style: 'text-align:center;margin-top:16px' }, el('button', { class: 'btn', text: 'DONE', on: { click: cb.onClose } })));
   return el('div', { class: 'overlay interactive' }, panel);
+}
+
+function buildPadGrid(labels: Record<string, string>): HTMLElement {
+  const grid = el('div', { class: 'controls-grid' });
+  grid.append(el('div', {}, el('span', { class: 'key', text: 'L-stick' })), el('div', { text: 'Move' }));
+  grid.append(el('div', {}, el('span', { class: 'key', text: 'R-stick' })), el('div', { text: 'Aim' }));
+  for (const [a, name] of Object.entries(PAD_ACTION_LABELS)) grid.append(el('div', {}, el('span', { class: 'key', text: labels[a] ?? '?' })), el('div', { text: name }));
+  return grid;
+}
+
+const PAD_ACTION_LABELS: Record<string, string> = {
+  fire: 'Fire (hold to charge)',
+  grapple: 'Grapple',
+  jump: 'Jump',
+  dash: 'Dash',
+  brace: 'Brace',
+  grab: 'Grab / ledge grab',
+  reload: 'Reload',
+  util1: 'Utility 1',
+  util2: 'Utility 2',
+  taunt: 'Taunt',
+  scoreboard: 'Scoreboard',
+  menu: 'Menu',
+};
+
+function buildPadBindings(s: Settings, cb: SettingsCallbacks): HTMLElement {
+  const wrap = el('div', { style: 'margin-top:18px' }, el('div', { class: 'label', text: 'Controller buttons (click, then press a button). Left stick moves, right stick aims.' }));
+  const grid = el('div', { class: 'controls-grid', style: 'grid-template-columns: 1fr auto auto' });
+  const draw = () => {
+    clear(grid);
+    const labels = cb.padLabels!();
+    for (const a of Object.keys(PAD_ACTION_LABELS)) {
+      const btn = el('button', { class: 'btn small ghost', text: labels[a] ?? '?' });
+      btn.addEventListener('click', () => {
+        btn.textContent = 'Press a button...';
+        cb.onRebindPad!(a, draw);
+      });
+      const reset = el('button', {
+        class: 'btn small ghost',
+        text: '↺',
+        attrs: { title: 'Reset to default' },
+        on: {
+          click: () => {
+            delete s.padBindings[a];
+            cb.onChange(s);
+            draw();
+          },
+        },
+      });
+      grid.append(el('div', { text: PAD_ACTION_LABELS[a] }), btn, reset);
+    }
+  };
+  draw();
+  wrap.append(grid);
+  return wrap;
 }
 
 function buildBindings(s: Settings, cb: SettingsCallbacks): HTMLElement {

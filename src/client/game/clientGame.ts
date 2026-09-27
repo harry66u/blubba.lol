@@ -1139,6 +1139,7 @@ export class ClientGame {
       this.updateCamera(dt);
     }
     this.updateLocalFeedback(dt);
+    this.updateAimAssist(dt);
     this.updateChaos(dt);
     this.mapView.update(dt, this.time);
     for (const v of this.entities.vacuums) this.effects.vacuumSwirl(v.x, v.y, v.z, BALANCE.utilities.vacuumGrenade.radius, dt);
@@ -1507,7 +1508,48 @@ export class ClientGame {
   }
 
   private key(a: Action): string {
+    if (this.input.lastDevice === 'pad') {
+      if (a === 'forward' || a === 'back' || a === 'left' || a === 'right') return 'L-stick';
+      return this.input.padLabel(a);
+    }
     return codeLabel(this.input.getBindings()[a][0] ?? '?');
+  }
+
+  /** Light controller aim assist: slows aim over enemies and nudges toward them. */
+  private updateAimAssist(dt: number): void {
+    const inp = this.input;
+    inp.assistFriction = 1;
+    const k = this.settings.aimAssist;
+    if (inp.lastDevice !== 'pad' || k <= 0 || !this.alive || !this.havePred) return;
+    const eye = this.r.camera.position;
+    const f = lookDir(inp.yaw, inp.pitch, tmpDir);
+    let best: { yaw: number; pitch: number; ang: number; tol: number } | null = null;
+    for (const rv of this.remotes.values()) {
+      const c = rv.cur;
+      if (!c || c.mode === MODE_DEAD || (c.flags & FLAG_PROTECTED) !== 0) continue;
+      const s = inflationScale(c.inflation);
+      const vx = c.px - eye.x;
+      const vy = c.py + BALANCE.player.height * s * 0.55 - eye.y;
+      const vz = c.pz - eye.z;
+      const d = Math.hypot(vx, vy, vz);
+      if (d > 45 || d < 0.5) continue;
+      const ang = Math.acos(Math.max(-1, Math.min(1, (vx * f.x + vy * f.y + vz * f.z) / d)));
+      const tol = 0.05 + Math.atan2(BALANCE.player.radius * s, d);
+      if (ang > tol * 2.5 || (best && ang > best.ang)) continue;
+      if (this.world.raycast(eye.x, eye.y, eye.z, vx / d, vy / d, vz / d, d - 0.5)) continue;
+      best = { yaw: Math.atan2(-vx, -vz), pitch: Math.atan2(vy, Math.hypot(vx, vz)), ang, tol };
+    }
+    if (!best) return;
+    if (best.ang < best.tol) inp.assistFriction = 1 - 0.5 * k;
+    // Gentle pull, strongest near the target, only while the player is actively aiming or moving.
+    const moving = Math.hypot(this.pred.vx, this.pred.vz) > 1 || inp.external.moveX !== 0 || inp.external.moveZ !== 0;
+    if (!moving) return;
+    const rate = 0.7 * k * (1 - best.ang / (best.tol * 2.5));
+    let dy = best.yaw - inp.yaw;
+    while (dy > Math.PI) dy -= Math.PI * 2;
+    while (dy < -Math.PI) dy += Math.PI * 2;
+    inp.yaw += Math.max(-rate * dt, Math.min(rate * dt, dy));
+    inp.pitch += Math.max(-rate * dt, Math.min(rate * dt, best.pitch - inp.pitch));
   }
 
   /** Short on-screen tip for whatever situation you're in right now. */

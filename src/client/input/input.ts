@@ -1,5 +1,6 @@
 import { BTN_FIRE, BTN_GRAB, BTN_JUMP, type InputFrame, type PressKey } from '../../shared/input';
 import type { Settings } from '../settings';
+import { DEFAULT_PAD_BINDINGS, PAD, type PadAction, isPlayStation, padButtonName, shapeStick } from './gamepad';
 
 export type Action =
   | 'forward'
@@ -114,6 +115,19 @@ export class InputManager {
   onAnyPress: ((action: Action) => void) | null = null;
   /** When set, the next key/button press is captured for rebinding instead of played. */
   captureNext: ((code: string) => void) | null = null;
+  /** When set, the next controller button press is captured for rebinding. */
+  capturePad: ((button: number) => void) | null = null;
+  /** Which device was used last (for button prompts and aim assist). */
+  lastDevice: 'kbm' | 'pad' = 'kbm';
+  padConnected = false;
+  padIsPlayStation = false;
+  private padPrev: boolean[] = [];
+  private padBindings: Record<PadAction, number> = { ...DEFAULT_PAD_BINDINGS };
+  /** Aim-assist slowdown (0..1) set by the game when the crosshair is on an enemy. */
+  assistFriction = 1;
+  onMenuButton: (() => void) | null = null;
+  /** Any controller button (used to start playing without pointer lock). */
+  onPadButton: ((button: number) => void) | null = null;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -142,6 +156,10 @@ export class InputManager {
 
   applySettings(s: Settings): void {
     this.settings = s;
+    this.padBindings = { ...DEFAULT_PAD_BINDINGS };
+    for (const [k, v] of Object.entries(s.padBindings ?? {})) {
+      if (k in this.padBindings && Array.isArray(v) && typeof v[0] === 'number') this.padBindings[k as PadAction] = v[0];
+    }
     this.bindings = { ...DEFAULT_BINDINGS };
     for (const [k, v] of Object.entries(s.bindings)) {
       if (k in this.bindings && Array.isArray(v)) this.bindings[k as Action] = v.filter((c) => !BLOCKED_CODES.has(c));
@@ -242,6 +260,7 @@ export class InputManager {
   private press(code: string): void {
     if (this.held.has(code)) return;
     this.held.add(code);
+    this.lastDevice = 'kbm';
     if (!this.enabled) return;
     for (const a of this.codeToActions.get(code) ?? []) {
       const pk = PRESS_ACTIONS[a];
@@ -269,6 +288,7 @@ export class InputManager {
       if (Math.abs(dx) > 200 || Math.abs(dy) > 200) return;
     }
     if (Math.abs(dx) > 800 || Math.abs(dy) > 800) return;
+    this.lastDevice = 'kbm';
     const s = this.settings;
     const base = s.device === 'trackpad' ? 0.0034 * s.sensTrackpad : 0.0021 * s.sensMouse;
     this.applyLook(dx * base, dy * base * (s.invertY ? -1 : 1));
@@ -290,7 +310,83 @@ export class InputManager {
   }
 
   /** Extra movement/buttons from other devices (controllers) merged into each frame. */
-  external: { moveX: number; moveZ: number; fire: boolean } = { moveX: 0, moveZ: 0, fire: false };
+  external: { moveX: number; moveZ: number; fire: boolean; jump: boolean; grab: boolean } = { moveX: 0, moveZ: 0, fire: false, jump: false, grab: false };
+
+  getPadBindings(): Record<PadAction, number> {
+    return this.padBindings;
+  }
+
+  padLabel(a: PadAction): string {
+    return padButtonName(this.padBindings[a], this.padIsPlayStation);
+  }
+
+  /** Reads the first connected controller. Call once per rendered frame. */
+  pollGamepad(dt: number): void {
+    const pads = typeof navigator.getGamepads === 'function' ? navigator.getGamepads() : [];
+    let pad: Gamepad | null = null;
+    for (const p of pads) {
+      if (p && p.connected) {
+        pad = p;
+        break;
+      }
+    }
+    this.padConnected = !!pad;
+    if (!pad) {
+      this.external.moveX = this.external.moveZ = 0;
+      this.external.fire = this.external.jump = this.external.grab = false;
+      return;
+    }
+    this.padIsPlayStation = isPlayStation(pad.id);
+    const pressed = (i: number) => {
+      const b = pad!.buttons[i];
+      return !!b && (b.pressed || b.value > 0.35);
+    };
+    // Rebinding capture.
+    if (this.capturePad) {
+      for (let i = 0; i < pad.buttons.length; i++) {
+        if (pressed(i) && !this.padPrev[i]) {
+          const cb = this.capturePad;
+          this.capturePad = null;
+          cb(i);
+          break;
+        }
+      }
+    }
+    const [mx, my] = shapeStick(pad.axes[0] ?? 0, pad.axes[1] ?? 0, 0.18, 1);
+    const [lx, ly] = shapeStick(pad.axes[2] ?? 0, pad.axes[3] ?? 0, 0.12, 2);
+    let any = mx !== 0 || my !== 0 || lx !== 0 || ly !== 0;
+    for (let i = 0; i < pad.buttons.length; i++) {
+      const now = pressed(i);
+      if (now && !this.padPrev[i]) {
+        any = true;
+        this.onPadButton?.(i);
+        if (i === this.padBindings.menu) this.onMenuButton?.();
+        for (const [action, btn] of Object.entries(this.padBindings) as [PadAction, number][]) {
+          if (btn !== i || action === 'menu' || action === 'fire') continue;
+          if (action === 'scoreboard') this.onScoreboard?.(true);
+          else this.pressAction(action);
+        }
+      } else if (!now && this.padPrev[i] && i === this.padBindings.scoreboard) {
+        this.onScoreboard?.(false);
+      }
+      this.padPrev[i] = now;
+    }
+    if (any) this.lastDevice = 'pad';
+    if (!this.enabled) {
+      this.external.moveX = this.external.moveZ = 0;
+      this.external.fire = this.external.jump = this.external.grab = false;
+      return;
+    }
+    this.external.moveX = mx;
+    this.external.moveZ = -my;
+    this.external.fire = pressed(this.padBindings.fire);
+    this.external.jump = pressed(this.padBindings.jump);
+    this.external.grab = pressed(this.padBindings.grab);
+    // Stick aiming: radians per second at full tilt, slowed by aim assist when on target.
+    const s = this.settings;
+    const speed = 3.4 * s.sensController * this.assistFriction;
+    if (lx !== 0 || ly !== 0) this.applyLook(lx * speed * dt, ly * speed * dt * 0.8 * (s.invertY ? -1 : 1));
+  }
 
   /** Adds a press from another device (controller). */
   pressAction(a: Action): void {
@@ -325,8 +421,8 @@ export class InputManager {
     if (this.enabled) {
       // A click shorter than one frame still registers as a (weak) tap shot.
       if (this.actionHeld('fire') || this.fireLatch || this.external.fire) buttons |= BTN_FIRE;
-      if (this.actionHeld('jump')) buttons |= BTN_JUMP;
-      if (this.actionHeld('grab')) buttons |= BTN_GRAB;
+      if (this.actionHeld('jump') || this.external.jump) buttons |= BTN_JUMP;
+      if (this.actionHeld('grab') || this.external.grab) buttons |= BTN_GRAB;
     }
     this.fireLatch = false;
     f.buttons = buttons;

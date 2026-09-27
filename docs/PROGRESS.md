@@ -87,3 +87,19 @@ Phases follow spec §14. Each phase is committed separately and playable on its 
   200 KB gzipped.
 - Performance: a full 10-player lobby leaves the main thread ~80% idle in profiling; quality
   presets plus automatic resolution scaling hold frame rate on slower GPUs.
+
+## Phase 6: Controls ✅
+
+- Xbox and PlayStation controllers through the Gamepad API with the spec's default layout
+  (RT fire, LT grapple, A jump, B dash, RB brace, LB grab, X reload, Y / D-pad up utilities,
+  D-pad down taunt, View scoreboard, Menu pause). PlayStation controllers show ✕ ○ □ △ / L1 R1
+  labels in the same positions.
+- Stick aiming with deadzones and a response curve; controller sensitivity, invert Y.
+- Light aim assist for controllers only (adjustable 0-100%, or off): slows aim over an enemy and
+  gently pulls toward them while you're moving. Never applies to mouse or trackpad.
+- Play with only a controller: A starts, Menu pauses, B backs out of menus; no pointer lock needed.
+- Full remapping: every keyboard/mouse action and every controller button can be rebound in
+  Settings → Controls (a key can only do one thing; Command/Control can't be bound).
+- On-screen hints switch between key names and controller button names automatically.
+- Settings: separate trackpad, mouse, and controller sensitivity; invert Y; aim assist; FOV;
+  graphics presets (Auto/High/Medium/Low); volume sliders and mute; colorblind team colors.

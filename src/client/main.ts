@@ -4,6 +4,7 @@ import { Audio } from './audio/audio';
 import { Music } from './audio/music';
 import { ClientGame } from './game/clientGame';
 import { InputManager } from './input/input';
+import { PAD } from './input/gamepad';
 import { Connection } from './net/connection';
 import { type Quality, Renderer } from './render/renderer';
 import { type Settings, loadIdentity, loadSettings, saveIdentity, saveSettings } from './settings';
@@ -51,6 +52,8 @@ let screen: Screen = 'menu';
 let overlay: 'none' | 'pause' | 'settings' | 'howto' | 'click' | 'results' | 'loadout' | 'replay' = 'none';
 let pendingJoin: JoinRequest | null = null;
 let scoreboardOpen = false;
+/** Playing with a controller: no pointer lock needed. */
+let padPlay = false;
 
 // --- Routing ----------------------------------------------------------------------------------
 
@@ -142,8 +145,23 @@ function setOverlay(next: typeof overlay): void {
           onClose: () => setOverlay(screen === 'playing' ? 'pause' : 'none'),
           onRebind: (action, done) => {
             input.captureNext = (code) => {
-              const list = [code];
-              settings.bindings[action] = list;
+              // A key can only do one thing: remove it from any other action first.
+              for (const [k, v] of Object.entries(input.getBindings())) {
+                if (k !== action && v.includes(code)) settings.bindings[k] = v.filter((c) => c !== code);
+              }
+              settings.bindings[action] = [code];
+              applySettings(settings);
+              done();
+            };
+          },
+          padLabels: () => {
+            const out: Record<string, string> = {};
+            for (const k of Object.keys(input.getPadBindings())) out[k] = input.padLabel(k as keyof ReturnType<typeof input.getPadBindings>);
+            return out;
+          },
+          onRebindPad: (action, done) => {
+            input.capturePad = (button) => {
+              settings.padBindings[action] = [button];
               applySettings(settings);
               done();
             };
@@ -166,7 +184,13 @@ function setOverlay(next: typeof overlay): void {
       );
       break;
     case 'howto':
-      overlayLayer.append(buildHowTo(() => setOverlay(screen === 'playing' ? 'pause' : 'none'), input.getBindings()));
+      overlayLayer.append(
+        buildHowTo(
+          () => setOverlay(screen === 'playing' ? 'pause' : 'none'),
+          input.getBindings(),
+          Object.fromEntries(Object.keys(input.getPadBindings()).map((k) => [k, input.padLabel(k as keyof ReturnType<typeof input.getPadBindings>)])),
+        ),
+      );
       break;
     case 'click':
       overlayLayer.append(buildClickToPlay(game.alive ? 'READY?' : 'WAITING...', resume));
@@ -193,7 +217,7 @@ function setOverlay(next: typeof overlay): void {
     default:
       break;
   }
-  input.enabled = screen === 'playing' && (next === 'none' || next === 'results' || next === 'replay') && input.locked;
+  input.enabled = screen === 'playing' && (next === 'none' || next === 'results' || next === 'replay') && (input.locked || padPlay);
 }
 
 function applySettings(s: Settings): void {
@@ -208,8 +232,36 @@ function applySettings(s: Settings): void {
 
 function resume(): void {
   audio.unlock();
-  input.requestLock();
+  if (padPlay) setOverlay('none');
+  else input.requestLock();
 }
+
+// Controller: Menu toggles pause, any button starts playing without a mouse, B closes menus.
+input.onMenuButton = () => {
+  if (screen !== 'playing') return;
+  if (overlay === 'none') {
+    padPlay = true;
+    setOverlay('pause');
+  } else if (overlay === 'pause' || overlay === 'click') {
+    padPlay = true;
+    setOverlay('none');
+  }
+};
+input.onPadButton = (b) => {
+  audio.unlock();
+  if (screen === 'menu' && overlay === 'none' && b === PAD.A) {
+    const play = document.querySelector<HTMLButtonElement>('.menu .btn.big');
+    play?.click();
+    padPlay = true;
+    return;
+  }
+  if (screen === 'playing' && overlay === 'click' && b === PAD.A) {
+    padPlay = true;
+    setOverlay('none');
+    return;
+  }
+  if (b === PAD.B && (overlay === 'settings' || overlay === 'howto' || overlay === 'loadout')) setOverlay(screen === 'playing' ? 'pause' : 'none');
+};
 
 function leaveMatch(): void {
   net.close();
@@ -240,6 +292,8 @@ function renderScoreboard(): void {
 
 input.onLockChange = (locked) => {
   if (screen !== 'playing') return;
+  if (locked) padPlay = false;
+  if (padPlay) return;
   if (locked) {
     if (overlay !== 'results') setOverlay('none');
     input.enabled = true;
@@ -337,6 +391,7 @@ function loop(now: number): void {
   const dtMs = Math.min(100, now - last);
   last = now;
   const dt = dtMs / 1000;
+  input.pollGamepad(dt);
   const t0 = performance.now();
   game.frame(dt);
   const t1 = performance.now();
