@@ -295,6 +295,12 @@ plan. Built so far:
   bigger, wider). 8 pops: both. Everyone sees a callout or kill-feed line and a flickering
   orange-gold glow with sparks; a HUD badge shows what's left. In 6-bot matches Turbo Tank
   happens 3-4 times a match and Mega Blast about every other match.
+- **Daily challenges and a play streak** (below) and **Sky Pier**, a fourth free-for-all map
+  (listed under Phase 7's maps).
+- **Fuller rooms:** public free-for-all rooms fill to 6 players with bots (was 4).
+- **Less clutter:** other players' flavor popups are skipped when the screen is busy or the same
+  word is already showing nearby.
+- Tools: `scripts/playtest-touch.mjs` plays a match on an emulated phone using only touch input.
 
 ## Daily challenges and streak ✅
 

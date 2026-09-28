@@ -23,7 +23,11 @@ Open http://localhost:8080, pick a mode (Knockout, Team Knockout, Ball, Pump, 1v
 plays you one-on-one.
 
 Controls are listed under **How to play** in the menu and every ability shows its key on the
-HUD. Press **V** to switch between first and third person (the choice is remembered).
+HUD. Press **V** to switch between first and third person (the choice is remembered). Phones and
+tablets get on-screen touch controls automatically (hold the phone sideways).
+
+Every day brings three **daily challenges** (on the main menu) and a play streak bonus; knockout
+streaks in a match earn **Turbo Tank** (3 pops) and **Mega Blast** (5 pops).
 
 Progress (XP, levels, coins, unlocks, stats) is saved for guests automatically. An optional
 account (name + password, no email) keeps it across computers, unlocks **Ranked 1v1**, and lets
@@ -52,6 +56,7 @@ BUBBA_DEBUG=1 npm start & node scripts/smoke-host.mjs   # host controls and the 
 BUBBA_DEBUG=1 npm start & node scripts/smoke-accounts.mjs  # sign-up, store, rewards, chat, ranked
 node scripts/smoke-controls.mjs                 # control hints, tooltips, third-person camera
 BUBBA_DEBUG=1 npm start & node scripts/playtest.mjs  # autopilot plays a full match, logs everything
+node scripts/playtest-touch.mjs                 # plays on an emulated phone with touch input only
 npx tsx scripts/knockback-sweep.ts              # launch distance per hit and hits-to-knockout
 npx tsx scripts/chaos-report.ts                 # how often events, chains, crown, revenge happen
 QUALITY=medium node scripts/lookdev.mjs         # screenshot of the ?lookdev tube man lineup

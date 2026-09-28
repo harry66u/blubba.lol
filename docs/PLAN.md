@@ -1,5 +1,7 @@
 # Blubba: the plan to beat Shell Shockers
 
+**Status: built** (see docs/PROGRESS.md, "Beat-Shell-Shockers pass").
+
 Shell Shockers wins schools because it is instant, runs on anything, plays on phones, and gives
 players a reason to come back. Blubba already beats it on some of that and has a stronger core
 idea (no health bars, knock people off the map). This plan closes the gaps, in build order.
