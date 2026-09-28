@@ -50,6 +50,8 @@ export interface MatchStats {
   goals: number;
   /** Seconds spent filling your own team's pump. */
   pumpTime: number;
+  /** Knockouts of whoever wore the crown (for daily challenges). */
+  crownKos: number;
 }
 
 export interface SimPlayer {
@@ -204,7 +206,7 @@ export interface MatchResult {
 }
 
 function newStats(): MatchStats {
-  return { kos: 0, deaths: 0, falls: 0, hits: 0, shots: 0, longestLaunch: 0, chainKos: 0, timesPopped: 0, bestCombo: 0, throws: 0, stomps: 0, goals: 0, pumpTime: 0 };
+  return { kos: 0, deaths: 0, falls: 0, hits: 0, shots: 0, longestLaunch: 0, chainKos: 0, timesPopped: 0, bestCombo: 0, throws: 0, stomps: 0, goals: 0, pumpTime: 0, crownKos: 0 };
 }
 
 const MAX_QUEUE = 12;
@@ -1921,6 +1923,7 @@ export class GameSim {
       if (this.crownId === p.id) {
         points *= BALANCE.crown.multiplier;
         tags.push('crown');
+        killer.stats.crownKos++;
       }
       if (this.isFinal()) {
         points *= BALANCE.final.multiplier;

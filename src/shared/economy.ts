@@ -5,6 +5,7 @@
  * Rules from the spec: mods and utilities unlock by playing, never by paying; the store sells
  * cosmetics only, at listed prices, with no random rewards; purchases need an account.
  */
+import type { DailyView } from './daily';
 import { MOD_IDS, type ModId, UTILITY_IDS, type UtilityId } from './loadout';
 
 // --- Cosmetics -------------------------------------------------------------------------------
@@ -335,6 +336,7 @@ export interface ProfileView {
   stats: LifetimeStats;
   rating: number | null;
   rankedGames: number;
+  daily: DailyView;
 }
 
 /** Sent after each match. */

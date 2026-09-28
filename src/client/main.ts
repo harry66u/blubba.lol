@@ -13,7 +13,7 @@ import { AccountClient } from './net/account';
 import { type Quality, Renderer } from './render/renderer';
 import { type Settings, loadIdentity, loadSettings, saveIdentity, saveSettings } from './settings';
 import { clear } from './ui/dom';
-import { type AccountTab, buildAccountChip, buildAccountPanel, buildProfile, buildQueue } from './ui/accountUi';
+import { type AccountTab, buildAccountChip, buildAccountPanel, buildDailyCard, buildProfile, buildQueue } from './ui/accountUi';
 import { buildLocker } from './ui/locker';
 import { Hud } from './ui/hud';
 import { type PlayMode, buildClickToPlay, buildHowTo, buildMainMenu, buildPause, buildReplayBanner, buildResults, buildRoomJoin, buildScoreboard, buildSettings } from './ui/menus';
@@ -128,7 +128,7 @@ function renderMenu(notice?: string): void {
       onSettings: () => setOverlay('settings'),
       onHowTo: () => setOverlay('howto'),
       onNameChange: rememberName,
-    }, notice, lastMode, account.account?.name ?? null),
+    }, notice, lastMode, account.account?.name ?? null, buildDailyCard(account)),
     buildAccountChip(account, () => openAccount('signup'), () => setOverlay('profile')),
   );
 }
@@ -197,6 +197,9 @@ function cancelQueue(): void {
 }
 
 function setOverlay(next: typeof overlay): void {
+  // The results screen is redrawn twice a second (for its countdown); keep its scroll position so
+  // the rewards and daily challenges at the bottom stay readable on short screens.
+  const resultsScroll = next === 'results' && overlay === 'results' ? (overlayLayer.querySelector('.results .panel')?.scrollTop ?? 0) : 0;
   overlay = next;
   clear(overlayLayer);
   lockerDispose?.();
@@ -317,6 +320,8 @@ function setOverlay(next: typeof overlay): void {
             ranked: !!game.room?.ranked,
           }),
         );
+        const panel = overlayLayer.querySelector('.results .panel');
+        if (panel) panel.scrollTop = resultsScroll;
       }
       break;
     default:

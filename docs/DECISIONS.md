@@ -141,6 +141,15 @@ The spec leaves the tech stack and many details open. This file records what was
   unlock) takes about a dozen matches; items cost 100-450 coins (a few matches each).
 - **Anti-farming:** nothing is earned without 45 seconds in the match and some activity (a shot,
   a hit, a goal, or time on a pump); knockout rewards cap at 15 per match.
+- **Daily challenges** (`src/shared/daily.ts`): three a day from a pool of 13, each measured from
+  a single match's stats and building up over the day. They're picked from a hash of the UTC day
+  and the profile key, so reloading never rerolls them; no repeats, and at most one is tied to a
+  mode so nobody has to play three playlists in a day. Each pays 25-50 coins plus XP (about one
+  or two matches' worth), so a full day's set is roughly 120-150 coins. Only matches that earn
+  rewards count, and each challenge pays once.
+- **Daily streak:** consecutive UTC days with a counted match. The day's first counted match pays
+  10 coins × the streak (capped at 7 days, 70 coins); missing a day starts over at 1. Days roll
+  over at midnight UTC for everyone, so a school's players all see the same reset time.
 - **Ranked is 1v1** because it's the cleanest measure of skill and needs only two people online.
   Elo with K=40 for the first 10 games and K=24 after; draws don't change ratings; leaving
   mid-match is a loss. Matchmaking starts within ±100 rating and widens by 15 per second, then

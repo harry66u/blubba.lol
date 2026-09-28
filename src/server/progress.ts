@@ -1,4 +1,5 @@
 import { type ProgressReport, REWARDS, UNLOCKS, eloUpdate, levelForXp, matchReward, unlockedAt } from '../shared/economy';
+import { applyDailyMatch } from '../shared/daily';
 import type { MatchStats } from '../shared/game/sim';
 import type { ModeId } from '../shared/game/modes';
 import type { ProfileData, Store } from './store';
@@ -20,7 +21,7 @@ export function allowedLoadout(p: ProfileData): { mods: string[]; utils: string[
   return unlockedAt(levelForXp(p.xp).level);
 }
 
-/** Adds a finished match to a profile: XP, coins, lifetime stats, unlocks. */
+/** Adds a finished match to a profile: XP, coins, lifetime stats, daily challenges, unlocks. */
 export function awardMatch(store: Store, key: string, name: string | null, isAccount: boolean, o: MatchOutcome, now = Date.now()): ProgressReport {
   const p = store.profile(key);
   const before = levelForXp(p.xp).level;
@@ -36,6 +37,15 @@ export function awardMatch(store: Store, key: string, name: string | null, isAcc
     won: o.won,
     firstWinToday,
   });
+  // Only matches you actually played (the same rule as XP) count toward the daily challenges
+  // and streak. Done before the level check so challenge XP can level you up too.
+  if (reward.xp > 0) {
+    for (const line of applyDailyMatch(p.daily, key, o, now)) {
+      reward.lines.push(line);
+      reward.xp += line.xp;
+      reward.coins += line.coins;
+    }
+  }
   p.xp += reward.xp;
   p.coins += reward.coins;
   const after = levelForXp(p.xp).level;
@@ -65,7 +75,7 @@ export function awardMatch(store: Store, key: string, name: string | null, isAcc
   }
   store.saveProfile(key);
   const unlocked = UNLOCKS.filter((u) => u.level > before && u.level <= after).map((u) => u.id);
-  return { reward, levelBefore: before, levelAfter: after, unlocked, profile: store.view(p, name, isAccount) };
+  return { reward, levelBefore: before, levelAfter: after, unlocked, profile: store.view(key, name, isAccount, now) };
 }
 
 /** Applies a ranked 1v1 result. Returns [winner, loser] rating changes. */

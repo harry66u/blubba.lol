@@ -117,6 +117,9 @@ describe('chaos', () => {
     // Triple for the crown, plus a revenge bonus (a had just knocked c out).
     expect(c.score - before).toBe(BALANCE.crown.multiplier + BALANCE.revenge.bonus);
     expect(sim.crownId).toBe(-1);
+    // Counted for the "Pop the crown holder" daily challenge.
+    expect(c.stats.crownKos).toBe(1);
+    expect(a.stats.crownKos).toBe(0);
   });
 
   it('revenge pays a bonus and multi-knockouts are tagged', () => {

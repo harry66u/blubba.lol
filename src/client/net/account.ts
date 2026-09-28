@@ -27,12 +27,14 @@ export class AccountClient {
   profile: ProfileView = AccountClient.blankProfile();
   /** False until the first /api/me answer (the menu shows placeholders until then). */
   loaded = false;
+  /** When `profile` arrived (Date.now()), so countdowns like `daily.resetsIn` stay right later. */
+  profileAt = Date.now();
   private readonly listeners = new Set<() => void>();
 
   constructor(private readonly guestId: string) {}
 
   static blankProfile(): ProfileView {
-    return { name: null, isAccount: false, level: 1, xp: 0, xpInto: 0, xpNext: 100, coins: 0, owned: [], cosmetics: { ...DEFAULT_COSMETICS }, stats: emptyStats(), rating: null, rankedGames: 0 };
+    return { name: null, isAccount: false, level: 1, xp: 0, xpInto: 0, xpNext: 100, coins: 0, owned: [], cosmetics: { ...DEFAULT_COSMETICS }, stats: emptyStats(), rating: null, rankedGames: 0, daily: { challenges: [], streak: 0, playedToday: false, resetsIn: 0 } };
   }
 
   onChange(fn: () => void): () => void {
@@ -87,7 +89,10 @@ export class AccountClient {
 
   private apply(r: { account?: { name: string } | null; profile?: ProfileView | null }): void {
     if (r.account !== undefined) this.account = r.account;
-    if (r.profile) this.profile = r.profile;
+    if (r.profile) {
+      this.profile = r.profile;
+      this.profileAt = Date.now();
+    }
     this.loaded = true;
     this.emit();
   }
