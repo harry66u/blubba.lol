@@ -258,7 +258,7 @@ export const BALANCE = {
     spawnProtection: 2.0,
     maxPlayers: 10,
     /** Public rooms are topped up with bots until this many players are present. */
-    publicBotFill: 4,
+    publicBotFill: 6,
   },
 
   scoring: {
