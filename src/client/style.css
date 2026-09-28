@@ -2678,3 +2678,32 @@ body.touch .power-badge {
     padding: 6px 8px 12px;
   }
 }
+
+/* Touch: the kill feed sits under the clock (the top-right corner belongs to the buttons),
+   the situation hint drops a little, and the streak badge sits above the ability bar. */
+body.touch .killfeed {
+  top: 82px;
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+  align-items: center;
+  font-size: 11px;
+}
+body.touch .killfeed .item:nth-child(n + 4) {
+  display: none;
+}
+body.touch .hint {
+  top: 34%;
+}
+body.touch .power-badge {
+  top: auto;
+  bottom: 64px;
+}
+/* Touch: notices sit low in the middle, between the stick and the buttons. */
+body.touch .toast {
+  bottom: 70px;
+  max-width: 36vw;
+  font-size: 12px;
+  padding: 6px 10px;
+  text-align: center;
+}

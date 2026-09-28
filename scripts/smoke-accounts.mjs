@@ -96,11 +96,12 @@ await page.screenshot({ path: `${out}/6-chat-wheel.png` });
 await page.keyboard.press('Digit1');
 await page.keyboard.up('KeyZ');
 // Fire a few shots so the match counts as played.
+// press() latches the shot like a real click, so it fires even when frames are slow.
 for (let i = 0; i < 3; i++) {
-  await page.evaluate(() => window.bubba.input.held.add('Mouse0'));
+  await page.evaluate(() => window.bubba.input.press('Mouse0'));
   await page.waitForTimeout(250);
-  await page.evaluate(() => window.bubba.input.held.delete('Mouse0'));
-  await page.waitForTimeout(250);
+  await page.evaluate(() => window.bubba.input.release('Mouse0'));
+  await page.waitForTimeout(400);
 }
 await page.waitForTimeout(500);
 await page.screenshot({ path: `${out}/7-chat-sent.png` });
