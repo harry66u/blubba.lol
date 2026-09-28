@@ -12,6 +12,7 @@ import { TouchControls, isTouchDevice } from './input/touch';
 import { Connection } from './net/connection';
 import { AccountClient } from './net/account';
 import { type Quality, Renderer } from './render/renderer';
+import { isWeakGpu } from './render/gpu';
 import { type Settings, loadIdentity, loadSettings, saveIdentity, saveSettings } from './settings';
 import { clear } from './ui/dom';
 import { type AccountTab, buildAccountChip, buildAccountPanel, buildProfile, buildQueue } from './ui/accountUi';
@@ -29,14 +30,23 @@ const uiRoot = document.getElementById('ui') as HTMLElement;
 const touchMode = isTouchDevice();
 if (touchMode) document.body.classList.add('touch');
 
+/** Checked once: weak and software GPUs (many school Chromebooks) start on Low. */
+const weakGpu = isWeakGpu();
+
 function qualityFor(s: Settings): Quality {
   if (s.quality !== 'auto') return s.quality;
-  // Phones run hot and on battery: start them light. Elsewhere Medium, and dynamic resolution
-  // handles the rest.
-  return touchMode ? 'low' : 'medium';
+  // Phones run hot and on battery, and weak GPUs can't hold Medium: start them light. Elsewhere
+  // Medium; dynamic resolution and the automatic drop handle the rest.
+  return touchMode || weakGpu ? 'low' : 'medium';
 }
 
 const renderer = new Renderer(canvas, qualityFor(settings));
+/** Auto quality already stepped down this session (don't undo it on a settings change). */
+let autoDropped = false;
+renderer.onAutoDrop = (q) => {
+  autoDropped = true;
+  hud.toast(`Switched to ${q === 'low' ? 'Low' : 'Medium'} graphics to keep things smooth.`, 3500);
+};
 renderer.baseFov = settings.fov;
 const audio = new Audio(settings.volumes);
 const music = new Music(() => audio.ctx, () => audio.musicBus);
@@ -355,7 +365,10 @@ function applySettings(s: Settings): void {
   audio.setVolumes(s.volumes);
   game.announcer.setVolume(s.volumes.muted ? 0 : s.volumes.master * s.volumes.announcer);
   const q = qualityFor(s);
-  if (q !== renderer.quality) renderer.setQuality(q);
+  renderer.autoQuality = s.quality === 'auto';
+  if (s.quality !== 'auto' || !autoDropped) {
+    if (q !== renderer.quality) renderer.setQuality(q);
+  }
   fpsEl.classList.toggle('hidden', !s.showFps);
   game.refreshTeamColors();
   game.showChat = s.showQuickChat;

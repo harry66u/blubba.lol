@@ -45,6 +45,11 @@ export class Renderer {
   renderScale = 1;
   private frameTimes: number[] = [];
   private lastAdjust = 0;
+  /** When set (Auto quality), a machine that stays slow at the lowest resolution drops a level. */
+  autoQuality = false;
+  private slowStrikes = 0;
+  /** Called after an automatic quality drop. */
+  onAutoDrop: ((q: Quality) => void) | null = null;
   baseFov = 80;
 
   constructor(
@@ -177,6 +182,23 @@ export class Renderer {
     const sorted = [...this.frameTimes].sort((a, b) => a - b);
     const p75 = sorted[Math.floor(sorted.length * 0.75)];
     let changed = false;
+    // Already at the lowest resolution and still slow (under ~45 fps): step down a quality level.
+    if (this.autoQuality && this.quality !== 'low' && this.renderScale <= 0.56 && p75 > 22) {
+      this.slowStrikes++;
+      if (this.slowStrikes >= 2) {
+        this.slowStrikes = 0;
+        const next: Quality = this.quality === 'high' ? 'medium' : 'low';
+        this.setQuality(next);
+        this.renderScale = 0.8;
+        this.resize();
+        this.lastAdjust = now;
+        this.frameTimes.length = 0;
+        this.onAutoDrop?.(next);
+        return;
+      }
+    } else if (p75 <= 22) {
+      this.slowStrikes = 0;
+    }
     if (p75 > 18.5 && this.renderScale > 0.55) {
       this.renderScale = Math.max(0.55, this.renderScale - 0.1);
       changed = true;
