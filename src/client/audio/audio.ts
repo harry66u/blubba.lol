@@ -525,29 +525,31 @@ export class Audio {
     osc.stop(t + 0.35);
   }
 
-  /** Air Horn: a big two-tone honk. Louder with more charge. */
-  honk(power: number, pos: [number, number, number] | null): void {
-    const out = this.out(pos, 0.5 + power * 0.4);
+  /** Air Blaster: a deep FWOOMP of air (a noise burst swept down, over a sub thump). */
+  airBlast(power: number, pos: [number, number, number] | null): void {
+    const out = this.out(pos, 0.55 + power * 0.35);
     if (!out) return;
     const ctx = this.ctx!;
     const t = ctx.currentTime;
-    const dur = 0.35 + power * 0.35;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.7, t + 0.02);
-    g.gain.setValueAtTime(0.7, t + dur * 0.8);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    const dur = 0.28 + power * 0.18;
     const lp = ctx.createBiquadFilter();
-    lp.frequency.value = 2400;
-    for (const f of [233, 311, 466]) {
-      const osc = ctx.createOscillator();
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(f * (0.97 + power * 0.03), t);
-      osc.connect(lp);
-      osc.start(t);
-      osc.stop(t + dur + 0.05);
-    }
-    lp.connect(g).connect(out);
+    lp.type = 'lowpass';
+    lp.Q.value = 1.2;
+    lp.frequency.setValueAtTime(2600 + power * 1800, t);
+    lp.frequency.exponentialRampToValueAtTime(180, t + dur);
+    const ng = ctx.createGain();
+    this.env(ng, t, 0.004, 0.9 + power * 0.3, dur);
+    lp.connect(ng).connect(out);
+    this.noise(lp, t, dur + 0.05);
+    const sub = ctx.createOscillator();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(120 + power * 30, t);
+    sub.frequency.exponentialRampToValueAtTime(40, t + 0.22);
+    const sg = ctx.createGain();
+    this.env(sg, t, 0.003, 0.9 + power * 0.4, 0.24);
+    sub.connect(sg).connect(out);
+    sub.start(t);
+    sub.stop(t + 0.3);
   }
 
   /** Pump Rifle crack. */

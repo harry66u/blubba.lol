@@ -167,7 +167,7 @@ export const BALANCE = {
       hoverLift: 2.5,
       hoverTime: 1.2,
     },
-    /** Close-range cone blast with a loud honk. */
+    /** Air Blaster: close-range cone blast. */
     airHorn: {
       kind: 'cone',
       ammo: 4,

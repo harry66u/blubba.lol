@@ -27,7 +27,7 @@ export const EXCLUSIVE_MODS: [ModId, ModId][] = [
 export const WEAPON_INFO: Record<WeaponId, { name: string; blurb: string }> = {
   airCannon: { name: 'Air Cannon', blurb: 'Medium range and balanced. Charge it into a heavy shot.' },
   leafBlower: { name: 'Leaf Blower', blurb: 'A steady stream that shoves people around. Aim at the ground to hover.' },
-  airHorn: { name: 'Air Horn', blurb: 'Huge close-range HONK. Kicks you back too.' },
+  airHorn: { name: 'Air Blaster', blurb: 'Huge close-range air blast. Kicks you back too.' },
   pumpRifle: { name: 'Pump Rifle', blurb: 'Long-range precise shots that pump in extra air. Needs good aim.' },
 };
 

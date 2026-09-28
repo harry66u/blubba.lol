@@ -41,7 +41,7 @@ Phases follow spec §14. Each phase is committed separately and playable on its 
   - **Air Cannon**: medium-range air blobs with splash.
   - **Leaf Blower**: continuous stream that spins up while held and shoves (and slowly inflates)
     everyone in it; its tank drains in seconds. Aim at the ground while airborne to hover.
-  - **Air Horn**: close-range cone blast with a HONK and recoil you can use to recover.
+  - **Air Blaster** (was Air Horn): close-range cone blast with recoil you can use to recover.
   - **Pump Rifle**: long-range, lag-compensated hitscan with a tiny hitbox and extra inflation.
 - Mods (up to two, each a trade-off): Wide Nozzle, Big Tank, Charge Valve, Quick Valve, Long
   Barrel. Charge/Quick Valve and Wide Nozzle/Long Barrel are mutually exclusive.

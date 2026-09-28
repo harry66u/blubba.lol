@@ -77,7 +77,7 @@ describe('loadouts', () => {
     expect(minVy).toBeGreaterThan(-5);
   });
 
-  it('Air Horn blasts close targets hard and ignores far ones', () => {
+  it('Air Blaster blasts close targets hard and ignores far ones', () => {
     const { sim, ps, ds } = setup([{ weapon: 'airHorn' }, {}, {}]);
     const [a, near, far] = ps;
     place(a, 0, 0, 0, 0);

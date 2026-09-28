@@ -733,8 +733,8 @@ export class ClientGame {
         if (e.id !== you) {
           fx.honkBlast(e.x, e.y, e.z, e.dx, e.dy, e.dz, e.range, e.cone, e.power, this.r.camera.position);
           fx.muzzleFlash(e.x, e.y, e.z, e.dx, e.dy, e.dz, e.power);
-          a.honk(e.power, [e.x, e.y, e.z]);
-          this.hud.popup(tmpV.set(e.x + e.dx * 2, e.y + e.dy * 2 + 0.5, e.z + e.dz * 2), 'HONK!', '#ffd60a', 0.8 + e.power * 0.6, 0.8);
+          a.airBlast(e.power, [e.x, e.y, e.z]);
+          this.hud.popup(tmpV.set(e.x + e.dx * 2, e.y + e.dy * 2 + 0.5, e.z + e.dz * 2), 'FWOOMP!', '#ffd60a', 0.8 + e.power * 0.6, 0.8);
         }
         break;
       }
@@ -1315,14 +1315,14 @@ export class ClientGame {
     const w = this.weapon;
     if (w.kind === 'cone') {
       this.viewModel.kick(f.power * 1.5);
-      this.audio.honk(f.power, null);
+      this.audio.airBlast(f.power, null);
       this.trauma = Math.min(1, this.trauma + 0.15 + f.power * 0.25);
       this.punchV += 0.8 + f.power * 1.6;
       this.fovKick += 2 + f.power * 4;
       this.muzzlePos(tmpV);
       this.effects.honkBlast(tmpV.x, tmpV.y, tmpV.z, f.dx, f.dy, f.dz, w.range, w.cone, f.power);
       this.effects.muzzleFlash(tmpV.x, tmpV.y, tmpV.z, f.dx, f.dy, f.dz, f.power * 0.6);
-      this.hud.popup(tmpV3.set(tmpV.x + f.dx * 2.5, tmpV.y + f.dy * 2.5 + 0.4, tmpV.z + f.dz * 2.5), 'HONK!', '#ffd60a', 0.9 + f.power * 0.5, 0.6);
+      this.hud.popup(tmpV3.set(tmpV.x + f.dx * 2.5, tmpV.y + f.dy * 2.5 + 0.4, tmpV.z + f.dz * 2.5), 'FWOOMP!', '#ffd60a', 0.9 + f.power * 0.5, 0.6);
       return;
     }
     if (w.kind === 'hitscan') {
