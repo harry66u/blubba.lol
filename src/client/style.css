@@ -432,14 +432,22 @@ body {
   animation: hitmark 0.35s ease-out;
 }
 
+.hitmarker.big line {
+  stroke: #ffd60a;
+}
+
+.hitmarker.big svg {
+  filter: drop-shadow(0 0 4px rgba(255, 90, 60, 0.9));
+}
+
 @keyframes hitmark {
   0% {
     opacity: 1;
-    transform: scale(0.6) rotate(0deg);
+    transform: scale(calc(0.6 * var(--hm, 1))) rotate(0deg);
   }
   100% {
     opacity: 0;
-    transform: scale(1.5) rotate(20deg);
+    transform: scale(calc(1.5 * var(--hm, 1))) rotate(20deg);
   }
 }
 
@@ -646,6 +654,21 @@ body {
   from {
     transform: translateX(40px);
     opacity: 0;
+  }
+}
+
+/* Narrow windows: keep the kill feed clear of the clock. */
+@media (max-width: 900px) {
+  .killfeed {
+    top: 96px;
+    right: 10px;
+    font-size: 13px;
+    gap: 4px;
+  }
+
+  .killfeed .item {
+    padding: 2px 8px;
+    border-width: 2px;
   }
 }
 
@@ -1376,6 +1399,27 @@ body {
   .btn.big {
     font-size: 30px;
     padding: 10px 48px;
+  }
+
+  .tip {
+    top: 18%;
+    left: 12px;
+    max-width: 240px;
+    padding: 6px 10px;
+    gap: 8px;
+    border-width: 3px;
+  }
+
+  .tip .t {
+    font-size: 14px;
+  }
+
+  .tip .d {
+    font-size: 12px;
+  }
+
+  .tip .key {
+    font-size: 13px;
   }
 }
 

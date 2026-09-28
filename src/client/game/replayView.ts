@@ -132,6 +132,12 @@ export class ReplayView {
     if (this.t < 0.05) camera.position.copy(desired);
     else camera.position.lerp(desired, Math.min(1, dt * 3));
     camera.lookAt(this.focus);
+    // Bystanders that end up right against the lens would fill the screen: hide them.
+    for (const [id, actor] of this.actors) {
+      if (id === this.data.victim || !actor.visible) continue;
+      const near = Math.hypot(actor.lastX - camera.position.x, actor.lastY + 1 - camera.position.y, actor.lastZ - camera.position.z) < 3.5;
+      actor.man.setVisible(!near);
+    }
     if (Math.abs(camera.fov - 55) > 0.01) {
       camera.fov = 55;
       camera.updateProjectionMatrix();

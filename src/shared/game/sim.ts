@@ -1903,9 +1903,19 @@ export class GameSim {
     const s = p.state;
     this.releaseInvolving(p);
     const credit = p.lastAttacker >= 0 && this.time - p.lastAttackTime <= BALANCE.knockback.creditWindow;
-    const killer = credit ? this.players.get(p.lastAttacker) : undefined;
+    let killer = credit ? this.players.get(p.lastAttacker) : undefined;
     let points = 0;
     const tags: string[] = tag ? [tag] : [];
+    if (!killer && this.mode === 'duel' && this.phase === 'playing') {
+      // In a 1v1, falling off on your own still scores for your rival.
+      for (const q of this.players.values()) {
+        if (q !== p) {
+          killer = q;
+          tags.push('sd');
+          break;
+        }
+      }
+    }
     if (killer && killer !== p && this.phase === 'playing') {
       points = BALANCE.scoring.knockout;
       if (this.crownId === p.id) {

@@ -230,19 +230,28 @@ export class Audio {
 
   /** Air Cannon shot: a thumpy "pomf". */
   shoot(power: number, pos: [number, number, number] | null = null): void {
-    const out = this.out(pos, 0.7);
+    const out = this.out(pos, 0.8);
     if (!out) return;
     const ctx = this.ctx!;
     const t = ctx.currentTime;
+    // Body: a deep air-cannon thump, heavier for charged shots.
     const osc = ctx.createOscillator();
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(180 + power * 60, t);
-    osc.frequency.exponentialRampToValueAtTime(50, t + 0.18);
+    osc.frequency.setValueAtTime(170 + power * 70, t);
+    osc.frequency.exponentialRampToValueAtTime(38, t + 0.16 + power * 0.08);
     const og = ctx.createGain();
-    this.env(og, t, 0.005, 0.8, 0.2);
+    this.env(og, t, 0.003, 0.85 + power * 0.35, 0.2 + power * 0.08);
     osc.connect(og).connect(out);
     osc.start(t);
-    osc.stop(t + 0.3);
+    osc.stop(t + 0.35);
+    // Crack: a very short bright transient so the shot has a sharp front edge.
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 1800;
+    const cg = ctx.createGain();
+    this.env(cg, t, 0.001, 0.35 + power * 0.35, 0.035);
+    hp.connect(cg).connect(out);
+    this.noise(hp, t, 0.05);
     const f = ctx.createBiquadFilter();
     f.type = 'lowpass';
     f.frequency.setValueAtTime(2500 + power * 2000, t);
@@ -342,20 +351,30 @@ export class Audio {
   }
 
   /** Satisfying pop when your shot connects. */
-  hitConfirm(): void {
-    const out = this.out(null, 0.35);
+  /** Your hit landed: a bright tick plus a low body thump that grows with how hard it hit (0..1). */
+  hitConfirm(strength = 0.5): void {
+    const out = this.out(null, 0.35 + strength * 0.15);
     if (!out) return;
     const ctx = this.ctx!;
     const t = ctx.currentTime;
     const osc = ctx.createOscillator();
     osc.type = 'triangle';
-    osc.frequency.setValueAtTime(900, t);
-    osc.frequency.exponentialRampToValueAtTime(1600, t + 0.05);
+    osc.frequency.setValueAtTime(900 - strength * 250, t);
+    osc.frequency.exponentialRampToValueAtTime(1600 - strength * 400, t + 0.05);
     const g = ctx.createGain();
     this.env(g, t, 0.002, 0.8, 0.09);
     osc.connect(g).connect(out);
     osc.start(t);
     osc.stop(t + 0.12);
+    const sub = ctx.createOscillator();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(95 + strength * 40, t);
+    sub.frequency.exponentialRampToValueAtTime(42, t + 0.16);
+    const sg = ctx.createGain();
+    this.env(sg, t, 0.003, 0.5 + strength * 0.9, 0.16);
+    sub.connect(sg).connect(out);
+    sub.start(t);
+    sub.stop(t + 0.22);
   }
 
   /** Little fanfare when you knock someone out. */
@@ -791,11 +810,11 @@ export class Audio {
   }
 
   /** A landed hit: a deep thump, a rubbery "bwomp" and a slap (see voices.ts). */
-  impact(strength: number, pos: [number, number, number] | null): void {
+  impact(strength: number, pos: [number, number, number] | null, gain = 1): void {
     if (!this.throttle('impact', 40)) return;
     const k = Math.min(1, strength / 30);
     // Harder hits are louder and deeper.
-    this.playSample('impact', pos, 0.5 + k * 0.45, 1.15 - k * 0.35 + Math.random() * 0.1);
+    this.playSample('impact', pos, (0.5 + k * 0.45) * gain, 1.15 - k * 0.35 + Math.random() * 0.1);
   }
 
   /** Stadium horn plus a crowd roar (noise swell) for goals and giant tube men filling up. */

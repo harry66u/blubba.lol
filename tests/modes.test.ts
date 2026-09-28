@@ -185,6 +185,16 @@ describe('1v1', () => {
     expect(sim.phase).toBe('results');
     expect(sim.lastResult?.winnerId).toBe(a.id);
   });
+
+  it('falling off on your own scores for your rival', () => {
+    const { sim, ps, ds } = setup('duel', 2);
+    const [a, b] = ps;
+    place(b, 0, -60, 0);
+    const ko = collect(sim, ds, 2).find((e) => e.t === 'ko');
+    expect(ko).toMatchObject({ victim: b.id, killer: a.id, points: 1 });
+    expect((ko as { tags: string[] }).tags).toContain('sd');
+    expect(a.score).toBe(1);
+  });
 });
 
 describe('mode plumbing', () => {

@@ -74,7 +74,7 @@ export const BALANCE = {
 
   knockback: {
     /** Launch speed = power * (base + growth * inflation^growthExp) / mass. */
-    base: 7.6,
+    base: 9,
     growth: 16,
     /** >1 keeps early hits modest and makes high inflation ramp up sharply (tuned with scripts/knockback-sweep.ts). */
     growthExp: 3,
@@ -89,9 +89,9 @@ export const BALANCE = {
     /** Fraction of the target's previous velocity kept on a new hit. */
     keepVelocity: 0.15,
     /** Hit-stop: the target freezes this long on impact (longer for harder hits), then launches. */
-    hitStopBase: 0.045,
-    hitStopPerSpeed: 0.0008,
-    hitStopMax: 0.09,
+    hitStopBase: 0.06,
+    hitStopPerSpeed: 0.0012,
+    hitStopMax: 0.12,
     hitstunPerSpeed: 0.03,
     hitstunMin: 0.15,
     hitstunMax: 1.0,
@@ -122,12 +122,14 @@ export const BALANCE = {
       ammo: 5,
       reloadTime: 1.5,
       fireCooldown: 0.28,
-      chargeTime: 0.75,
-      /** Power of an instant tap relative to a full charge. */
-      tapPower: 0.35,
-      projSpeed: 36,
+      chargeTime: 0.6,
+      /** Power of an instant tap relative to a full charge (quick shots still shove). */
+      tapPower: 0.5,
+      /** Fast enough that shots land about 0.25 s after the click at typical fighting range. */
+      projSpeed: 75,
       projRadius: 0.55,
-      projLifetime: 1.3,
+      /** Range = projSpeed × projLifetime (about 49 m). */
+      projLifetime: 0.65,
       projGravity: 0,
       blastRadius: 2.6,
       /** Inflation added by a full-power direct hit. */

@@ -406,9 +406,12 @@ export class Hud {
     this.flashEl.animate([{ opacity: 1 }, { opacity: 0 }], { duration: ms, easing: 'ease-out' });
   }
 
-  hitMarker(): void {
+  /** `strength` 0..1: harder hits draw a bigger, hotter marker. */
+  hitMarker(strength = 0.5): void {
     this.hitmarker.classList.remove('show');
     void this.hitmarker.offsetWidth;
+    this.hitmarker.style.setProperty('--hm', (0.9 + strength * 0.9).toFixed(2));
+    this.hitmarker.classList.toggle('big', strength > 0.5);
     this.hitmarker.classList.add('show');
     this.crosshair.classList.add('hit');
     window.setTimeout(() => this.crosshair.classList.remove('hit'), 90);

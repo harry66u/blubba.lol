@@ -541,6 +541,9 @@ game.onMatchChange = (m) => {
       setOverlay('results');
     }
     input.enabled = false;
+    // Give the mouse back so Skip and the results buttons can be clicked. The next match's
+    // "click to play" takes it again.
+    input.exitLock();
   } else if (overlay === 'results' || overlay === 'replay') {
     game.stopReplay();
     setOverlay(input.locked ? 'none' : 'click');

@@ -61,7 +61,8 @@ class ParticlePool {
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
   }
 
-  update(dt: number): void {
+  /** `near`: shrink particles that drift right up to the camera so they never blot out the view. */
+  update(dt: number, near: THREE.Vector3 | null = null): void {
     for (let i = 0; i < this.capacity; i++) {
       const p = this.parts[i];
       if (p.life <= 0) continue;
@@ -80,7 +81,11 @@ class ParticlePool {
       p.rot += p.spin * dt;
       const t = 1 - p.life / p.max;
       // Pop in quickly, then shrink away.
-      const scale = p.size * (1 + p.grow * t) * Math.min(1, t * 8) * (1 - Math.pow(t, 3));
+      let scale = p.size * (1 + p.grow * t) * Math.min(1, t * 8) * (1 - Math.pow(t, 3));
+      if (near) {
+        const d = Math.hypot(p.x - near.x, p.y - near.y, p.z - near.z) - scale;
+        if (d < 1.3) scale *= Math.max(0, d / 1.3);
+      }
       this.e.set(p.rot, p.rot * 0.7, 0);
       this.q.setFromEuler(this.e);
       this.m.compose(this.v.set(p.x, p.y, p.z), this.q, this.s.set(scale, scale, scale));
@@ -89,6 +94,9 @@ class ParticlePool {
     this.mesh.instanceMatrix.needsUpdate = true;
   }
 }
+
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
+const tmpDirV = new THREE.Vector3();
 
 let starTex: THREE.Texture | null = null;
 /** Soft star-burst texture for muzzle flashes and impacts. */
@@ -163,7 +171,12 @@ export interface Projectile3D {
   ox: number;
   oy: number;
   oz: number;
+  /** Distance flown since the last trail puff. */
   trail: number;
+  /** Last drawn position (for distance-based trails). */
+  lx: number;
+  ly: number;
+  lz: number;
 }
 
 const AIR_VERT = /* glsl */ `
@@ -215,6 +228,8 @@ export class Effects {
   private readonly utilGeos = [null, new THREE.IcosahedronGeometry(0.3, 1), new THREE.IcosahedronGeometry(0.3, 1), new THREE.CylinderGeometry(0.35, 0.35, 0.15, 16), new THREE.BoxGeometry(0.45, 0.45, 0.45)];
   private readonly ringGeo = new THREE.RingGeometry(0.8, 1, 40);
   private time = 0;
+  /** Camera position, so particles right in front of the lens can fade out. */
+  camPos: THREE.Vector3 | null = null;
 
   constructor() {
     const puffMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, emissive: 0x333333, transparent: true, opacity: 0.6, depthWrite: false });
@@ -286,9 +301,20 @@ export class Effects {
   /** A landed hit: flash, a ring, and a spray of air and confetti along the knockback. */
   impactBurst(x: number, y: number, z: number, dx: number, dy: number, dz: number, strength: number, color: number, camPos: THREE.Vector3): void {
     const k = Math.min(1, strength / 30);
-    this.flash(x, y, z, 1.4 + k * 2.2, 0xffffff, 0.09 + k * 0.05);
-    this.shockwave(x, y, z, 1.4 + k * 2.4, 0.28, 0xffffff, false, camPos);
-    const n = 10 + Math.round(k * 18);
+    this.flash(x, y, z, 2 + k * 3, 0xffffff, 0.1 + k * 0.06);
+    // A second, colored flash lingers a moment longer so the hit reads at any distance.
+    this.flash(x, y, z, 1.4 + k * 2.2, color, 0.16 + k * 0.08);
+    this.shockwave(x, y, z, 1.8 + k * 3, 0.3, 0xffffff, false, camPos);
+    if (k > 0.35) this.shockwave(x, y, z, 1.2 + k * 2, 0.22, 0xffd60a, false, camPos);
+    // Speed streaks shooting out along the knockback.
+    for (let i = 0; i < 4 + Math.round(k * 8); i++) {
+      const sp = 14 + Math.random() * (10 + k * 18);
+      this.puffs.spawn(
+        { x, y, z, vx: dx * sp + (Math.random() - 0.5) * 3, vy: dy * sp + (Math.random() - 0.5) * 3, vz: dz * sp + (Math.random() - 0.5) * 3, size: 0.1 + k * 0.08, grow: 0.4, max: 0.22 + Math.random() * 0.12, drag: 7 },
+        0xffffff,
+      );
+    }
+    const n = 12 + Math.round(k * 22);
     for (let i = 0; i < n; i++) {
       const spread = 0.7;
       const vx = dx + (Math.random() - 0.5) * spread;
@@ -497,7 +523,7 @@ export class Effects {
     mesh.castShadow = kind > 0;
     mesh.renderOrder = 2;
     this.root.add(mesh);
-    const p: Projectile3D = { id, mesh, x, y, z, vx, vy, vz, r, ox: 0, oy: 0, oz: 0, trail: 0 };
+    const p: Projectile3D = { id, mesh, x, y, z, vx, vy, vz, r, ox: 0, oy: 0, oz: 0, trail: 0, lx: x, ly: y, lz: z };
     if (muzzle) {
       p.ox = muzzle.x - x;
       p.oy = muzzle.y - y;
@@ -524,14 +550,34 @@ export class Effects {
     p.x = x;
     p.y = y;
     p.z = z;
-    p.mesh.position.set(x + p.ox, y + p.oy, z + p.oz);
-    p.mesh.rotation.y += dt * 8;
-    p.mesh.rotation.x += dt * 5;
-    p.trail += dt;
-    if (p.trail > 0.03 && p.mesh.material === this.airMat) {
-      p.trail = 0;
-      this.puffs.spawn({ x: p.mesh.position.x, y: p.mesh.position.y, z: p.mesh.position.z, size: p.r * 0.35, grow: 0.8, max: 0.35, drag: 5, vx: (Math.random() - 0.5), vy: Math.random() * 0.5, vz: (Math.random() - 0.5) }, 0xe8fbff);
+    const mx = x + p.ox;
+    const my = y + p.oy;
+    const mz = z + p.oz;
+    p.mesh.position.set(mx, my, mz);
+    if (p.mesh.material !== this.airMat) {
+      p.mesh.rotation.y += dt * 8;
+      p.mesh.rotation.x += dt * 5;
+      return;
     }
+    // Air shots are fast: stretch the blob along its flight into a streak.
+    const sp = Math.hypot(p.vx, p.vy, p.vz);
+    if (sp > 1) {
+      tmpDirV.set(p.vx / sp, p.vy / sp, p.vz / sp);
+      p.mesh.quaternion.setFromUnitVectors(Z_AXIS, tmpDirV);
+      p.mesh.scale.set(p.r, p.r, p.r * (1 + Math.min(2.2, sp * 0.03)));
+    }
+    // Trail puffs every ~0.8 m travelled, so it stays continuous at any speed.
+    const moved = Math.hypot(mx - p.lx, my - p.ly, mz - p.lz);
+    p.trail += moved;
+    const n = Math.min(6, Math.floor(p.trail / 0.8));
+    for (let i = 0; i < n; i++) {
+      const f = (i + 1) / (n + 1);
+      this.puffs.spawn({ x: p.lx + (mx - p.lx) * f, y: p.ly + (my - p.ly) * f, z: p.lz + (mz - p.lz) * f, size: p.r * 0.3, grow: 0.9, max: 0.3, drag: 5, vx: Math.random() - 0.5, vy: Math.random() * 0.5, vz: Math.random() - 0.5 }, 0xe8fbff);
+    }
+    if (n > 0) p.trail = 0;
+    p.lx = mx;
+    p.ly = my;
+    p.lz = mz;
   }
 
   /** Grapple line between two moving points; each getter returns null once its end is gone. */
@@ -696,8 +742,8 @@ export class Effects {
       r.mesh.scale.set(1, 1, Math.max(0.01, len));
     }
     this.airMat.uniforms.time.value = this.time;
-    this.puffs.update(dt);
-    this.confetti.update(dt);
+    this.puffs.update(dt, this.camPos);
+    this.confetti.update(dt, this.camPos);
     for (const r of this.rings) {
       if (r.life <= 0) continue;
       r.life -= dt;

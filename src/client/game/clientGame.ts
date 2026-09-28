@@ -200,6 +200,9 @@ export class ClientGame {
   private trauma = 0;
   private lastChainCallout = -99;
   private fovKick = 0;
+  /** View punch: the camera kicks up when you fire and springs back (visual only, aim is unchanged). */
+  private punch = 0;
+  private punchV = 0;
   private deathAt = 0;
   private killerId = -1;
   private deathPos = new THREE.Vector3();
@@ -254,6 +257,7 @@ export class ClientGame {
     this.viewModel.root.visible = false;
     r.setTheme(this.map.theme);
     input.onAnyPress = (a) => this.tips.used(a);
+    this.effects.camPos = r.camera.position;
   }
 
   private makeCtx(features: StepContext['features']): StepContext {
@@ -541,6 +545,9 @@ export class ClientGame {
 
   private onEvents(list: GameEvent[]): void {
     for (const e of list) {
+      // Your own hits are confirmed the moment the server says so; the burst on the target still
+      // plays where you see them.
+      if (e.t === 'hit' && e.attacker === this.youId && e.target !== this.youId) this.confirmHit(e);
       if (this.isImmediate(e)) this.handleEvent(e, true);
       else this.pending.push(e);
     }
@@ -673,7 +680,7 @@ export class ClientGame {
           } else {
             const key = -100000 - e.id;
             const p3 = fx.addProjectile(key, e.x, e.y, e.z, e.vx, e.vy, e.vz, e.r);
-            this.localShots.set(key, { p3, serverId: e.id, life: BALANCE.weapons.airCannon.projLifetime, exploded: false, boomAt: null });
+            this.localShots.set(key, { p3, serverId: e.id, life: this.weapon.projLifetime, exploded: false, boomAt: null });
             this.localByServer.set(e.id, key);
           }
         } else {
@@ -907,24 +914,22 @@ export class ClientGame {
       }
       case 'hit': {
         const pos: [number, number, number] = [e.x, e.y, e.z];
+        const mine = e.attacker === you && e.target !== you;
         a.squeak(e.infl, e.target === you ? null : pos);
-        a.impact(e.speed, e.target === you || e.attacker === you ? null : pos);
+        if (!mine) a.impact(e.speed, e.target === you ? null : pos);
         if (!e.braced) {
           fx.impactBurst(e.x, e.y, e.z, e.dx, e.dy, e.dz, e.speed, this.colorOf(e.target), this.r.camera.position);
           this.remotes.get(e.target)?.man.impact(e.speed, e.dx, e.dz);
           if (e.target === you) this.selfMan?.impact(e.speed, e.dx, e.dz);
         }
-        if (e.attacker === you && e.target !== you) {
-          this.hud.hitMarker();
-          a.hitConfirm();
-          // Your shot landed: shake and a beat of hit-stop on your gun, scaled by how hard it hit.
-          this.trauma = Math.min(1, this.trauma + 0.12 + Math.min(0.45, e.speed * 0.012));
-          this.viewModel.hitStop(Math.min(0.09, 0.045 + e.speed * 0.0008));
-          if (e.combo >= 2) this.hud.callout(`${e.combo}x COMBO!`, e.combo >= 3 ? 'Juggle master!' : 'Keep them in the air!', 1.2, e.combo >= 3 ? '#ff5fd2' : '#ffd60a');
-          this.hud.popup(tmpV.set(e.x, e.y + 0.6, e.z), `+${Math.round(e.infl * 100)}%`, '#ffd60a', 0.8, 0.8);
+        if (mine) {
+          // Their new inflation pops off them, greener to redder as they near bursting.
+          const pct = Math.round(e.infl * 100);
+          this.hud.popup(tmpV.set(e.x, e.y - 0.3, e.z), `${pct}%`, `hsl(${120 - Math.min(1, e.infl) * 120}, 95%, ${pct >= 75 ? 62 : 68}%)`, 0.8 + e.infl * 0.7, 0.9);
         }
         if (e.target === you) {
           this.trauma = Math.min(1, this.trauma + 0.35 + e.speed * 0.02);
+          if (e.speed > 12 && !e.braced) this.hud.flash('rgba(255, 255, 255, 0.45)', 160);
           // Direction the hit came from relative to where we're looking.
           const ang = Math.atan2(-e.dx, -e.dz) - this.input.yaw;
           this.hud.damageFrom(-ang + Math.PI);
@@ -937,7 +942,7 @@ export class ClientGame {
           this.hud.popup(tmpV.set(e.x, e.y + 1.2, e.z), 'BRACED!', '#9fe8ff', 1, 0.9);
           if (e.target === you) this.hud.flash('rgba(120, 220, 255, 0.55)', 350);
         } else if (e.direct && (e.attacker === you || e.target === you || e.speed > 18)) {
-          this.hud.popup(tmpV.set(e.x, e.y + 1, e.z), e.speed > 20 ? 'WHAM!' : 'BOP!', '#ffffff', 0.7 + Math.min(0.6, e.speed * 0.02), 0.7);
+          this.hud.popup(tmpV.set(e.x, e.y + 1.6, e.z), e.speed > 20 ? 'WHAM!' : 'BOP!', '#ffffff', 0.7 + Math.min(0.6, e.speed * 0.02), 0.7);
         }
         break;
       }
@@ -952,9 +957,11 @@ export class ClientGame {
         const icons: Record<string, string> = { crown: ' 👑', chain: ' ⛓️', revenge: ' ⚔️', final: ' ×2', pin: ' 📌', double: ' ✌️', triple: ' 🔥', multi: ' 🔥🔥' };
         const suffix = e.tags.map((t) => icons[t] ?? '').join('') + (e.points > 1 ? ` <b>+${e.points}</b>` : '');
         const html =
-          e.killer >= 0
-            ? `<b style="color:${kc}">${esc(killerName)}</b> popped <b style="color:${vc}">${esc(victimName)}</b>${suffix}`
-            : `<b style="color:${vc}">${esc(victimName)}</b> fell off`;
+          e.killer >= 0 && e.tags.includes('sd')
+            ? `<b style="color:${vc}">${esc(victimName)}</b> fell off · <b style="color:${kc}">${esc(killerName)}</b> <b>+${e.points}</b>`
+            : e.killer >= 0
+              ? `<b style="color:${kc}">${esc(killerName)}</b> popped <b style="color:${vc}">${esc(victimName)}</b>${suffix}`
+              : `<b style="color:${vc}">${esc(victimName)}</b> fell off`;
         this.hud.addKill(html, e.killer === you || e.victim === you);
         a.squeal(e.victim === you ? null : [e.x, Math.max(e.y, -10), e.z]);
         fx.deflatingBalloon(e.x, e.y, e.z, this.colorOf(e.victim), e.vx, e.vy, e.vz);
@@ -975,7 +982,7 @@ export class ClientGame {
         this.hud.popup(tmpV.set(e.x, Math.max(e.y, -8) + 2, e.z), 'WHEEEE!', '#ffffff', 1.2, 1.4);
         if (e.victim === you) {
           this.deathAt = this.time;
-          this.killerId = e.killer;
+          this.killerId = e.tags.includes('sd') ? -1 : e.killer;
           this.deathPos.set(e.x, Math.max(e.y, -6), e.z);
           this.audio.setCharge(0);
         }
@@ -1081,6 +1088,14 @@ export class ClientGame {
     const you = this.youId;
     const tags = e.tags;
     const pts = e.points > 1 ? ` +${e.points}` : '';
+    if (tags.includes('sd')) {
+      // 1v1: they fell off on their own, and the point is yours.
+      if (e.killer === you) {
+        this.audio.koConfirm();
+        this.hud.callout('THEY FELL!', `${victimName} fell off · +${e.points} for you`, 1.8);
+      }
+      return;
+    }
     let main = '';
     let sub = '';
     let line = '';
@@ -1301,7 +1316,9 @@ export class ClientGame {
     if (w.kind === 'cone') {
       this.viewModel.kick(f.power * 1.5);
       this.audio.honk(f.power, null);
-      this.trauma = Math.min(1, this.trauma + 0.1 + f.power * 0.15);
+      this.trauma = Math.min(1, this.trauma + 0.15 + f.power * 0.25);
+      this.punchV += 0.8 + f.power * 1.6;
+      this.fovKick += 2 + f.power * 4;
       this.muzzlePos(tmpV);
       this.effects.honkBlast(tmpV.x, tmpV.y, tmpV.z, f.dx, f.dy, f.dz, w.range, w.cone, f.power);
       this.effects.muzzleFlash(tmpV.x, tmpV.y, tmpV.z, f.dx, f.dy, f.dz, f.power * 0.6);
@@ -1311,6 +1328,8 @@ export class ClientGame {
     if (w.kind === 'hitscan') {
       this.viewModel.kick(f.power);
       this.audio.pew(f.power, null);
+      this.trauma = Math.min(1, this.trauma + 0.06 + f.power * 0.12);
+      this.punchV += 0.6 + f.power * 1.2;
       this.muzzlePos(tmpV);
       const end = this.localRay(f.ox, f.oy, f.oz, f.dx, f.dy, f.dz, w.range, w.rayRadius);
       this.effects.tracer(tmpV.x, tmpV.y, tmpV.z, end.x, end.y, end.z);
@@ -1319,7 +1338,9 @@ export class ClientGame {
     }
     this.viewModel.kick(f.power);
     this.audio.shoot(f.power, null);
-    this.trauma = Math.min(1, this.trauma + 0.05 + f.power * 0.1);
+    this.trauma = Math.min(1, this.trauma + 0.1 + f.power * 0.2);
+    this.punchV += 0.5 + f.power * 1.3;
+    this.fovKick += 1 + f.power * 3;
     const key = -this.seq;
     this.muzzlePos(tmpV);
     this.effects.muzzleFlash(tmpV.x, tmpV.y, tmpV.z, f.dx, f.dy, f.dz, f.power * 0.6);
@@ -1692,6 +1713,18 @@ export class ClientGame {
     }
   }
 
+  /** Your shot landed: marker, crunch, shake and a beat of hit-stop, scaled by how hard it hit. */
+  private confirmHit(e: Extract<GameEvent, { t: 'hit' }>): void {
+    const k = Math.min(1, e.speed / 30);
+    this.hud.hitMarker(k);
+    this.audio.hitConfirm(k);
+    this.audio.impact(e.speed, null, 1.3);
+    this.trauma = Math.min(1, this.trauma + 0.2 + k * 0.5);
+    this.fovKick -= 1 + k * 4;
+    this.viewModel.hitStop(Math.min(BALANCE.knockback.hitStopMax, BALANCE.knockback.hitStopBase + e.speed * BALANCE.knockback.hitStopPerSpeed));
+    if (e.combo >= 2) this.hud.callout(`${e.combo}x COMBO!`, e.combo >= 3 ? 'Juggle master!' : 'Keep them in the air!', 1.2, e.combo >= 3 ? '#ff5fd2' : '#ffd60a');
+  }
+
   /** Third-person camera is on and you're alive (so shots aim along the camera's center ray). */
   private get thirdPersonLive(): boolean {
     return this.settings.thirdPerson && this.camLive && this.havePred && this.pred.mode !== MODE_DEAD && !this.replay.active;
@@ -1801,6 +1834,10 @@ export class ClientGame {
     this.errZ *= decay;
     this.trauma = Math.max(0, this.trauma - dt * 1.6);
     this.fovKick *= Math.exp(-dt * 6);
+    // Underdamped spring: a sharp kick up that settles in about a fifth of a second.
+    const pdt = Math.min(dt, 1 / 30);
+    this.punchV += (-320 * this.punch - 30 * this.punchV) * pdt;
+    this.punch += this.punchV * pdt;
     const shake = this.trauma * this.trauma;
     const alive = p.mode !== MODE_DEAD && this.havePred;
     const third = alive && this.settings.thirdPerson;
@@ -1822,7 +1859,7 @@ export class ClientGame {
       }
       this.camPos.copy(cam.position);
       this.camLive = true;
-      cam.rotation.set(this.input.pitch + (Math.random() - 0.5) * shake * 0.08, this.input.yaw + (Math.random() - 0.5) * shake * 0.08, roll);
+      cam.rotation.set(this.input.pitch + this.punch + (Math.random() - 0.5) * shake * 0.08, this.input.yaw + (Math.random() - 0.5) * shake * 0.08, roll);
       this.poseSelf(dt, x, y, z, third && this.camDist > 0.7 * inflationScale(p.inflation));
     } else {
       // Spectate: watch the balloon fly off, then look at whoever popped you.
