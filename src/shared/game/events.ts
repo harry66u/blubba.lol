@@ -49,6 +49,8 @@ export type GameEvent =
   | { t: 'chaos'; tick: number; kind: 'fan' | 'lowGravity' | 'ice' | 'maxInflate'; announceTick: number; startTick: number; endTick: number; dirX: number; dirZ: number }
   | { t: 'chain'; tick: number; id: number; target: number; by: number; x: number; y: number; z: number }
   | { t: 'crown'; tick: number; id: number }
+  /** Streak reward earned: Turbo Tank, Mega Blast, or both. */
+  | { t: 'streak'; tick: number; id: number; kind: 'turbo' | 'mega' | 'both'; n: number }
   | { t: 'final'; tick: number }
   | { t: 'goal'; tick: number; team: 0 | 1; scorer: number; x: number; y: number; z: number }
   | { t: 'ballOut'; tick: number; x: number; y: number; z: number }

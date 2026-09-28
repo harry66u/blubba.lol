@@ -42,6 +42,8 @@ export interface TubeManPose {
   streaming: boolean;
   hasPin: boolean;
   crowned: boolean;
+  /** Has a streak reward active (Turbo Tank / Mega Blast): flickers orange-gold. */
+  powered: boolean;
   /** This player last knocked you out (drawn with a red revenge glow). */
   nemesis: boolean;
 }
@@ -69,6 +71,7 @@ export function defaultPose(): TubeManPose {
     streaming: false,
     hasPin: false,
     crowned: false,
+    powered: false,
     nemesis: false,
   };
 }
@@ -644,6 +647,9 @@ export class TubeMan {
       const pulse = 0.5 + 0.5 * Math.sin(t * (5 + danger * 9));
       glow += danger * (0.25 + 0.45 * pulse);
       this.bodyMat.emissive.setHex(0xff2a2a);
+    } else if (p.powered) {
+      glow += 0.4 + 0.25 * Math.abs(Math.sin(t * 13 + this.seed));
+      this.bodyMat.emissive.setHex(0xffa51f);
     } else {
       this.bodyMat.emissive.copy(this.color);
     }

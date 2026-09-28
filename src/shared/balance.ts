@@ -342,6 +342,23 @@ export const BALANCE = {
     cooldown: 0.6,
   },
 
+  /** Rewards for knockouts in one life (streak), announced to everyone. */
+  streaks: {
+    /** Turbo Tank: full ammo and dashes, then faster reloads and fire rate for a while. */
+    turboAt: 3,
+    turboSeconds: 12,
+    /** Reloads and fire cooldowns run this many times faster during Turbo Tank. */
+    turboRate: 2,
+    /** Mega Blast: the next few shots fire at full charge, bigger and harder. */
+    megaAt: 5,
+    megaShots: 3,
+    megaKnockback: 1.2,
+    megaBlast: 1.5,
+    megaRadius: 1.3,
+    /** At this streak you get both again. */
+    bothAt: 8,
+  },
+
   crown: {
     /** Knockouts in a row (without being knocked out) needed to wear the crown. */
     minStreak: 2,

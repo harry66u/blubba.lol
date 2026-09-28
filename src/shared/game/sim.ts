@@ -572,15 +572,17 @@ export class GameSim {
     const tick = this.tick;
     if (out.fired) {
       const f = out.fired;
+      // Mega Blast shots hit harder (and projectiles are bigger with a wider blast).
+      const hard = f.mega ? f.power * BALANCE.streaks.megaKnockback : f.power;
       switch (p.weapon.kind) {
         case 'cone':
-          this.fireCone(p, f.ox, f.oy, f.oz, f.dx, f.dy, f.dz, f.power);
+          this.fireCone(p, f.ox, f.oy, f.oz, f.dx, f.dy, f.dz, hard);
           break;
         case 'hitscan':
-          this.fireHitscan(p, f.dx, f.dy, f.dz, f.power, input.viewTick);
+          this.fireHitscan(p, f.dx, f.dy, f.dz, hard, input.viewTick);
           break;
         default:
-          this.spawnShot(p, f.ox, f.oy, f.oz, f.dx, f.dy, f.dz, f.power, f.charge, input.seq);
+          this.spawnShot(p, f.ox, f.oy, f.oz, f.dx, f.dy, f.dz, f.power, f.charge, input.seq, f.mega);
       }
     }
     p.streaming = out.stream > 0;
@@ -631,7 +633,8 @@ export class GameSim {
     return id;
   }
 
-  private spawnShot(p: SimPlayer, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, power: number, charge: number, clientSeq: number): void {
+  private spawnShot(p: SimPlayer, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, power: number, charge: number, clientSeq: number, mega = false): void {
+    const M = BALANCE.streaks;
     const w = p.weapon;
     const id = this.newProjectileId();
     const proj: Projectile = {
@@ -647,14 +650,14 @@ export class GameSim {
       vx: dx * w.projSpeed,
       vy: dy * w.projSpeed,
       vz: dz * w.projSpeed,
-      radius: w.projRadius * (0.75 + 0.25 * power),
+      radius: w.projRadius * (0.75 + 0.25 * power) * (mega ? M.megaRadius : 1),
       power,
       charge,
       gravity: w.projGravity,
       expires: this.time + w.projLifetime,
-      blastRadius: w.blastRadius * (0.8 + 0.2 * power),
+      blastRadius: w.blastRadius * (0.8 + 0.2 * power) * (mega ? M.megaBlast : 1),
       inflation: w.inflation,
-      knockback: w.knockback,
+      knockback: w.knockback * (mega ? M.megaKnockback : 1),
     };
     this.projectiles.push(proj);
     p.stats.shots++;
@@ -1899,6 +1902,26 @@ export class GameSim {
     }
   }
 
+  /** Turbo Tank at 3 pops in one life, Mega Blast at 5, both again at 8. */
+  private streakReward(p: SimPlayer): void {
+    const B = BALANCE.streaks;
+    const s = p.state;
+    if (s.mode === MODE_DEAD) return;
+    const n = p.streak;
+    const turbo = n === B.turboAt || n === B.bothAt;
+    const mega = n === B.megaAt || n === B.bothAt;
+    if (!turbo && !mega) return;
+    if (turbo) {
+      s.turboTimer = B.turboSeconds;
+      s.ammo = p.weapon.ammo;
+      s.reloadTimer = 0;
+      s.dashCharges = BALANCE.dash.charges;
+      s.dashRecharge = 0;
+    }
+    if (mega) s.megaShots = B.megaShots;
+    this.events.push({ t: 'streak', tick: this.tick, id: p.id, kind: turbo && mega ? 'both' : turbo ? 'turbo' : 'mega', n });
+  }
+
   knockout(p: SimPlayer, tag?: string): void {
     const s = p.state;
     this.releaseInvolving(p);
@@ -1950,6 +1973,7 @@ export class GameSim {
       killer.score += points;
       killer.stats.kos++;
       killer.streak++;
+      this.streakReward(killer);
       p.nemesis = killer.id;
     }
     if (killer && p.launchBy === killer.id) this.finishLaunch(p, true);

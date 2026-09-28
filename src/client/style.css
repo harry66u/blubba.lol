@@ -2390,3 +2390,28 @@ body.touch .killfeed {
 .touch-controls .rotate-hint {
   background: rgba(29, 27, 58, 0.9);
 }
+
+/* Streak rewards (Turbo Tank / Mega Blast). */
+.power-badge {
+  position: absolute;
+  right: 28px;
+  bottom: 214px;
+  background: linear-gradient(90deg, #ffd60a, #ff8a1f);
+  color: var(--ink);
+  border: 3px solid var(--ink);
+  border-radius: 12px;
+  padding: 4px 12px;
+  font-size: 17px;
+  font-weight: 900;
+  box-shadow: 0 3px 0 var(--ink), 0 0 18px rgba(255, 170, 30, 0.8);
+  animation: pulse 0.5s ease-in-out infinite alternate;
+  white-space: nowrap;
+}
+body.touch .power-badge {
+  right: auto;
+  left: 50%;
+  bottom: auto;
+  top: 96px;
+  transform: translateX(-50%);
+  font-size: 13px;
+}

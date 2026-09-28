@@ -33,6 +33,7 @@ import {
   FLAG_GROUND,
   FLAG_LAUNCHED,
   FLAG_PIN,
+  FLAG_POWERED,
   FLAG_PROTECTED,
   FLAG_STREAM,
   type ModeState,
@@ -581,6 +582,8 @@ export class ClientGame {
         return true;
       case 'pickup':
         return e.by === you;
+      case 'streak':
+        return e.id === you;
       case 'pop':
         return e.id === you || e.target === you;
       case 'hit':
@@ -954,6 +957,31 @@ export class ClientGame {
       case 'shield':
         fx.airPuff(e.x, e.y, e.z, 8, 2, 0.25, 0x9fe8ff);
         break;
+      case 'streak': {
+        const title = e.kind === 'both' ? 'UNSTOPPABLE!' : e.kind === 'turbo' ? 'TURBO TANK!' : 'MEGA BLAST!';
+        const p = this.posOf(e.id);
+        if (p) {
+          fx.shockwave(p.x, p.y + 1, p.z, 3, 0.4, 0xffb020, false, this.r.camera.position);
+          for (let i = 0; i < 16; i++) fx.sparkle(p.x + (Math.random() - 0.5) * 1.6, p.y + Math.random() * 2.4, p.z + (Math.random() - 0.5) * 1.6);
+        }
+        if (e.id === you) {
+          const sub =
+            e.kind === 'turbo'
+              ? `${e.n} pops in a row! Full tank, double-speed reloads for ${BALANCE.streaks.turboSeconds}s`
+              : e.kind === 'mega'
+                ? `${e.n} pops in a row! Your next ${BALANCE.streaks.megaShots} shots are fully charged`
+                : `${e.n} pops in a row! Turbo Tank AND Mega Blast`;
+          this.hud.callout(title, sub, 2.6, '#ffb020');
+          this.hud.flash('rgba(255, 190, 40, 0.45)', 400);
+          a.powerUp();
+          this.announcer.say(e.kind === 'both' ? 'Unstoppable!' : e.kind === 'turbo' ? 'Turbo tank!' : 'Mega blast!', 3);
+        } else {
+          if (p) this.hud.popup(tmpV.set(p.x, p.y + 3.2, p.z), title, '#ffb020', 1, 1.3);
+          const nm = this.nameOf(e.id);
+          this.hud.addKill(`<b style="color:${hexColor(this.colorOf(e.id))}">${esc(nm)}</b> is on a ${e.n}-pop streak: <b>${title.replace('!', '')}</b> ⚡`, false);
+        }
+        break;
+      }
       case 'ko': {
         const victimName = this.nameOf(e.victim);
         const killerName = e.killer >= 0 ? this.nameOf(e.killer) : '';
@@ -1341,16 +1369,18 @@ export class ClientGame {
       this.effects.muzzleFlash(tmpV.x, tmpV.y, tmpV.z, f.dx, f.dy, f.dz, f.power * 0.5);
       return;
     }
-    this.viewModel.kick(f.power);
+    const M = BALANCE.streaks;
+    const kick = f.mega ? 1.6 : 1;
+    this.viewModel.kick(f.power * kick);
     this.audio.shoot(f.power, null);
-    this.trauma = Math.min(1, this.trauma + 0.1 + f.power * 0.2);
-    this.punchV += 0.5 + f.power * 1.3;
-    this.fovKick += 1 + f.power * 3;
+    this.trauma = Math.min(1, this.trauma + (0.1 + f.power * 0.2) * kick);
+    this.punchV += (0.5 + f.power * 1.3) * kick;
+    this.fovKick += (1 + f.power * 3) * kick;
     const key = -this.seq;
     this.muzzlePos(tmpV);
-    this.effects.muzzleFlash(tmpV.x, tmpV.y, tmpV.z, f.dx, f.dy, f.dz, f.power * 0.6);
-    const r = w.projRadius * (0.75 + 0.25 * f.power);
-    this.localBlast = w.blastRadius;
+    this.effects.muzzleFlash(tmpV.x, tmpV.y, tmpV.z, f.dx, f.dy, f.dz, f.power * 0.6 * kick);
+    const r = w.projRadius * (0.75 + 0.25 * f.power) * (f.mega ? M.megaRadius : 1);
+    this.localBlast = w.blastRadius * (f.mega ? M.megaBlast : 1);
     const p3 = this.effects.addProjectile(key, f.ox, f.oy, f.oz, f.dx * w.projSpeed, f.dy * w.projSpeed, f.dz * w.projSpeed, r, tmpV);
     this.localShots.set(key, { p3, serverId: -1, life: w.projLifetime, exploded: false, boomAt: null });
     this.effects.airPuff(tmpV.x, tmpV.y, tmpV.z, 5, 2, 0.12);
@@ -1627,6 +1657,8 @@ export class ClientGame {
     p.streaming = (c.flags & FLAG_STREAM) !== 0;
     p.hasPin = (c.flags & FLAG_PIN) !== 0;
     p.crowned = (c.flags & FLAG_CROWN) !== 0;
+    p.powered = (c.flags & FLAG_POWERED) !== 0;
+    if (p.powered && Math.random() < dt * 12) this.effects.sparkle(c.px + (Math.random() - 0.5) * 1.4, c.py + Math.random() * 2.2, c.pz + (Math.random() - 0.5) * 1.4);
     p.nemesis = rv.id === this.nemesisId;
     rv.man.setWeapon(WEAPON_IDS[c.weapon] ?? 'airCannon');
     p.dashing = (c.flags & FLAG_DASHING) !== 0;
@@ -1816,6 +1848,7 @@ export class ClientGame {
     pose.streaming = p.charging === 1 && this.weapon.kind === 'stream';
     pose.hasPin = p.pinTimer > 0;
     pose.crowned = this.crownId === this.youId;
+    pose.powered = p.turboTimer > 0 || p.megaShots > 0;
     pose.nemesis = false;
     pose.dashing = p.dashTimer > 0;
     pose.protected = p.spawnProt > 0;
@@ -1971,6 +2004,8 @@ export class ClientGame {
         u1Ready: 1 - Math.min(1, p.u1Cool / BALANCE.utilities[this.loadout.utils[0]].cooldown),
         u2Ready: 1 - Math.min(1, p.u2Cool / BALANCE.utilities[this.loadout.utils[1]].cooldown),
         pin: p.pinTimer,
+        turbo: alive ? p.turboTimer : 0,
+        mega: alive ? p.megaShots : 0,
       },
       dt,
     );

@@ -37,6 +37,9 @@ export interface HudState {
   u1Ready: number;
   u2Ready: number;
   pin: number;
+  /** Streak rewards: Turbo Tank seconds left, Mega Blast shots left. */
+  turbo: number;
+  mega: number;
 }
 
 /** Team score strip under the clock (team modes only). */
@@ -87,6 +90,7 @@ export class Hud {
   private readonly keyChips: Record<string, HTMLElement> = {};
   private readonly tipEl: HTMLElement;
   private readonly pinBadge: HTMLElement;
+  private readonly powerBadge: HTMLElement;
   private readonly eventBanner: HTMLElement;
   private readonly clock: HTMLElement;
   private readonly teamBar: HTMLElement;
@@ -167,6 +171,7 @@ export class Hud {
       this.utilEls.push({ box, cool, icon, k: key });
     }
     this.pinBadge = el('div', { class: 'pin-badge hidden', text: '📌 PIN' });
+    this.powerBadge = el('div', { class: 'power-badge hidden' });
     this.eventBanner = el('div', { class: 'event-banner hidden' });
 
     this.dashPips = el('div', { class: 'pips' });
@@ -215,7 +220,7 @@ export class Hud {
     this.chatWheel = el('div', { class: 'chat-wheel hidden' }, el('div', { class: 'hub', text: 'QUICK CHAT' }));
     this.chatFeed = el('div', { class: 'chat-feed' });
 
-    this.root.append(this.flashEl, this.nametags, this.popups, this.damage, this.crosshair, this.hitmarker, inflation, movement, ammo, utils, this.pinBadge, timer, this.killfeed, this.calloutBox, this.respawnBox, this.note, this.hintEl, this.escapeBox, this.ping, this.chatFeed, this.chatWheel, this.tipEl);
+    this.root.append(this.flashEl, this.nametags, this.popups, this.damage, this.crosshair, this.hitmarker, inflation, movement, ammo, utils, this.pinBadge, this.powerBadge, timer, this.killfeed, this.calloutBox, this.respawnBox, this.note, this.hintEl, this.escapeBox, this.ping, this.chatFeed, this.chatWheel, this.tipEl);
   }
 
   /** Current key (or controller button) for each ability, shown next to it. */
@@ -314,6 +319,11 @@ export class Hud {
     }
     this.utilEls[0].cool.style.height = `${Math.round((1 - s.u1Ready) * 100)}%`;
     this.utilEls[1].cool.style.height = `${Math.round((1 - s.u2Ready) * 100)}%`;
+    const power = [s.turbo > 0 ? `⚡ TURBO ${Math.ceil(s.turbo)}s` : '', s.mega > 0 ? `💥 MEGA ×${s.mega}` : ''].filter(Boolean).join('  ');
+    this.setIf('power', power, () => {
+      this.powerBadge.textContent = power;
+      this.powerBadge.classList.toggle('hidden', !power);
+    });
     this.pinBadge.classList.toggle('hidden', s.pin <= 0);
     if (s.pin > 0) this.setIf('pin', Math.ceil(s.pin), () => (this.pinBadge.textContent = `📌 PIN ${Math.ceil(s.pin)}s`));
     this.reloadBar.classList.toggle('hidden', s.reloadFrac <= 0);

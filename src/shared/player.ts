@@ -26,6 +26,8 @@ export const PLAYER_FIELDS = [
   'cJump', 'cDash', 'cBrace', 'cGrab', 'cGrapple', 'cReload', 'cU1', 'cU2', 'cTaunt',
   // Hit-stop: frozen for a moment on impact, then the stored knockback plays out.
   'hitStop', 'hsVx', 'hsVy', 'hsVz',
+  // Streak rewards: Turbo Tank seconds left, Mega Blast shots left.
+  'turboTimer', 'megaShots',
 ] as const;
 
 export type PlayerField = (typeof PLAYER_FIELDS)[number];
@@ -95,6 +97,8 @@ export interface ShotSpec {
   /** Final shot power 0..1 (tap power up to full charge). */
   power: number;
   charge: number;
+  /** A Mega Blast shot (streak reward): full power, bigger and harder. */
+  mega: boolean;
 }
 
 /** Everything notable that happened during one player step; used for effects and server logic. */
@@ -856,6 +860,9 @@ const tmpDir = { x: 0, y: 0, z: 0 };
 function stepWeapon(p: PlayerState, inp: InputFrame, ctx: StepContext, out: StepResult, reloadP: boolean): void {
   const W = ctx.weapon;
   const dt = ctx.dt;
+  // Turbo Tank (streak reward): reloads and fire cooldowns run faster.
+  const rate = p.turboTimer > 0 ? BALANCE.streaks.turboRate : 1;
+  if (p.turboTimer > 0) p.turboTimer = Math.max(0, p.turboTimer - dt);
   if (p.reloadTimer > 0) {
     p.reloadTimer -= dt;
     if (p.reloadTimer <= 0) {
@@ -876,7 +883,7 @@ function stepWeapon(p: PlayerState, inp: InputFrame, ctx: StepContext, out: Step
   }
 
   if (reloadP && canAct && p.ammo < W.ammo && p.reloadTimer <= 0 && !p.charging) {
-    p.reloadTimer = W.reloadTime;
+    p.reloadTimer = W.reloadTime / rate;
     out.reloadStart = true;
   }
 
@@ -899,11 +906,11 @@ function stepWeapon(p: PlayerState, inp: InputFrame, ctx: StepContext, out: Step
       }
       if (p.ammo <= 0) {
         p.charging = 0;
-        p.reloadTimer = W.reloadTime;
+        p.reloadTimer = W.reloadTime / rate;
         out.reloadStart = true;
       }
     } else {
-      if (p.charging) p.fireCool = W.fireCooldown;
+      if (p.charging) p.fireCool = W.fireCooldown / rate;
       p.charging = 0;
       p.charge = Math.max(0, p.charge - dt * 3);
     }
@@ -914,6 +921,12 @@ function stepWeapon(p: PlayerState, inp: InputFrame, ctx: StepContext, out: Step
     if (fireHeld) {
       p.charge = Math.min(1, p.charge + dt / W.chargeTime);
     } else {
+      // Mega Blast shots always fire at full charge.
+      const mega = p.megaShots > 0;
+      if (mega) {
+        p.megaShots -= 1;
+        p.charge = 1;
+      }
       const power = W.tapPower + (1 - W.tapPower) * p.charge;
       lookDir(p.yaw, p.pitch, tmpDir);
       const eye = eyeHeight(p);
@@ -926,9 +939,10 @@ function stepWeapon(p: PlayerState, inp: InputFrame, ctx: StepContext, out: Step
         dz: tmpDir.z,
         power,
         charge: p.charge,
+        mega,
       };
       p.ammo -= 1;
-      p.fireCool = W.fireCooldown;
+      p.fireCool = W.fireCooldown / rate;
       p.charging = 0;
       p.charge = 0;
       p.spawnProt = 0;
@@ -944,7 +958,7 @@ function stepWeapon(p: PlayerState, inp: InputFrame, ctx: StepContext, out: Step
       }
       if (p.ammo <= 0) {
         p.ammo = 0;
-        p.reloadTimer = W.reloadTime;
+        p.reloadTimer = W.reloadTime / rate;
         out.reloadStart = true;
       }
     }

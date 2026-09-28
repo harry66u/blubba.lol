@@ -378,6 +378,36 @@ export class Audio {
   }
 
   /** Little fanfare when you knock someone out. */
+  /** Streak reward earned: a rising whoosh into a bright chord. */
+  powerUp(): void {
+    const out = this.out(null, 0.4);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const sweep = ctx.createOscillator();
+    sweep.type = 'sawtooth';
+    sweep.frequency.setValueAtTime(220, t);
+    sweep.frequency.exponentialRampToValueAtTime(1320, t + 0.28);
+    const lp = ctx.createBiquadFilter();
+    lp.frequency.setValueAtTime(900, t);
+    lp.frequency.exponentialRampToValueAtTime(4000, t + 0.28);
+    const sg = ctx.createGain();
+    this.env(sg, t, 0.02, 0.35, 0.3);
+    sweep.connect(lp).connect(sg).connect(out);
+    sweep.start(t);
+    sweep.stop(t + 0.36);
+    [659, 831, 988, 1319].forEach((f) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.value = f;
+      const g = ctx.createGain();
+      this.env(g, t + 0.26, 0.01, 0.28, 0.5);
+      osc.connect(g).connect(out);
+      osc.start(t + 0.26);
+      osc.stop(t + 0.85);
+    });
+  }
+
   koConfirm(): void {
     const out = this.out(null, 0.35);
     if (!out) return;

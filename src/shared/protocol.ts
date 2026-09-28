@@ -6,7 +6,7 @@ import type { Loadout } from './loadout';
 import type { ChaosEvent } from './game/chaos';
 import type { Cosmetics, ProgressReport, ReportReason } from './economy';
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 // --- Binary message ids -------------------------------------------------------------------
 export const MSG_INPUTS = 1;
@@ -147,6 +147,8 @@ export const FLAG_PIN = 2048;
 export const FLAG_STREAM = 4096;
 export const FLAG_BLOWN = 8192;
 export const FLAG_CROWN = 16384;
+/** Has a streak reward active (Turbo Tank or Mega Blast shots left). */
+export const FLAG_POWERED = 32768;
 
 /** What every client knows about every player (interpolated for rendering). */
 export interface PublicPlayer {
@@ -204,6 +206,7 @@ export function publicFlags(s: PlayerState): number {
   if (s.zipTimer > 0) f |= FLAG_ZIP;
   if (s.pinTimer > 0) f |= FLAG_PIN;
   if (s.blownTimer > 0) f |= FLAG_BLOWN;
+  if (s.turboTimer > 0 || s.megaShots > 0) f |= FLAG_POWERED;
   return f;
 }
 
