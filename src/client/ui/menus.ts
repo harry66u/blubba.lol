@@ -625,6 +625,7 @@ export function buildSettings(s: Settings, cb: SettingsCallbacks, tab: 'controls
       slider('Trackpad sensitivity', 0.2, 3, 0.05, () => s.sensTrackpad, (v) => (s.sensTrackpad = v));
       slider('Mouse sensitivity', 0.2, 3, 0.05, () => s.sensMouse, (v) => (s.sensMouse = v));
       slider('Controller sensitivity', 0.2, 3, 0.05, () => s.sensController, (v) => (s.sensController = v));
+      slider('Touch aim sensitivity', 0.2, 3, 0.05, () => s.sensTouch, (v) => (s.sensTouch = v));
       slider('Controller aim assist', 0, 1, 0.05, () => s.aimAssist, (v) => (s.aimAssist = v), (v) => (v === 0 ? 'Off' : `${Math.round(v * 100)}%`));
       check('Invert Y', () => s.invertY, (v) => (s.invertY = v));
       slider('Field of view', 65, 105, 1, () => s.fov, (v) => (s.fov = v), (v) => `${v}°`);

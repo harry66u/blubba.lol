@@ -66,6 +66,7 @@ import type { TeamView } from '../ui/menus';
 import { CHASE, aimFromCamera, chaseCamera, rebaseMove } from './chaseCam';
 import { ServerClock } from './clock';
 import { TipCoach } from '../ui/tips';
+import { TOUCH_LABELS, type TouchControls } from '../input/touch';
 
 interface HistoryEntry {
   seq: number;
@@ -91,6 +92,8 @@ interface RemoteView {
   lastTagText: string;
   lookKey: string;
 }
+
+const UTIL_ICONS: Record<string, string> = { 'Bounce Pad': '🟣', 'Air Grenade': '💥', 'Inflatable Wall': '🧱', 'Vacuum Grenade': '🌀' };
 
 function lookOf(cos: Partial<Cosmetics> | undefined): Look {
   return { pattern: cosmeticKey(cos, 'pattern'), face: cosmeticKey(cos, 'face'), hat: cosmeticKey(cos, 'hat'), finish: cosmeticKey(cos, 'finish') };
@@ -224,6 +227,8 @@ export class ClientGame {
   /** camPos follows you (false while spectating, until the first frame after respawning). */
   private camLive = false;
   private readonly aimOut = { yaw: 0, pitch: 0 };
+  /** On-screen controls on phones and tablets (null elsewhere). */
+  touch: TouchControls | null = null;
   /** First-use tooltips for the less obvious controls. */
   private readonly tips = new TipCoach((t, done) => this.hud.showTip(t, done));
   onMatchChange: ((m: MatchInfo) => void) | null = null;
@@ -1977,6 +1982,18 @@ export class ClientGame {
       this.hud.setRespawn(null);
     }
     if (p.reloadTimer <= 0) this.hud.setNote(alive && p.spawnProt > 0 ? 'Spawn shield: fire to drop it' : '');
+    this.touch?.update({
+      charge,
+      dash: p.dashCharges > 0 ? 1 : p.dashCharges < BALANCE.dash.charges ? 1 - p.dashRecharge / BALANCE.dash.rechargeTime : 1,
+      brace: 1 - p.braceCool / BALANCE.brace.cooldown,
+      grab: 1 - Math.min(1, p.grabCool / BALANCE.grab.cooldown),
+      grapple: 1 - Math.min(1, p.grappleCool / BALANCE.grapple.cooldown),
+      u1: 1 - Math.min(1, p.u1Cool / BALANCE.utilities[this.loadout.utils[0]].cooldown),
+      u2: 1 - Math.min(1, p.u2Cool / BALANCE.utilities[this.loadout.utils[1]].cooldown),
+      reloading: p.reloadTimer > 0,
+      features: this.ctx.features,
+      utilIcons: [UTIL_ICONS[UTILITY_INFO[this.loadout.utils[0]].name] ?? '?', UTIL_ICONS[UTILITY_INFO[this.loadout.utils[1]].name] ?? '?'],
+    });
     const k = (a: Action) => this.key(a);
     this.hud.setKeys(
       { dash: k('dash'), brace: k('brace'), grab: k('grab'), grapple: k('grapple'), reload: k('reload'), camera: k('camera'), util1: k('util1'), util2: k('util2') },
@@ -1992,6 +2009,7 @@ export class ClientGame {
   }
 
   private key(a: Action): string {
+    if (this.input.lastDevice === 'touch') return TOUCH_LABELS[a] ?? a;
     if (this.input.lastDevice === 'pad') {
       if (a === 'forward' || a === 'back' || a === 'left' || a === 'right') return 'L-stick';
       return this.input.padLabel(a);
@@ -2004,7 +2022,7 @@ export class ClientGame {
     const inp = this.input;
     inp.assistFriction = 1;
     const k = this.settings.aimAssist;
-    if (inp.lastDevice !== 'pad' || k <= 0 || !this.alive || !this.havePred) return;
+    if ((inp.lastDevice !== 'pad' && inp.lastDevice !== 'touch') || k <= 0 || !this.alive || !this.havePred) return;
     const eye = this.r.camera.position;
     const f = lookDir(inp.yaw, inp.pitch, tmpDir);
     let best: { yaw: number; pitch: number; ang: number; tol: number } | null = null;

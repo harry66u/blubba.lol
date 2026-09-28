@@ -8,6 +8,7 @@ import { Music } from './audio/music';
 import { ClientGame } from './game/clientGame';
 import { InputManager } from './input/input';
 import { PAD } from './input/gamepad';
+import { TouchControls, isTouchDevice } from './input/touch';
 import { Connection } from './net/connection';
 import { AccountClient } from './net/account';
 import { type Quality, Renderer } from './render/renderer';
@@ -24,10 +25,15 @@ const identity = loadIdentity(() => randomGuestName());
 const canvas = document.getElementById('scene') as HTMLCanvasElement;
 const uiRoot = document.getElementById('ui') as HTMLElement;
 
+/** Phones and tablets: on-screen controls instead of mouse and keyboard. */
+const touchMode = isTouchDevice();
+if (touchMode) document.body.classList.add('touch');
+
 function qualityFor(s: Settings): Quality {
   if (s.quality !== 'auto') return s.quality;
-  // Auto starts at medium; dynamic resolution handles the rest.
-  return 'medium';
+  // Phones run hot and on battery: start them light. Elsewhere Medium, and dynamic resolution
+  // handles the rest.
+  return touchMode ? 'low' : 'medium';
 }
 
 const renderer = new Renderer(canvas, qualityFor(settings));
@@ -42,6 +48,9 @@ const input = new InputManager(canvas, settings);
 const net = new Connection();
 const hud = new Hud();
 const game = new ClientGame(renderer, audio, hud, input, net, settings);
+const touch = touchMode ? new TouchControls(input) : null;
+game.touch = touch;
+if (touchMode) input.lastDevice = 'touch';
 game.setLoadout(loadLoadout(), false);
 const account = new AccountClient(identity.guestId);
 hud.setChatLabels(QUICK_CHAT);
@@ -55,7 +64,7 @@ const scoreLayer = document.createElement('div');
 const fpsEl = document.createElement('div');
 fpsEl.className = 'ping';
 fpsEl.style.top = '24px';
-uiRoot.append(hud.root, scoreLayer, menuLayer, overlayLayer, fpsEl);
+uiRoot.append(hud.root, ...(touch ? [touch.root] : []), scoreLayer, menuLayer, overlayLayer, fpsEl);
 
 type Screen = 'menu' | 'room-join' | 'connecting' | 'queue' | 'playing';
 let screen: Screen = 'menu';
@@ -174,8 +183,10 @@ function startJoin(name: string, join: JoinRequest): void {
   rememberName(name);
   audio.unlock();
   audio.uiClick();
-  // Request pointer lock inside the click so the browser allows it.
-  input.requestLock();
+  // Request pointer lock inside the click so the browser allows it. Phones go fullscreen and
+  // sideways instead (where the browser allows it).
+  if (touchMode) goFullscreen();
+  else input.requestLock();
   screen = 'connecting';
   pendingJoin = join;
   clear(menuLayer);
@@ -188,6 +199,18 @@ function startJoin(name: string, join: JoinRequest): void {
     input.exitLock();
     showMenu(err.message || 'Could not connect. Check your Wi-Fi and try again.');
   });
+}
+
+function goFullscreen(): void {
+  const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
+  try {
+    const p = el.requestFullscreen?.({ navigationUI: 'hide' }) ?? el.webkitRequestFullscreen?.();
+    const orientation = window.screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> };
+    const lock = () => orientation?.lock?.('landscape').catch(() => undefined);
+    if (p && typeof (p as Promise<void>).then === 'function') (p as Promise<void>).then(lock, () => undefined);
+  } catch {
+    // Fullscreen isn't available everywhere (iPhone Safari); the game still works.
+  }
 }
 
 function cancelQueue(): void {
@@ -322,12 +345,13 @@ function setOverlay(next: typeof overlay): void {
     default:
       break;
   }
-  input.enabled = screen === 'playing' && (next === 'none' || next === 'results' || next === 'replay') && (input.locked || padPlay);
+  input.enabled = screen === 'playing' && (next === 'none' || next === 'results' || next === 'replay') && (input.locked || padPlay || touchMode);
 }
 
 function applySettings(s: Settings): void {
   saveSettings(s);
   input.applySettings(s);
+  if (touch) touch.sensitivity = s.sensTouch;
   audio.setVolumes(s.volumes);
   game.announcer.setVolume(s.volumes.muted ? 0 : s.volumes.master * s.volumes.announcer);
   const q = qualityFor(s);
@@ -339,7 +363,7 @@ function applySettings(s: Settings): void {
 
 function resume(): void {
   audio.unlock();
-  if (padPlay) setOverlay('none');
+  if (padPlay || touchMode) setOverlay('none');
   else input.requestLock();
 }
 
@@ -449,6 +473,16 @@ input.onScoreboard = (show) => {
   renderScoreboard();
 };
 
+if (touch) {
+  touch.onPause = () => {
+    if (screen === 'playing' && overlay === 'none') setOverlay('pause');
+  };
+  touch.onScoreboard = (show) => {
+    scoreboardOpen = show;
+    renderScoreboard();
+  };
+}
+
 net.handlers = {
   onSnapshot: (snap) => game.onSnapshot(snap),
   onMessage: (msg: ServerMessage) => {
@@ -487,7 +521,7 @@ net.handlers = {
       if (msg.room.isPrivate) setPath(`/${msg.room.challenge ? 'c' : 'r'}/${msg.room.code}`);
       else setPath('/');
       if (msg.name !== identity.name) rememberName(msg.name);
-      setOverlay(input.locked ? 'none' : 'click');
+      setOverlay(input.locked || touchMode ? 'none' : 'click');
       if (msg.room.isPrivate && pendingJoin?.kind === 'create') {
         hud.callout('ROOM ' + msg.room.code, 'Press Esc to copy the invite link', 4);
       } else if (pendingJoin?.kind === 'challenge') {
@@ -546,7 +580,7 @@ game.onMatchChange = (m) => {
     input.exitLock();
   } else if (overlay === 'results' || overlay === 'replay') {
     game.stopReplay();
-    setOverlay(input.locked ? 'none' : 'click');
+    setOverlay(input.locked || touchMode ? 'none' : 'click');
     if (m.phase === 'playing') hud.callout('GO!', 'Blast them off the map!', 1.6);
   }
 };
@@ -586,6 +620,7 @@ function loop(now: number): void {
   last = now;
   const dt = dtMs / 1000;
   input.pollGamepad(dt);
+  touch?.show(screen === 'playing' && overlay === 'none');
   const t0 = performance.now();
   if (lookdev) {
     game.mapView.update(dt, now / 1000);
@@ -628,4 +663,4 @@ if (splash) {
 }
 
 // Expose for debugging and automated tests.
-(window as unknown as { bubba: unknown }).bubba = { game, net, input, renderer, settings, perf, account };
+(window as unknown as { bubba: unknown }).bubba = { game, net, input, renderer, settings, perf, account, touch };

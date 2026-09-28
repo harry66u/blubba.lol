@@ -129,7 +129,9 @@ export class InputManager {
   /** When set, the next controller button press is captured for rebinding. */
   capturePad: ((button: number) => void) | null = null;
   /** Which device was used last (for button prompts and aim assist). */
-  lastDevice: 'kbm' | 'pad' = 'kbm';
+  lastDevice: 'kbm' | 'pad' | 'touch' = 'kbm';
+  /** On-screen touch controls (phones and tablets) merged into each frame. */
+  readonly touch = { moveX: 0, moveZ: 0, fire: false, jump: false, grab: false };
   padConnected = false;
   padIsPlayStation = false;
   private padPrev: boolean[] = [];
@@ -487,8 +489,8 @@ export class InputManager {
       if (this.actionHeld('left')) mx -= 1;
       if (this.actionHeld('forward')) mz += 1;
       if (this.actionHeld('back')) mz -= 1;
-      mx += this.external.moveX;
-      mz += this.external.moveZ;
+      mx += this.external.moveX + this.touch.moveX;
+      mz += this.external.moveZ + this.touch.moveZ;
     }
     const l = Math.hypot(mx, mz);
     if (l > 1) {
@@ -502,9 +504,9 @@ export class InputManager {
     let buttons = 0;
     if (this.enabled) {
       // A click shorter than one frame still registers as a (weak) tap shot.
-      if (this.actionHeld('fire') || this.fireLatch || this.external.fire) buttons |= BTN_FIRE;
-      if (this.actionHeld('jump') || this.external.jump) buttons |= BTN_JUMP;
-      if (this.actionHeld('grab') || this.external.grab) buttons |= BTN_GRAB;
+      if (this.actionHeld('fire') || this.fireLatch || this.external.fire || this.touch.fire) buttons |= BTN_FIRE;
+      if (this.actionHeld('jump') || this.external.jump || this.touch.jump) buttons |= BTN_JUMP;
+      if (this.actionHeld('grab') || this.external.grab || this.touch.grab) buttons |= BTN_GRAB;
     }
     this.fireLatch = false;
     f.buttons = buttons;

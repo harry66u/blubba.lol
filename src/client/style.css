@@ -2098,3 +2098,295 @@ body {
 .callout .main {
   filter: drop-shadow(0 0 14px rgba(255, 255, 255, 0.45));
 }
+
+/* --- Touch controls (phones and tablets) ------------------------------------------------ */
+.touch-controls {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  pointer-events: auto;
+}
+
+.touch-controls .stick-base {
+  position: absolute;
+  left: 110px;
+  top: calc(100% - 110px);
+  width: 124px;
+  height: 124px;
+  margin: -62px 0 0 -62px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16);
+  border: 3px solid rgba(255, 255, 255, 0.45);
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.touch-controls .stick-base.on {
+  opacity: 0.95;
+}
+
+.touch-controls .stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  border: 3px solid var(--ink);
+}
+
+.touch-controls .tbtn {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  border: 3px solid rgba(29, 27, 58, 0.6);
+  color: white;
+  text-shadow: 0 2px 0 var(--ink);
+  font-weight: 900;
+  overflow: hidden;
+  transition: transform 0.06s, background 0.1s;
+}
+
+.touch-controls .tbtn span {
+  position: relative;
+  pointer-events: none;
+}
+
+.touch-controls .tbtn .cd {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0;
+  background: rgba(29, 27, 58, 0.5);
+  pointer-events: none;
+}
+
+.touch-controls .tbtn.down {
+  transform: scale(0.9);
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.touch-controls .tbtn.busy span {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.touch-controls .big {
+  width: 92px;
+  height: 92px;
+  font-size: 19px;
+}
+.touch-controls .mid {
+  width: 64px;
+  height: 64px;
+  font-size: 18px;
+}
+.touch-controls .small {
+  width: 50px;
+  height: 50px;
+  font-size: 21px;
+}
+.touch-controls .tiny {
+  width: 40px;
+  height: 40px;
+  font-size: 16px;
+  border-radius: 12px;
+}
+
+/* The fire button fills with charge. */
+.touch-controls .fire {
+  right: 24px;
+  bottom: 30px;
+  background: conic-gradient(rgba(255, 214, 10, 0.85) calc(var(--charge, 0) * 360deg), rgba(255, 59, 138, 0.55) 0);
+}
+.touch-controls .jump { right: 130px; bottom: 22px; }
+.touch-controls .dash { right: 124px; bottom: 98px; }
+.touch-controls .grapple { right: 36px; bottom: 138px; }
+.touch-controls .reload { right: 96px; bottom: 170px; }
+.touch-controls .brace { right: 206px; bottom: 26px; }
+.touch-controls .grab { right: 202px; bottom: 90px; }
+.touch-controls .util1 { right: 36px; bottom: 202px; }
+.touch-controls .util2 { right: 158px; bottom: 164px; }
+.touch-controls .pause { left: 12px; top: 10px; }
+.touch-controls .score { left: 60px; top: 10px; }
+.touch-controls .camera { left: 108px; top: 10px; }
+.touch-controls .taunt { left: 156px; top: 10px; }
+
+.touch-controls .rotate-hint {
+  display: none;
+}
+
+@media (orientation: portrait) {
+  .touch-controls .rotate-hint {
+    display: flex;
+    position: absolute;
+    inset: 0;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 24px;
+    background: rgba(29, 27, 58, 0.72);
+    color: white;
+    font-size: 26px;
+    line-height: 1.3;
+    z-index: 2;
+  }
+}
+
+/* HUD rearranged around the thumbs on touch screens. */
+body.touch .kc,
+body.touch .ammo-keys,
+body.touch .utils,
+body.touch .chat-wheel {
+  display: none !important;
+}
+
+body.touch .inflation {
+  left: 12px;
+  top: 58px;
+  bottom: auto;
+  transform: scale(0.62);
+  transform-origin: 0 0;
+}
+
+body.touch .ammo {
+  right: 14px;
+  bottom: auto;
+  top: 150px;
+  transform: scale(0.7);
+  transform-origin: 100% 0;
+}
+
+body.touch .killfeed {
+  top: 56px;
+  font-size: 12px;
+}
+
+body.touch .movement {
+  bottom: 12px;
+  transform: translateX(-50%) scale(0.75);
+  transform-origin: 50% 100%;
+}
+
+body.touch .hint {
+  bottom: auto;
+  top: 20%;
+  font-size: 14px;
+}
+
+body.touch .center-note {
+  top: 30%;
+}
+
+@media (max-height: 500px) {
+  body.touch .timer .clock {
+    font-size: 30px;
+  }
+  body.touch .callout .main {
+    font-size: 40px;
+  }
+}
+
+/* Short screens (phones held sideways): compact menu so PLAY is on screen. */
+@media (max-height: 500px) {
+  .menu {
+    justify-content: flex-start;
+    gap: 6px;
+    padding: 6px 8px 12px;
+    overflow-y: auto;
+  }
+  .logo {
+    font-size: 40px;
+    -webkit-text-stroke: 4px var(--ink);
+    text-shadow: 0 4px 0 var(--ink);
+    align-self: flex-start;
+    margin: 2px 0 0 10px;
+  }
+  .tagline {
+    display: none;
+  }
+  .account-chip {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    margin: 0;
+    transform: scale(0.8);
+    transform-origin: 100% 0;
+  }
+  .menu-card {
+    width: min(560px, 94vw);
+    gap: 8px;
+  }
+  .menu-footer {
+    position: static;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .btn.big {
+    font-size: 26px;
+    padding: 8px 40px;
+  }
+}
+
+/* Narrow screens (phones held upright): nothing spills off the sides. */
+@media (max-width: 560px) {
+  .menu-card .row.split .btn {
+    font-size: 14px;
+    padding: 10px 4px;
+  }
+  .menu-footer {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 0 8px;
+  }
+  .menu-footer .btn {
+    padding: 6px 10px;
+    font-size: 14px;
+  }
+}
+
+/* Touch: the tooltip sits on the left under the inflation readout, clear of the crosshair,
+   the event banner and the buttons. */
+body.touch .tip {
+  left: 10px;
+  top: 124px;
+  max-width: 270px;
+  padding: 6px 10px;
+  gap: 8px;
+  border-width: 3px;
+}
+body.touch .tip.off {
+  transform: translateX(-12px);
+}
+body.touch .tip .t {
+  font-size: 14px;
+}
+body.touch .tip .d {
+  font-size: 12px;
+}
+body.touch .ammo {
+  top: 6px;
+  right: 10px;
+  transform: scale(0.6);
+}
+body.touch .killfeed {
+  top: 64px;
+}
+.touch-controls .rotate-hint {
+  background: rgba(29, 27, 58, 0.9);
+}

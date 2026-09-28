@@ -8,6 +8,8 @@ export interface Settings {
   sensTrackpad: number;
   sensMouse: number;
   sensController: number;
+  /** Aim sensitivity when dragging on a touch screen. */
+  sensTouch: number;
   invertY: boolean;
   aimAssist: number;
   quality: QualitySetting;
@@ -28,6 +30,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sensTrackpad: 1,
   sensMouse: 1,
   sensController: 1,
+  sensTouch: 1,
   invertY: false,
   aimAssist: 0.5,
   quality: 'auto',
