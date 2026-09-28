@@ -63,7 +63,8 @@ export interface TeamView {
   percent: boolean;
 }
 
-export function buildMainMenu(name: string, cb: MenuCallbacks, notice?: string, initialMode: PlayMode = 'knockout', accountName: string | null = null): HTMLElement {
+/** `side` sits beside the main card on wide screens and below it on narrow ones (the daily challenges). */
+export function buildMainMenu(name: string, cb: MenuCallbacks, notice?: string, initialMode: PlayMode = 'knockout', accountName: string | null = null, side: HTMLElement | null = null): HTMLElement {
   const err = el('div', { class: 'error-text', text: notice ?? '' });
   const nameInput = nameField(accountName ?? name, cb.onNameChange, err);
   if (accountName) {
@@ -182,7 +183,7 @@ export function buildMainMenu(name: string, cb: MenuCallbacks, notice?: string, 
     el('button', { class: 'btn small ghost', text: 'How to play', on: { click: cb.onHowTo } }),
     el('button', { class: 'btn small ghost', text: 'Settings', on: { click: cb.onSettings } }),
   );
-  return el('div', { class: 'menu' }, logo(), el('div', { class: 'tagline', text: 'Blast your friends off the map!' }), card, footer);
+  return el('div', { class: 'menu' }, logo(), el('div', { class: 'tagline', text: 'Blast your friends off the map!' }), el('div', { class: 'menu-body' }, card, side), footer);
 }
 
 export function buildRoomJoin(

@@ -294,3 +294,18 @@ plan. Built so far:
   orange-gold glow with sparks; a HUD badge shows what's left. In 6-bot matches Turbo Tank
   happens 3-4 times a match and Mega Blast about every other match.
 
+## Daily challenges and streak ✅
+
+- **Three daily challenges** per player, new every UTC day, from a pool of 13: pop players, land
+  hits, play matches, win, grab-and-throw, a long launch, an air combo, a chain-reaction pop,
+  popping the crown holder, and one-per-day mode challenges (a Ball goal, time on a Pump, a Team
+  Knockout win, pops in 1v1). Progress adds up across the day's matches; each pays coins and XP
+  once, shown as a "Daily: ... ✓" line on the results screen.
+- **Daily streak:** the first counted match each day pays a bonus that grows with the streak
+  (10 coins per day, up to 70); miss a day and it starts over.
+- **Main menu card** beside the play panel: the three challenges with progress bars and rewards,
+  the streak, a nudge to keep it going, and the time until new challenges. On narrow screens it
+  sits under the panel, folded to one line. The results screen shows all three challenges'
+  progress after every match that counted.
+- Saved in the profile (`daily`); older profiles pick it up with empty defaults. A new
+  `crownKos` match stat tracks knockouts of the crown wearer.

@@ -68,7 +68,7 @@ export class Api {
 
   view(c: Caller): ProfileView | null {
     if (!c.key) return null;
-    return this.store.view(this.store.profile(c.key), c.account?.name ?? null, !!c.account);
+    return this.store.view(c.key, c.account?.name ?? null, !!c.account);
   }
 
   async handle(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
@@ -131,7 +131,7 @@ export class Api {
         const token = this.store.createSession(made.account.id);
         const key = accountKey(made.account.id);
         this.store.saveProfile(key);
-        return { token, recoveryCode: made.recoveryCode, account: { name: made.account.name }, profile: this.store.view(this.store.profile(key), made.account.name, true) };
+        return { token, recoveryCode: made.recoveryCode, account: { name: made.account.name }, profile: this.store.view(key, made.account.name, true) };
       }
       case '/api/account/login': {
         const b = await this.body(req);
@@ -139,7 +139,7 @@ export class Api {
         const acc = await this.store.login(String(b.name ?? '').trim(), String(b.password ?? ''));
         if (!acc) throw new ApiError(401, 'bad_login', "That name and password don't match.");
         const token = this.store.createSession(acc.id);
-        return { token, account: { name: acc.name }, profile: this.store.view(this.store.profile(accountKey(acc.id)), acc.name, true) };
+        return { token, account: { name: acc.name }, profile: this.store.view(accountKey(acc.id), acc.name, true) };
       }
       case '/api/account/reset': {
         const b = await this.body(req);
@@ -148,7 +148,7 @@ export class Api {
         const done = await this.store.resetPassword(String(b.name ?? '').trim(), String(b.recoveryCode ?? ''), password);
         if (!done) throw new ApiError(401, 'bad_recovery', "That name and recovery code don't match.");
         const token = this.store.createSession(done.account.id);
-        return { token, recoveryCode: done.recoveryCode, account: { name: done.account.name }, profile: this.store.view(this.store.profile(accountKey(done.account.id)), done.account.name, true) };
+        return { token, recoveryCode: done.recoveryCode, account: { name: done.account.name }, profile: this.store.view(accountKey(done.account.id), done.account.name, true) };
       }
       case '/api/account/logout': {
         await this.body(req);

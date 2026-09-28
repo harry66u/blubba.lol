@@ -20,6 +20,7 @@ const stats = (over: Partial<Record<string, number>> = {}) => ({
   stomps: 0,
   goals: 0,
   pumpTime: 0,
+  crownKos: 0,
   ...over,
 });
 

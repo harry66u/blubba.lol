@@ -1,5 +1,6 @@
 import { MODE_INFO, type ModeId } from '../../shared/game/modes';
 import { type ProgressReport, UNLOCKS, tierFor } from '../../shared/economy';
+import { DAILY, type DailyChallengeView, type DailyView } from '../../shared/daily';
 import { MOD_INFO, type ModId, UTILITY_INFO, type UtilityId } from '../../shared/loadout';
 import { checkName } from '../../shared/names';
 import type { AccountClient, LeaderboardRow } from '../net/account';
@@ -133,6 +134,108 @@ export function buildAccountChip(account: AccountClient, onAccount: () => void, 
   return chip;
 }
 
+// --- Daily challenges ----------------------------------------------------------------------------
+
+function dailyCount(c: DailyChallengeView): string {
+  return `${Math.floor(c.progress)}/${c.target}${c.unit ? ` ${c.unit}` : ''}`;
+}
+
+function dailyBar(c: DailyChallengeView): HTMLElement {
+  return el('div', { class: 'bar' }, el('div', { style: { width: `${Math.min(100, Math.round((c.progress / c.target) * 100))}%` } }));
+}
+
+function untilText(sec: number): string {
+  const mins = Math.max(1, Math.ceil(sec / 60));
+  const h = Math.floor(mins / 60);
+  return h ? `${h}h ${mins % 60}m` : `${mins}m`;
+}
+
+/** What the streak line says: a nudge to play today, or a pat on the back. */
+function streakHint(d: DailyView): string {
+  if (d.playedToday) return d.streak > 1 ? `${d.streak} days in a row! See you tomorrow.` : 'Streak started! See you tomorrow.';
+  const bonus = DAILY.streakCoins * Math.min(d.streak + 1, DAILY.streakCap);
+  return d.streak ? `Play today for streak day ${d.streak + 1}: +${bonus} 🪙` : `Start a streak today: +${bonus} 🪙`;
+}
+
+/**
+ * Today's three challenges and the play streak, for the main menu. Beside the main card on wide
+ * screens; on narrow ones it folds into one line you can tap open.
+ */
+export function buildDailyCard(account: AccountClient): HTMLElement {
+  const card = el('div', { class: 'panel daily-card interactive' });
+  const countdown = el('div', { class: 'reset' });
+  let open = false;
+  let refreshing = false;
+  const tick = () => {
+    const d = account.profile.daily;
+    const left = d.resetsIn - (Date.now() - account.profileAt) / 1000;
+    countdown.textContent = `New challenges in ${untilText(Math.max(0, left))}`;
+    // Midnight (UTC) passed while the menu was open: fetch the new day's challenges.
+    if (left <= 0 && d.challenges.length && !refreshing) {
+      refreshing = true;
+      void account
+        .refresh()
+        .catch(() => undefined)
+        .finally(() => (refreshing = false));
+    }
+  };
+  const draw = () => {
+    clear(card);
+    const d = account.profile.daily;
+    // Nothing to show until the server has answered (avoids flashing an empty card).
+    card.classList.toggle('hidden', !d.challenges.length);
+    card.classList.toggle('open', open);
+    const done = d.challenges.filter((c) => c.done).length;
+    const head = el(
+      'button',
+      { class: 'daily-head', attrs: { 'aria-expanded': String(open) }, on: { click: () => ((open = !open), draw()) } },
+      el('span', { class: 'ttl', text: 'Daily challenges' }),
+      el('span', { class: 'count', text: `${done}/${d.challenges.length}` }),
+      el('span', { class: `streak${d.streak ? '' : ' off'}`, text: `🔥 ${d.streak}`, attrs: { title: `Daily streak: ${d.streak} day${d.streak === 1 ? '' : 's'} in a row` } }),
+      el('span', { class: 'caret', text: '▾' }),
+    );
+    const rows = el('div', { class: 'daily-rows' });
+    for (const c of d.challenges) {
+      rows.append(
+        el(
+          'div',
+          { class: `daily-row${c.done ? ' done' : ''}` },
+          el('div', { class: 'top' }, el('span', { class: 'lbl', text: c.label }), el('span', { class: 'rw', text: c.done ? '✓' : `+${c.coins} 🪙` })),
+          el('div', { class: 'bottom' }, dailyBar(c), el('span', { class: 'n', text: c.done ? 'Done!' : dailyCount(c) })),
+        ),
+      );
+    }
+    add(card, head, rows, el('div', { class: 'daily-foot' }, el('div', { class: `streak-hint${d.playedToday ? '' : ' nudge'}`, text: streakHint(d) }), countdown));
+    tick();
+  };
+  // Menus are rebuilt often; stop listening once this card is gone.
+  const off = account.onChange(() => (card.isConnected ? draw() : stop()));
+  const timer = window.setInterval(() => (card.isConnected ? tick() : stop()), 20_000);
+  const stop = () => {
+    off();
+    window.clearInterval(timer);
+  };
+  draw();
+  return card;
+}
+
+/** Compact progress on all three challenges, for the results screen. */
+function buildDailyMini(d: DailyView): HTMLElement | null {
+  if (!d.challenges.length) return null;
+  return el(
+    'div',
+    { class: 'daily-mini' },
+    el('div', { class: 'label' }, 'Daily challenges', el('span', { class: 'streak', text: d.streak ? ` · 🔥 ${d.streak}-day streak` : '' })),
+    el(
+      'div',
+      { class: 'cells' },
+      ...d.challenges.map((c) =>
+        el('div', { class: `cell${c.done ? ' done' : ''}` }, el('div', { class: 'lbl', text: c.label }), dailyBar(c), el('div', { class: 'n', text: c.done ? '✓ Done' : dailyCount(c) })),
+      ),
+    ),
+  );
+}
+
 const MODE_ORDER: ModeId[] = ['knockout', 'teamKnockout', 'ball', 'pump', 'duel'];
 
 /** Profile: level, coins, rank, lifetime stats, and the ranked leaderboard. */
@@ -255,6 +358,8 @@ export function buildProgressBox(r: ProgressReport, isGuest: boolean, onSignup: 
     const tier = tierFor(r.rating.after);
     box.append(el('div', { class: `rating-change ${d >= 0 ? 'up' : 'down'}`, text: `Rating ${r.rating.before} → ${r.rating.after} (${d >= 0 ? '+' : ''}${d}) · ${tier.name}` }));
   }
+  // Only matches that counted moved the challenges along.
+  if (r.reward.xp) add(box, buildDailyMini(p.daily));
   if (isGuest) {
     box.append(
       el(

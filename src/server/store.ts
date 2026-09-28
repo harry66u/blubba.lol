@@ -13,6 +13,7 @@ import {
   levelForXp,
   sanitizeCosmetics,
 } from '../shared/economy';
+import { type DailyState, dailyView, emptyDaily, sanitizeDaily } from '../shared/daily';
 
 const scrypt = promisify(scryptCb) as (password: string, salt: Buffer, keylen: number) => Promise<Buffer>;
 
@@ -27,6 +28,8 @@ export interface ProfileData {
   rankedGames: number;
   /** UTC day (YYYY-MM-DD) of the last win, for the first-win-of-the-day bonus. */
   lastWinDay: string;
+  /** Today's challenges and the daily play streak. */
+  daily: DailyState;
 }
 
 export interface Account {
@@ -35,7 +38,7 @@ export interface Account {
 }
 
 export function newProfile(): ProfileData {
-  return { xp: 0, coins: 0, owned: [], cosmetics: { ...DEFAULT_COSMETICS }, stats: emptyStats(), rating: RANKED.start, rankedGames: 0, lastWinDay: '' };
+  return { xp: 0, coins: 0, owned: [], cosmetics: { ...DEFAULT_COSMETICS }, stats: emptyStats(), rating: RANKED.start, rankedGames: 0, lastWinDay: '', daily: emptyDaily() };
 }
 
 export const guestKey = (guestId: string) => `g:${guestId}`;
@@ -222,6 +225,8 @@ export class Store {
         const parsed = JSON.parse(row.data) as Partial<ProfileData>;
         data = { ...data, ...parsed, stats: { ...emptyStats(), ...(parsed.stats ?? {}) } };
         data.cosmetics = sanitizeCosmetics(data.cosmetics, data.owned);
+        // Profiles saved before daily challenges existed have no `daily` (sanitize fills it in).
+        data.daily = sanitizeDaily(parsed.daily);
       } catch {
         // Corrupt row: start over rather than crash.
       }
@@ -255,7 +260,9 @@ export class Store {
     this.db.prepare('DELETE FROM profiles WHERE key = ?').run(from);
   }
 
-  view(data: ProfileData, name: string | null, isAccount: boolean): ProfileView {
+  /** The profile as its owner sees it. Takes the key because the day's challenges are picked from it. */
+  view(key: string, name: string | null, isAccount: boolean, now = Date.now()): ProfileView {
+    const data = this.profile(key);
     const lv = levelForXp(data.xp);
     return {
       name,
@@ -270,6 +277,7 @@ export class Store {
       stats: data.stats,
       rating: isAccount ? data.rating : null,
       rankedGames: data.rankedGames,
+      daily: dailyView(data.daily, key, now),
     };
   }
 
