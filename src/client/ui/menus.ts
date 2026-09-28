@@ -531,15 +531,32 @@ export function buildResults(
   );
 }
 
-export function buildHowTo(onClose: () => void, bindings: Record<Action, string[]> = DEFAULT_BINDINGS, padLabels?: Record<string, string>): HTMLElement {
+export function buildHowTo(onClose: () => void, bindings: Record<Action, string[]> = DEFAULT_BINDINGS, padLabels?: Record<string, string>, touch = false): HTMLElement {
   const grid = el('div', { class: 'controls-grid' });
   const row = (keys: string[], what: string) => grid.append(el('div', {}, ...keys.map((k) => el('span', { class: 'key', text: k, style: 'margin-right:4px' }))), el('div', { text: what }));
-  row(['W', 'A', 'S', 'D'], 'Move');
-  row(['Trackpad'], 'Aim (or mouse)');
-  for (const a of ['fire', 'jump', 'dash', 'brace', 'grapple', 'grab', 'reload', 'util1', 'util2', 'camera', 'taunt', 'chat', 'scoreboard'] as Action[]) {
-    row(bindings[a].slice(0, 2).map(codeLabel), ACTION_LABELS[a]);
+  if (touch) {
+    row(['Left thumb'], 'Move (the stick appears where you touch)');
+    row(['Drag right side'], 'Aim');
+    row(['FIRE'], 'Fire (hold to charge, drag to aim while charging)');
+    row(['JUMP'], 'Jump / double jump');
+    row(['💨'], 'Dash');
+    row(['🛡️'], 'Brace (right before a hit)');
+    row(['✊'], 'Grab / catch a ledge');
+    row(['🪝'], 'Grapple');
+    row(['↻'], 'Reload');
+    row(['🟣 💥'], 'Your two gadgets');
+    row(['🎥'], 'First / third person');
+    row(['💬'], 'Quick chat');
+    row(['🏆'], 'Scoreboard (hold)');
+    row(['❚❚'], 'Pause');
+  } else {
+    row(['W', 'A', 'S', 'D'], 'Move');
+    row(['Trackpad'], 'Aim (or mouse)');
+    for (const a of ['fire', 'jump', 'dash', 'brace', 'grapple', 'grab', 'reload', 'util1', 'util2', 'camera', 'taunt', 'chat', 'scoreboard'] as Action[]) {
+      row(bindings[a].slice(0, 2).map(codeLabel), ACTION_LABELS[a]);
+    }
+    row(['Esc'], 'Menu');
   }
-  row(['Esc'], 'Menu');
   return el(
     'div',
     { class: 'overlay interactive' },

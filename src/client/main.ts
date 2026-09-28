@@ -319,7 +319,8 @@ function setOverlay(next: typeof overlay): void {
         buildHowTo(
           () => setOverlay(screen === 'playing' ? 'pause' : 'none'),
           input.getBindings(),
-          Object.fromEntries(Object.keys(input.getPadBindings()).map((k) => [k, input.padLabel(k as keyof ReturnType<typeof input.getPadBindings>)])),
+          touchMode ? undefined : Object.fromEntries(Object.keys(input.getPadBindings()).map((k) => [k, input.padLabel(k as keyof ReturnType<typeof input.getPadBindings>)])),
+          touchMode,
         ),
       );
       break;
@@ -494,6 +495,8 @@ if (touch) {
     scoreboardOpen = show;
     renderScoreboard();
   };
+  touch.onChat = (slot) => game.sendChat(slot);
+  touch.setChatLabels(QUICK_CHAT);
 }
 
 net.handlers = {

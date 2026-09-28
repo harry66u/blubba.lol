@@ -2415,3 +2415,24 @@ body.touch .power-badge {
   transform: translateX(-50%);
   font-size: 13px;
 }
+.touch-controls .talk { left: 204px; top: 10px; }
+.touch-chat {
+  position: absolute;
+  left: 12px;
+  top: 58px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  width: min(360px, 60vw);
+  z-index: 3;
+}
+.touch-chat .chat-pick {
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--ink);
+  border: 3px solid var(--ink);
+  border-radius: 12px;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-weight: 900;
+  text-align: center;
+}

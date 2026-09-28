@@ -271,3 +271,26 @@ found, and what changed:
   no console errors. The many prediction corrections in the log come from the headless software
   renderer running at 2-7 fps (the client can't simulate 60 steps a second there).
 
+## Beat-Shell-Shockers pass (docs/PLAN.md)
+
+A run-through as a brand-new player (desktop and phone) found the gaps; `docs/PLAN.md` has the
+plan. Built so far:
+
+- **The honk is gone.** The Air Horn is now the **Air Blaster**: same weapon, but a deep air
+  FWOOMP instead of a horn.
+- **Phones and tablets can play.** Touch devices get on-screen controls: a floating move stick
+  where the left thumb lands, drag anywhere on the right to aim, a fire button that fills as it
+  charges (and aims while held), jump, dash, brace, grab, grapple, reload, both gadgets, camera,
+  taunt, quick chat (tap a preset), scoreboard and pause, all with cooldown rings. PLAY goes
+  straight into the match (fullscreen and landscape where allowed; a "turn your phone sideways"
+  screen in portrait). The HUD moves out from under the thumbs, menus fit phone screens either
+  way up, aim assist helps touch aiming, and there's a Touch aim sensitivity setting.
+- **Runs on school laptops.** Weak and software GPUs (older Intel chips common in Chromebooks,
+  low-end Mali/PowerVR/Adreno) start on Low, and on Auto a machine that stays slow at the lowest
+  resolution steps down a quality level by itself.
+- **Streak rewards.** 3 pops in one life: **Turbo Tank** (full ammo and dashes, double-speed
+  reloads and fire rate for 12 s). 5 pops: **Mega Blast** (next 3 shots at full charge, harder,
+  bigger, wider). 8 pops: both. Everyone sees a callout or kill-feed line and a flickering
+  orange-gold glow with sparks; a HUD badge shows what's left. In 6-bot matches Turbo Tank
+  happens 3-4 times a match and Mega Blast about every other match.
+

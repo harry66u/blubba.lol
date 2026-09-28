@@ -228,3 +228,17 @@ The spec leaves the tech stack and many details open. This file records what was
   `BUBBA_*` environment variables, the default database file, and the npm package name. Renaming
   those would reset everyone's settings and guest progress and break existing deploy configs.
 
+## Beat-Shell-Shockers pass
+
+- **Touch play reuses the controller path:** no pointer lock, input enabled whenever the pause
+  menu is closed. Touch input merges into the same input frames as keyboard and controller, so
+  the server and prediction need nothing new.
+- **Aim by dragging, with the fire button as a second aim pad**, so one thumb can charge and aim
+  at once; aim assist (slowdown and a gentle pull) is on for touch as on controllers.
+- **Phones start on Low graphics** (heat and battery), as do GPUs matched by a list of weak and
+  software renderers. Auto quality also steps down one level when frames stay above ~22 ms at the
+  minimum render scale for two checks in a row.
+- **Streak rewards are small, visible and temporary.** They reward a hot streak without making the
+  streak holder untouchable (the crown already makes them worth triple). They are part of the
+  shared player state (so prediction is exact) and clear when you're popped.
+

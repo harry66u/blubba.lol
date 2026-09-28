@@ -23,7 +23,7 @@ export interface TouchState {
 }
 
 interface ButtonDef {
-  act: Action | 'pause' | 'score';
+  act: Action | 'pause' | 'score' | 'talk';
   label: string;
   cls: string;
 }
@@ -41,6 +41,7 @@ const BUTTONS: ButtonDef[] = [
   { act: 'camera', label: '🎥', cls: 'camera tiny' },
   { act: 'taunt', label: '😜', cls: 'taunt tiny' },
   { act: 'score', label: '🏆', cls: 'score tiny' },
+  { act: 'talk', label: '💬', cls: 'talk tiny' },
   { act: 'pause', label: '❚❚', cls: 'pause tiny' },
 ];
 
@@ -65,6 +66,9 @@ export class TouchControls {
   private visible = false;
   sensitivity = 1;
   onPause: (() => void) | null = null;
+  /** Quick chat: tap a preset (the same eight as the keyboard wheel). */
+  onChat: ((slot: number) => void) | null = null;
+  private readonly chatPanel: HTMLElement;
   onScoreboard: ((show: boolean) => void) | null = null;
 
   constructor(private readonly input: InputManager) {
@@ -91,12 +95,26 @@ export class TouchControls {
       this.root.append(el);
       this.buttons.set(b.act, { el, fill });
     }
+    this.chatPanel = document.createElement('div');
+    this.chatPanel.className = 'touch-chat hidden';
+    this.root.append(this.chatPanel);
     const opts = { passive: false } as AddEventListenerOptions;
     this.root.addEventListener('touchstart', (e) => this.onStart(e), opts);
     this.root.addEventListener('touchmove', (e) => this.onMove(e), opts);
     this.root.addEventListener('touchend', (e) => this.onEnd(e), opts);
     this.root.addEventListener('touchcancel', (e) => this.onEnd(e), opts);
     this.root.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
+  setChatLabels(labels: readonly string[]): void {
+    this.chatPanel.textContent = '';
+    labels.forEach((text, i) => {
+      const b = document.createElement('div');
+      b.className = 'chat-pick';
+      b.dataset.slot = String(i);
+      b.textContent = text;
+      this.chatPanel.append(b);
+    });
   }
 
   show(v: boolean): void {
@@ -129,14 +147,22 @@ export class TouchControls {
     e.preventDefault();
     this.input.lastDevice = 'touch';
     for (const t of Array.from(e.changedTouches)) {
+      const pick = (t.target as HTMLElement | null)?.closest?.('.chat-pick') as HTMLElement | null;
+      if (pick) {
+        this.onChat?.(Number(pick.dataset.slot));
+        this.chatPanel.classList.add('hidden');
+        continue;
+      }
       const btn = (t.target as HTMLElement | null)?.closest?.('.tbtn') as HTMLElement | null;
       if (btn) {
         const act = btn.dataset.act!;
         this.holding.set(t.identifier, act);
         this.setHeld(act, true);
         if (act === 'pause') this.onPause?.();
+        else if (act === 'talk') this.chatPanel.classList.toggle('hidden');
         // A press also latches, so a tap shorter than one frame still fires or jumps.
         else if (act !== 'score') this.input.pressAction(act as Action);
+        if (act !== 'talk') this.chatPanel.classList.add('hidden');
         // The fire button doubles as an aim pad, so you can charge and aim with one thumb.
         if (act === 'fire') this.lookers.set(t.identifier, { x: t.clientX, y: t.clientY });
         continue;
