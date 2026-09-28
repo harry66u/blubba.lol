@@ -1854,6 +1854,9 @@ body {
   gap: 14px;
   margin: 6px 0 12px;
 }
+.level-row > .grow {
+  flex: 1;
+}
 .lv-badge {
   display: grid;
   place-items: center;
