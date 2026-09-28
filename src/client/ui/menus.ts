@@ -50,7 +50,7 @@ function validName(input: HTMLInputElement, errorEl: HTMLElement): string | null
 }
 
 function logo(): HTMLElement {
-  return el('div', { class: 'logo' }, ...'BUBBA'.split('').map((ch) => el('span', { text: ch })));
+  return el('div', { class: 'logo' }, ...'BLUBBA'.split('').map((ch) => el('span', { text: ch })));
 }
 
 /** Colors and names for team scoreboards and results. */
@@ -639,7 +639,7 @@ export function buildSettings(s: Settings, cb: SettingsCallbacks, tab: 'controls
       slider('Effects', 0, 1, 0.01, () => s.volumes.effects, (v) => (s.volumes.effects = v), pct);
       slider('Announcer', 0, 1, 0.01, () => s.volumes.announcer, (v) => (s.volumes.announcer = v), pct);
       slider('Music', 0, 1, 0.01, () => s.volumes.music, (v) => (s.volumes.music = v), pct);
-      body.append(grid, el('p', { style: 'font-size:14px;opacity:.7', text: 'Every sound in Bubba has an on-screen version, so the game is fully playable muted.' }));
+      body.append(grid, el('p', { style: 'font-size:14px;opacity:.7', text: 'Every sound in Blubba has an on-screen version, so the game is fully playable muted.' }));
     } else {
       select('Graphics quality', [
         ['auto', 'Auto (recommended)'],

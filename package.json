@@ -2,7 +2,7 @@
   "name": "bubba",
   "version": "0.1.0",
   "private": true,
-  "description": "Bubba: a browser multiplayer FPS where inflatable tube men blast each other off floating maps.",
+  "description": "Blubba: a browser multiplayer FPS where inflatable tube men blast each other off floating maps.",
   "type": "module",
   "engines": {
     "node": ">=22.5"

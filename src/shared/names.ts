@@ -32,7 +32,7 @@ const SUBSTRINGS = [
   // compound insults
   'fatass', 'bigass', 'asskick', 'asswipe', 'kissmyass', 'buttface', 'butthead', 'buttmunch', 'assclown', 'asshat',
   // impersonation
-  'admin', 'moderator', 'official', 'bubbastaff', 'developer', 'support',
+  'admin', 'moderator', 'official', 'bubbastaff', 'blubbastaff', 'developer', 'support',
 ];
 
 // Blocked only as a whole word (so "class", "Scunthorpe"-style names still work).

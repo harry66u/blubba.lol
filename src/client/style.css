@@ -216,6 +216,10 @@ body {
 .logo span:nth-child(5) {
   animation-delay: 0.4s;
 }
+.logo span:nth-child(6) {
+  animation-delay: 0.5s;
+  color: var(--pink);
+}
 
 @keyframes bob {
   0%,

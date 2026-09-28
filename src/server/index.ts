@@ -70,7 +70,7 @@ function loadStatic(dir: string): Map<string, StaticFile> {
 
 const files = DEV ? new Map<string, StaticFile>() : loadStatic(CLIENT_DIR);
 if (!DEV && !files.has('/index.html')) {
-  console.warn(`[bubba] no client build found in ${CLIENT_DIR}; run "npm run build" first`);
+  console.warn(`[blubba] no client build found in ${CLIENT_DIR}; run "npm run build" first`);
 }
 
 const store = new Store();
@@ -158,7 +158,7 @@ wss.on('connection', (ws) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`[bubba] server listening on http://localhost:${PORT}${DEV ? ' (dev: client served by Vite on :5173)' : ''}`);
+  console.log(`[blubba] server listening on http://localhost:${PORT}${DEV ? ' (dev: client served by Vite on :5173)' : ''}`);
 });
 
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {

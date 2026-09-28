@@ -41,7 +41,7 @@ export class Connection {
     this.ws = ws;
     this.openPromise = new Promise((resolve, reject) => {
       ws.onopen = () => resolve();
-      ws.onerror = () => reject(new Error('Could not reach the Bubba server.'));
+      ws.onerror = () => reject(new Error('Could not reach the Blubba server.'));
     });
     ws.onmessage = (e) => this.onMessage(e);
     ws.onclose = (e) => {

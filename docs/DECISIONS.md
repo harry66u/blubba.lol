@@ -221,3 +221,10 @@ The spec leaves the tech stack and many details open. This file records what was
 - **1v1 self-falls score for the rival.** With only two players, a fall with no recent attacker
   has an obvious beneficiary; otherwise a duel can run out the clock at 0-0.
 
+## Name
+
+- The game is called **Blubba** (title, logo, menus and messages). Internal names keep "bubba"
+  on purpose: browser save keys (`bubba.settings.v1`, the guest id, the login token), the
+  `BUBBA_*` environment variables, the default database file, and the npm package name. Renaming
+  those would reset everyone's settings and guest progress and break existing deploy configs.
+

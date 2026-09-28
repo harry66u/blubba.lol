@@ -1,4 +1,4 @@
-# Bubba
+# Blubba
 
 A browser-based multiplayer PvP shooter where inflatable tube men blast each other off floating
 maps with air-powered weapons. No health bar: every hit inflates you (bigger, lighter, easier to
@@ -114,8 +114,8 @@ VPS). Serverless/edge platforms without persistent WebSockets (e.g. Vercel funct
 for the game server. A `Dockerfile` is included:
 
 ```bash
-docker build -t bubba .
-docker run -p 8080:8080 -v bubba-data:/data bubba
+docker build -t blubba .
+docker run -p 8080:8080 -v blubba-data:/data blubba
 ```
 
 The `/data` volume holds the SQLite database (accounts, progress, reports). Run a single server

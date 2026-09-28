@@ -159,7 +159,7 @@ export class Lobby {
       ws.send(JSON.stringify({ type: 'error', code, message } satisfies ServerMessage));
       ws.close(4000, code);
     };
-    if (msg.v !== PROTOCOL_VERSION) return fail('version', 'A new version of Bubba is out. Refresh the page!');
+    if (msg.v !== PROTOCOL_VERSION) return fail('version', 'A new version of Blubba is out. Refresh the page!');
     const guestId = validGuestId(msg.guestId) ? msg.guestId : '';
     const account = this.store.sessionAccount(msg.token);
     const name = account ? account.name : this.guestName(typeof msg.name === 'string' ? msg.name : '');
