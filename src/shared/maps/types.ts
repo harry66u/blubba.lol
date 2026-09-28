@@ -54,7 +54,7 @@ export interface BouncePadDef {
 
 /** Client-only scenery. */
 export interface DecorDef {
-  type: 'car' | 'tubeMan' | 'sign' | 'pole' | 'balloons' | 'bunting' | 'cone' | 'tires' | 'lines' | 'flag' | 'palm' | 'net' | 'turret' | 'umbrella';
+  type: 'car' | 'tubeMan' | 'sign' | 'pole' | 'balloons' | 'bunting' | 'cone' | 'tires' | 'lines' | 'flag' | 'palm' | 'net' | 'turret' | 'umbrella' | 'ferrisWheel';
   x: number;
   y: number;
   z: number;
@@ -94,6 +94,8 @@ export interface MapDef {
   blast: BlastZone;
   decor: DecorDef[];
   theme: MapTheme;
+  /** How the main deck tops are painted: parking lines (default) or boardwalk planks. */
+  deck?: 'parking' | 'planks';
   /** Spots where soda cans (and the rare pin) appear. */
   pickups: [number, number, number][];
   /** Spawn points per team (x, y, z) for team modes; falls back to `spawns`. */

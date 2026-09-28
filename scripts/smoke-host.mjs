@@ -21,7 +21,7 @@ await page.click('text=PRIVATE ROOM');
 await page.waitForFunction(() => window.bubba?.game?.active, null, { timeout: 60000 });
 const lock = () => page.evaluate(() => { const b = window.bubba; b.input.locked = true; b.input.enabled = true; document.querySelectorAll('.click-to-play').forEach((e) => e.remove()); });
 await lock();
-for (const [mode, mapId] of [['knockout', 'garage'], ['knockout', 'bounceHouse'], ['teamKnockout', 'bounceHouse']]) {
+for (const [mode, mapId] of [['knockout', 'garage'], ['knockout', 'bounceHouse'], ['knockout', 'pier'], ['teamKnockout', 'bounceHouse']]) {
   await page.evaluate(([mode, mapId]) => window.bubba.net.send({ type: 'host', action: 'settings', settings: { mode, mapId, bots: true } }), [mode, mapId]);
   await page.waitForFunction((m) => window.bubba.game.map.id === m && window.bubba.game.pred.mode !== 4, mapId, { timeout: 30000 });
   await lock();

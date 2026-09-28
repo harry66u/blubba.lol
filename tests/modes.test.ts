@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { BALANCE } from '../src/shared/balance';
 import type { GameEvent } from '../src/shared/game/events';
 import { GameSim, type ModeId, type SimPlayer } from '../src/shared/game/sim';
-import { getMap, mapForMode } from '../src/shared/maps';
+import { KNOCKOUT_MAPS, getMap, mapForMode } from '../src/shared/maps';
 import { DEALERSHIP } from '../src/shared/maps/dealership';
-import { createPlayerState } from '../src/shared/player';
+import { MODE_DEAD, createPlayerState } from '../src/shared/player';
 import { decodeSnapshot, encodeSnapshot } from '../src/shared/protocol';
 import { fitMap, sanitizeSettings } from '../src/server/room';
 import { Driver, run } from './helpers';
@@ -219,6 +219,8 @@ describe('mode plumbing', () => {
     expect(fitMap({ ...base, mode: 'pump', mapId: 'garage' }).mapId).toBe('pumpArena');
     expect(fitMap({ ...base, mapId: 'ballArena' }).mapId).toBe('dealership');
     expect(fitMap({ ...base, mode: 'duel', mapId: 'bounceHouse' }).mapId).toBe('bounceHouse');
+    expect(fitMap({ ...base, mode: 'teamKnockout', mapId: 'pier' }).mapId).toBe('pier');
+    expect(sanitizeSettings({ mapId: 'pier' })).toEqual({ mapId: 'pier' });
     expect(sanitizeSettings({ mode: 'nope' as ModeId, mapId: '__proto__' })).toEqual({});
   });
 
@@ -232,6 +234,55 @@ describe('mode plumbing', () => {
         sim.drainEvents();
       }
       if (mode === 'pump') expect(sim.pumpGame!.fill[0] + sim.pumpGame!.fill[1]).toBeGreaterThan(0.02);
+    }
+  });
+});
+
+describe('knockout maps', () => {
+  it.each(KNOCKOUT_MAPS)('%s: spawns and pickups sit on open ground away from the edges', (id) => {
+    const sim = new GameSim({ map: getMap(id), mode: 'knockout' });
+    const w = sim.world;
+    for (const [x, y, z] of sim.map.spawns) {
+      expect(w.groundBelow(x, y + 0.1, z, 0.2)).toBe(y);
+      // Room to stand, and floor a few steps away in every direction.
+      expect(w.boxBlocked(x - 0.5, y + 0.05, z - 0.5, x + 0.5, y + 2.2, z + 0.5)).toBe(false);
+      for (const [dx, dz] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) expect(w.groundBelow(x + dx, y + 0.1, z + dz, 0.6)).not.toBeNull();
+    }
+    for (const [x, y, z] of sim.map.pickups) expect(w.groundBelow(x, y + 0.1, z, 0.2)).toBe(y);
+  });
+
+  it.each(KNOCKOUT_MAPS)('%s: bounce pads land you on the map, not off it', (id) => {
+    const map = getMap(id);
+    for (const pad of map.bouncePads) {
+      const sim = new GameSim({ map, mode: 'knockout', durationSec: 999 });
+      sim.eventMult = 0;
+      const p = sim.addPlayer('p');
+      const d = new Driver(sim, p);
+      sim.startMatch();
+      place(p, pad.x, pad.y, pad.z);
+      let launched = false;
+      let landed = -1;
+      run(sim, [d], 60 * 5, () => {
+        if (!p.state.onGround) launched = true;
+        else if (launched && landed < 0) landed = p.state.groundId;
+      });
+      expect(launched).toBe(true);
+      expect(p.state.mode).not.toBe(MODE_DEAD);
+      expect(landed).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('bots knock each other off every knockout map', () => {
+    for (const id of KNOCKOUT_MAPS) {
+      const sim = new GameSim({ map: getMap(id), mode: 'knockout', durationSec: 999 });
+      for (let i = 0; i < 6; i++) sim.addBot(0.6);
+      // The first knockout usually lands within 15-25 s; allow plenty of slack.
+      let kos = 0;
+      for (let t = 0; t < 60 * 150 && kos === 0; t++) {
+        sim.step();
+        for (const e of sim.drainEvents()) if (e.t === 'ko' && e.killer >= 0) kos++;
+      }
+      expect(kos, id).toBeGreaterThan(0);
     }
   });
 });
