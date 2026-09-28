@@ -228,3 +228,46 @@ Checks: `npm test` (86 tests, including hit-stop, knockback targets, chase camer
 reticle aim, and sound model pitch/length checks), `node scripts/smoke-controls.mjs` (hints,
 tooltips, third person, persistence), `node scripts/lookdev.mjs`.
 
+## Playtest pass ✅
+
+`scripts/playtest.mjs` plays a full Knockout match in a real browser: an autopilot drives your
+character like a person would (turns at a human rate, leads shots, charges, strafes, avoids edges,
+recovers, uses abilities and utilities, switches to third person and back) while every game event
+is logged, then it runs out the clock to see the final 30 seconds, results and replay. What it
+found, and what changed:
+
+- **Shots were slow.** The Air Cannon shot flew at 36 m/s (0.4 s on average to reach a target,
+  up to 1.2 s). It now flies at 75 m/s with the same ~49 m range, and draws as a stretched streak
+  with a continuous trail.
+- **Hits didn't move people enough.** The autopilot landed 31 hits for 1 knockout. Most real
+  shots are partial charges, and launch distance grows with the square of shot power. Quick
+  taps now carry 50% power (was 35%), full charge takes 0.6 s (was 0.75 s), and base knockback
+  is 9 (was 7.6). Early hits travel about a third further (3.2, 4.1, 5.7, 9.1 m); a full-charge
+  fight still takes 5 hits from the middle (4 toward the short edge), and a typical fight (random
+  charge, mixed angles) takes about 5.8 landed hits per knockout instead of 7
+  (`npx tsx scripts/knockback-sweep.ts` prints both).
+- **More impact on every shot.** Firing kicks the view up and punches the field of view, with a
+  deeper, sharper shot sound. Your hit confirmation (marker, crunch, shake, gun freeze) now plays
+  the moment the server confirms it instead of after the interpolation delay; markers and sounds
+  scale with how hard the hit was. Hit-stop is longer (60-120 ms), impact bursts are bigger with
+  a colored flash and speed streaks, and getting hit hard flashes your screen.
+- **Hit popup showed the wrong number.** It printed the target's total inflation with a "+" (so
+  "+99%" on someone at 99%). It now shows their new total, colored green to red.
+- **Your own dash cloud covered the screen** in first person. Particles that drift right up to
+  the camera now shrink away.
+- **1v1s could stall at 0-0.** Falling off on your own gave your rival nothing. In 1v1 it now
+  scores for them (kill feed: "X fell off · Y +1").
+- **The replay's Skip button couldn't be clicked.** The mouse stayed pointer-locked (hidden, and
+  every click went to the game) after a match ended, so Skip and the results screen needed Esc
+  first. The match end now releases the mouse; the next match's "click to play" takes it back.
+- **Replay camera** hides bystanders that end up right against the lens.
+- **Small windows:** the kill feed moves below the clock and the first-use tooltip gets compact
+  instead of covering the middle of the screen.
+- Second run with everything above: shots reach targets in 0.23 s on average (was 0.42 s),
+  accuracy 45% (was 34%), 6.4 landed hits per knockout (was 31), and the autopilot finished
+  first with 10 knockouts.
+- Checked and fine: random events (Max Pressure, Giant Fan), chain reactions, crown, callouts,
+  final 30 seconds, results and replay, third person in a real fight, control hints and tooltips,
+  no console errors. The many prediction corrections in the log come from the headless software
+  renderer running at 2-7 fps (the client can't simulate 60 steps a second there).
+

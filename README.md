@@ -51,6 +51,7 @@ node scripts/smoke-modes.mjs                    # every mode + the challenge-lin
 BUBBA_DEBUG=1 npm start & node scripts/smoke-host.mjs   # host controls and the team results screen
 BUBBA_DEBUG=1 npm start & node scripts/smoke-accounts.mjs  # sign-up, store, rewards, chat, ranked
 node scripts/smoke-controls.mjs                 # control hints, tooltips, third-person camera
+BUBBA_DEBUG=1 npm start & node scripts/playtest.mjs  # autopilot plays a full match, logs everything
 npx tsx scripts/knockback-sweep.ts              # launch distance per hit and hits-to-knockout
 npx tsx scripts/chaos-report.ts                 # how often events, chains, crown, revenge happen
 QUALITY=medium node scripts/lookdev.mjs         # screenshot of the ?lookdev tube man lineup

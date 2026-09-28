@@ -206,3 +206,18 @@ The spec leaves the tech stack and many details open. This file records what was
   it off. Not yet measured on real laptop GPUs (the build environment only has a software
   renderer).
 
+## Playtest pass
+
+- **"More impact" is mostly feel, plus a knockback bump.** The "about five clean hits" target
+  stays (5 from the middle, 4 toward the 20 m short edge). Within it, early hits push further,
+  quick taps matter more, and every shot and hit got more feedback. The balance test for the short
+  edge now accepts 4-6.
+- **Your own hit confirmation skips the interpolation delay.** Other players are drawn about
+  70-120 ms in the past, so hit events were waiting for that timeline. The marker, sound, shake
+  and gun freeze now play as soon as the server's hit arrives; the burst on the target still
+  plays where you see them.
+- **View punch doesn't move your aim.** The camera kicks up and springs back in about a fifth of a
+  second, but the shot direction comes from your aim, not the kicked camera.
+- **1v1 self-falls score for the rival.** With only two players, a fall with no recent attacker
+  has an obvious beneficiary; otherwise a duel can run out the clock at 0-0.
+
