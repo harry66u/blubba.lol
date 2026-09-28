@@ -724,7 +724,7 @@ export class ClientGame {
           this.showBlast(e.x, e.y, e.z, e.r, e.power);
           if (e.k) {
             fx.confettiBurst(e.x, e.y, e.z, 25, [0x2ec5ff, 0xffffff, 0x9fe8ff]);
-            this.hud.popup(tmpV.set(e.x, e.y + 1.5, e.z), 'KA-WHOOSH!', '#2ec5ff', 1.2, 1);
+            this.hud.popup(tmpV.set(e.x, e.y + 1.5, e.z), 'KA-WHOOSH!', '#2ec5ff', 1.2, 1, e.owner !== you);
           }
         }
         break;
@@ -742,7 +742,7 @@ export class ClientGame {
           fx.honkBlast(e.x, e.y, e.z, e.dx, e.dy, e.dz, e.range, e.cone, e.power, this.r.camera.position);
           fx.muzzleFlash(e.x, e.y, e.z, e.dx, e.dy, e.dz, e.power);
           a.airBlast(e.power, [e.x, e.y, e.z]);
-          this.hud.popup(tmpV.set(e.x + e.dx * 2, e.y + e.dy * 2 + 0.5, e.z + e.dz * 2), 'FWOOMP!', '#ffd60a', 0.8 + e.power * 0.6, 0.8);
+          this.hud.popup(tmpV.set(e.x + e.dx * 2, e.y + e.dy * 2 + 0.5, e.z + e.dz * 2), 'FWOOMP!', '#ffd60a', 0.8 + e.power * 0.6, 0.8, true);
         }
         break;
       }
@@ -776,7 +776,7 @@ export class ClientGame {
       case 'vacuum':
         this.entities.addVacuum(e.x, e.y, e.z, e.until, BALANCE.utilities.vacuumGrenade.radius);
         a.suck([e.x, e.y, e.z]);
-        this.hud.popup(tmpV.set(e.x, e.y + 1.5, e.z), 'SHLURP!', '#c49bff', 1.1, 1.1);
+        this.hud.popup(tmpV.set(e.x, e.y + 1.5, e.z), 'SHLURP!', '#c49bff', 1.1, 1.1, true);
         if (this.remoteShots.has(e.id)) {
           fx.removeProjectile(e.id);
           this.remoteShots.delete(e.id);
@@ -806,7 +806,7 @@ export class ClientGame {
           if (e.kind === 'soda') {
             a.canOpen(e.by === you ? null : [e.x, e.y, e.z]);
             window.setTimeout(() => a.burp(e.by === you ? null : [e.x, e.y, e.z]), 250);
-            if (p) this.hud.popup(tmpV.set(p.x, p.y + 2.6, p.z), 'BUURRP!', '#b8f06a', 1.1, 1.2);
+            if (p) this.hud.popup(tmpV.set(p.x, p.y + 2.6, p.z), 'BUURRP!', '#b8f06a', 1.1, 1.2, e.by !== you);
             if (e.by === you) this.hud.toast('Soda! Dashes refilled.', 1500);
           } else {
             a.koConfirm();
@@ -950,7 +950,7 @@ export class ClientGame {
           this.hud.popup(tmpV.set(e.x, e.y + 1.2, e.z), 'BRACED!', '#9fe8ff', 1, 0.9);
           if (e.target === you) this.hud.flash('rgba(120, 220, 255, 0.55)', 350);
         } else if (e.direct && (e.attacker === you || e.target === you || e.speed > 18)) {
-          this.hud.popup(tmpV.set(e.x, e.y + 1.6, e.z), e.speed > 20 ? 'WHAM!' : 'BOP!', '#ffffff', 0.7 + Math.min(0.6, e.speed * 0.02), 0.7);
+          this.hud.popup(tmpV.set(e.x, e.y + 1.6, e.z), e.speed > 20 ? 'WHAM!' : 'BOP!', '#ffffff', 0.7 + Math.min(0.6, e.speed * 0.02), 0.7, e.attacker !== you && e.target !== you);
         }
         break;
       }
@@ -1054,8 +1054,8 @@ export class ClientGame {
           // Burp is the classic taunt sound; other packs replace it.
           if (style === 'burp' || pack !== 'classic') a.tauntSound(pack, at);
           else a.pop(at);
-          this.hud.popup(tmpV.set(p.x, p.y + 3, p.z), TAUNT_TEXT[style] ?? 'HEY!', style === 'burp' ? '#b8f06a' : '#ffffff', 1.1, 1.2);
-          if (PACK_TEXT[pack]) this.hud.popup(tmpV.set(p.x + 0.8, p.y + 3.8, p.z), PACK_TEXT[pack], '#ffd60a', 0.8, 1.1);
+          this.hud.popup(tmpV.set(p.x, p.y + 3, p.z), TAUNT_TEXT[style] ?? 'HEY!', style === 'burp' ? '#b8f06a' : '#ffffff', 1.1, 1.2, e.id !== you);
+          if (PACK_TEXT[pack]) this.hud.popup(tmpV.set(p.x + 0.8, p.y + 3.8, p.z), PACK_TEXT[pack], '#ffd60a', 0.8, 1.1, e.id !== you);
         }
         break;
       }
@@ -1272,7 +1272,7 @@ export class ClientGame {
       case 'tech':
         fx.fartCloud(e.x, e.y, e.z, vx / sp, vz / sp, e.long);
         a.fart(pos, e.long);
-        this.hud.popup(tmpV.set(e.x, e.y + 1.4, e.z), e.long ? 'PFFFFFFFRRRT!' : 'PFFT!', '#c6f08a', e.long ? 1.2 : 0.8, e.long ? 1.6 : 0.8);
+        this.hud.popup(tmpV.set(e.x, e.y + 1.4, e.z), e.long ? 'PFFFFFFFRRRT!' : 'PFFT!', '#c6f08a', e.long ? 1.2 : 0.8, e.long ? 1.6 : 0.8, true);
         break;
       case 'land':
         fx.groundRing(e.x, e.y, e.z, Math.min(1.5, (e.v ?? 8) / 10));
@@ -1286,7 +1286,7 @@ export class ClientGame {
       case 'pad':
         fx.groundRing(e.x, e.y, e.z, 1.4, 0xff9fd0);
         a.boing(pos, true);
-        this.hud.popup(tmpV.set(e.x, e.y + 2, e.z), 'BOING!', '#ff9fd0', 1, 0.9);
+        this.hud.popup(tmpV.set(e.x, e.y + 2, e.z), 'BOING!', '#ff9fd0', 1, 0.9, true);
         break;
       default:
         break;

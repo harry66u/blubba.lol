@@ -273,6 +273,13 @@ export class Room {
         } else if (msg.action === 'bots' && typeof msg.count === 'number') {
           while (this.sim.bots.size < msg.count && this.playerCount < BALANCE.match.maxPlayers) this.sim.addBot(0.5);
           this.rosterDirty = true;
+        } else if (msg.action === 'streak' && typeof msg.count === 'number') {
+          // Pretend you just reached a knockout streak (to see its reward).
+          const p = this.sim.players.get(conn.playerId);
+          if (p) {
+            p.streak = msg.count;
+            this.sim.streakReward(p);
+          }
         } else if (msg.action === 'endIn' && typeof msg.seconds === 'number') {
           // Jump the match clock forward (to see the final 30 seconds).
           this.sim.phaseEndsAt = this.sim.time + msg.seconds;

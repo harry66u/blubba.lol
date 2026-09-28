@@ -476,7 +476,16 @@ export class Hud {
 
   // --- World-space popups (comic sound-effect text) -----------------------------------------
 
-  popup(pos: THREE.Vector3, text: string, color = '#ffffff', scale = 1, life = 1): void {
+  /**
+   * `minor` popups (other players' flavor text) are skipped when the screen is already busy or
+   * the same word is already showing nearby, so a crowd of bots doesn't bury the action.
+   */
+  popup(pos: THREE.Vector3, text: string, color = '#ffffff', scale = 1, life = 1, minor = false): void {
+    if (minor) {
+      const busy = this.worldPopups.filter((p) => p.life > p.max * 0.3).length >= 4;
+      const dup = this.worldPopups.some((p) => p.el.textContent === text && p.life > p.max * 0.4 && p.pos.distanceTo(pos) < 5);
+      if (busy || dup) return;
+    }
     const e = el('div', { class: 'popup', text });
     e.style.color = color;
     this.popups.append(e);

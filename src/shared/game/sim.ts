@@ -1903,7 +1903,7 @@ export class GameSim {
   }
 
   /** Turbo Tank at 3 pops in one life, Mega Blast at 5, both again at 8. */
-  private streakReward(p: SimPlayer): void {
+  streakReward(p: SimPlayer): void {
     const B = BALANCE.streaks;
     const s = p.state;
     if (s.mode === MODE_DEAD) return;
