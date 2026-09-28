@@ -24,9 +24,9 @@ function hash(n: number): number {
   return s - Math.floor(s);
 }
 
-type DeckStyle = 'parking' | 'field' | 'quilt' | 'plain';
+type DeckStyle = 'parking' | 'field' | 'quilt' | 'plain' | 'planks';
 
-/** Canvas texture for a deck top: painted parking lines (or a pitch, or quilting) and hazard edges. */
+/** Canvas texture for a deck top: painted parking lines (or a pitch, quilting, or planks) and hazard edges. */
 function deckTexture(w: number, d: number, color: number, style: DeckStyle): THREE.CanvasTexture {
   const ppm = 24; // pixels per meter
   const cw = Math.min(2048, Math.round(w * ppm));
@@ -85,6 +85,19 @@ function deckTexture(w: number, d: number, color: number, style: DeckStyle): THR
     }
     g.fillStyle = 'rgba(0,0,0,0.05)';
     for (let x = 0; x < w; x += 2) for (let z = 0; z < d; z += 2) if ((x + z) % 4 === 0) g.fillRect(x * sx, z * sz, 2 * sx, 2 * sz);
+  } else if (style === 'planks') {
+    // Boardwalk planks running east-west: a slightly different shade per board, dark seams, and
+    // staggered butt joints.
+    const board = 0.8;
+    for (let row = 0; row * board < d; row++) {
+      const z = row * board;
+      const shade = (hash(row * 3.7 + w) - 0.5) * 0.14;
+      g.fillStyle = shade > 0 ? `rgba(255,240,220,${shade})` : `rgba(60,30,10,${-shade})`;
+      g.fillRect(0, z * sz, cw, board * sz);
+      g.fillStyle = 'rgba(70,40,20,0.45)';
+      g.fillRect(0, z * sz, cw, 0.08 * sz);
+      for (let x = hash(row * 1.9 + d) * 5; x < w; x += 3 + hash(row * 7.1 + x) * 4) g.fillRect(x * sx, z * sz, 0.08 * sx, board * sz);
+    }
   } else if (style === 'parking') {
     g.strokeStyle = 'rgba(255,255,255,0.85)';
     g.lineWidth = 0.14 * sx;
@@ -179,6 +192,7 @@ export class MapView {
   private readonly pads: THREE.Object3D[] = [];
   private readonly clouds = new THREE.Group();
   private readonly balloons: THREE.Object3D[] = [];
+  private readonly wheels: { wheel: THREE.Object3D; cars: THREE.Object3D[] }[] = [];
   private readonly solidMeshes = new Map<number, THREE.Object3D>();
   private readonly deckTops: THREE.MeshStandardMaterial[] = [];
   private fan: THREE.Group | null = null;
@@ -229,7 +243,7 @@ export class MapView {
       }
       return m;
     };
-    const style: DeckStyle = this.map.ball ? 'field' : this.map.pumps ? 'plain' : 'parking';
+    const style: DeckStyle = this.map.ball ? 'field' : this.map.pumps ? 'plain' : this.map.deck === 'planks' ? 'planks' : 'parking';
 
     this.map.solids.forEach((def, id) => {
       if (def.kind === 'hidden') return;
@@ -405,7 +419,7 @@ export class MapView {
       g.position.set(pad.x, pad.y, pad.z);
       g.userData.top = top;
       g.userData.arrow = arrow;
-      this.root.add(g);
+      this.addOnTop(g, pad.x, pad.y, pad.z);
       this.pads.push(g);
     }
   }
@@ -443,8 +457,25 @@ export class MapView {
   private buildDecor(): void {
     for (const d of this.map.decor) {
       const obj = this.makeDecor(d);
-      if (obj) this.root.add(obj);
+      // Cars keep their own collision boxes, so they stay put.
+      if (obj) this.addOnTop(obj, d.x, d.y, d.z, d.type !== 'car');
     }
+  }
+
+  /**
+   * Adds a prop standing at (x, y, z). Props on a piece that sinks in the final 30 seconds go
+   * down with it instead of hanging in the air.
+   */
+  private addOnTop(obj: THREE.Object3D, x: number, y: number, z: number, ride = true): void {
+    const on = this.map.solids.findIndex(
+      (s) => (s.collapse ?? 0) >= 1 && !s.mover && Math.abs(s.max[1] - y) < 0.05 && x >= s.min[0] && x <= s.max[0] && z >= s.min[2] && z <= s.max[2],
+    );
+    const pivot = ride && on >= 0 ? this.solidMeshes.get(on) : undefined;
+    if (pivot) {
+      obj.position.x -= pivot.position.x;
+      obj.position.z -= pivot.position.z;
+      pivot.add(obj);
+    } else this.root.add(obj);
   }
 
   private makeDecor(d: DecorDef): THREE.Object3D | null {
@@ -562,6 +593,8 @@ export class MapView {
         g.position.set(d.x, d.y, d.z);
         return g;
       }
+      case 'ferrisWheel':
+        return this.makeFerrisWheel(d);
       default:
         return null;
     }
@@ -701,6 +734,75 @@ export class MapView {
     return g;
   }
 
+  /** A big ferris wheel on A-frame legs that turns slowly; its cars stay level. Faces +-z. */
+  private makeFerrisWheel(d: DecorDef): THREE.Object3D {
+    const g = new THREE.Group();
+    const r = Number(d.data?.radius ?? 8);
+    // High enough that the lowest car swings past above a standing player's head.
+    const hubY = r + 4.5;
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.4, metalness: 0.2 });
+    const legs: THREE.BufferGeometry[] = [];
+    for (const z of [-1.1, 1.1]) {
+      for (const side of [-1, 1]) {
+        const x0 = side * r * 0.6;
+        const leg = new THREE.CylinderGeometry(0.14, 0.22, Math.hypot(x0, hubY), 8);
+        leg.rotateZ(Math.atan2(x0, hubY));
+        leg.translate(x0 / 2, hubY / 2, z);
+        legs.push(leg);
+      }
+    }
+    const axle = new THREE.CylinderGeometry(0.22, 0.22, 2.6, 10);
+    axle.rotateX(Math.PI / 2);
+    axle.translate(0, hubY, 0);
+    legs.push(axle);
+    const stand = new THREE.Mesh(mergeGeometries(legs.map((l) => l.toNonIndexed()), false)!, frameMat);
+    stand.castShadow = true;
+    // The turning part: two rims joined by spokes, with light bulbs around the edge.
+    const wheel = new THREE.Group();
+    wheel.position.y = hubY;
+    const frame: THREE.BufferGeometry[] = [];
+    const bulbs: THREE.BufferGeometry[] = [];
+    const spokes = 16;
+    for (const z of [-0.7, 0.7]) {
+      frame.push(new THREE.TorusGeometry(r, 0.14, 8, 64).translate(0, 0, z).toNonIndexed());
+      frame.push(new THREE.TorusGeometry(r * 0.3, 0.1, 6, 24).translate(0, 0, z).toNonIndexed());
+      for (let i = 0; i < spokes; i++) {
+        frame.push(new THREE.BoxGeometry(0.09, r, 0.09).translate(0, r / 2, z).rotateZ((i / spokes) * Math.PI * 2).toNonIndexed());
+        const a = ((i + 0.5) / spokes) * Math.PI * 2;
+        bulbs.push(new THREE.SphereGeometry(0.16, 8, 6).translate(Math.cos(a) * r, Math.sin(a) * r, z * 1.25).toNonIndexed());
+      }
+    }
+    frame.push(new THREE.CylinderGeometry(0.6, 0.6, 1.8, 14).rotateX(Math.PI / 2).toNonIndexed());
+    const rim = new THREE.Mesh(mergeGeometries(frame, false)!, frameMat);
+    rim.castShadow = true;
+    const bulbMesh = new THREE.Mesh(mergeGeometries(bulbs, false)!, new THREE.MeshStandardMaterial({ color: 0xfff3b0, emissive: 0xffe066, emissiveIntensity: 0.8 }));
+    wheel.add(rim, bulbMesh);
+    // Cars hang from pins between the rims and swing level as the wheel turns.
+    const cabinMats = [0xff6fa8, 0xffd60a, 0x6fd3ff, 0x9dff6f, 0xc49bff].map((color) => new THREE.MeshStandardMaterial({ color, roughness: 0.35 }));
+    const cabinGeo = new RoundedBoxGeometry(1.3, 1.0, 1.1, 2, 0.22);
+    // Roof and hanger in one mesh per car.
+    const top = mergeGeometries([new THREE.CylinderGeometry(0.2, 0.85, 0.35, 10).translate(0, -0.35, 0).toNonIndexed(), new THREE.CylinderGeometry(0.05, 0.05, 0.4, 6).translate(0, -0.1, 0).toNonIndexed()], false)!;
+    const topMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 });
+    const cars: THREE.Object3D[] = [];
+    const count = 10;
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2;
+      const car = new THREE.Group();
+      car.position.set(Math.cos(a) * r, Math.sin(a) * r, 0);
+      const cabin = new THREE.Mesh(cabinGeo, cabinMats[i % cabinMats.length]);
+      cabin.position.y = -1.0;
+      cabin.castShadow = true;
+      car.add(cabin, new THREE.Mesh(top, topMat));
+      wheel.add(car);
+      cars.push(car);
+    }
+    g.add(stand, wheel);
+    g.position.set(d.x, d.y, d.z);
+    g.rotation.y = d.rotY ?? 0;
+    this.wheels.push({ wheel, cars });
+    return g;
+  }
+
   /** Animates movers, decor tube men, pads, and clouds. `time` should be the game clock. */
   update(dt: number, time: number): void {
     this.time += dt;
@@ -758,6 +860,10 @@ export class MapView {
       }
       const base = b.userData.base as THREE.Vector3;
       b.position.set(base.x + Math.sin(this.time * 1.3 + b.userData.phase) * 0.12, base.y + Math.sin(this.time * 1.7 + b.userData.phase) * 0.1, base.z);
+    }
+    for (const w of this.wheels) {
+      w.wheel.rotation.z = time * 0.16;
+      for (const c of w.cars) c.rotation.z = -w.wheel.rotation.z;
     }
     this.clouds.rotation.y += dt * 0.004;
   }

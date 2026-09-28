@@ -130,9 +130,11 @@ Phases follow spec §14. Each phase is committed separately and playable on its 
   starts a new wait.
 - **Maps**: Sky Motors (dealership), **Top Floor** (rooftop parking garage at sunset with a
   lower deck, ramps, pillars, and a car lift), **Bounce Castle** (a giant inflatable castle: every
-  landing bounces you, trampoline islands outside the gaps), **Beach Blast** (Ball pitch with
-  goals, nets, and umbrellas), and **Pump Station** (two bases, a contested middle island, and
-  giant tube men on pedestals that grow as their team pumps).
+  landing bounces you, trampoline islands outside the gaps), **Sky Pier** (a plank boardwalk with
+  snack stands and a lifeguard tower, a railless pier out to a ferris wheel that crumbles from its
+  far end, a sand island, and two bouncy pool floats, one reached by a ferry raft), **Beach
+  Blast** (Ball pitch with goals, nets, and umbrellas), and **Pump Station** (two bases, a
+  contested middle island, and giant tube men on pedestals that grow as their team pumps).
 - Public knockout rooms rotate maps between matches. Hosts pick mode, map, length, bots, and
   event frequency; Ball and Pump always use their own arenas.
 - Bots play every mode: half of each Ball team plays the ball (gets behind it and shoots toward

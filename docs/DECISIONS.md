@@ -91,6 +91,7 @@ The spec leaves the tech stack and many details open. This file records what was
   revenge. Self-knockouts score nothing.
 - **Final collapse** is deterministic from the match end time: islands sink with constant
   acceleration in order, and the main deck shrinks 30% per side over the last 10 seconds.
+  Scenery and bounce pads standing on a sinking piece go down with it.
 - **Announcer** uses the browser's speech synthesis (no downloads) at the announcer volume; every
   line is also shown as on-screen text.
 - **Grapple** targets players first (with a 0.5 m aim forgiveness for trackpads), then surfaces.
@@ -114,7 +115,7 @@ The spec leaves the tech stack and many details open. This file records what was
   until someone opens the link; when the second human arrives the bot leaves and the match
   restarts from 0-0. The 1v1 queue is public 1v1 rooms: the next person to queue joins whoever
   is waiting.
-- **Map rotation:** public knockout-style rooms move to the next of the three knockout maps when
+- **Map rotation:** public knockout-style rooms move to the next knockout map when
   the results screen ends. The server keeps its tick counter across the swap so client clocks
   and prediction don't glitch.
 - **Colorblind-friendly team colors** swap red/blue for orange/blue (Settings → Graphics); the
