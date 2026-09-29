@@ -34,6 +34,8 @@ export class AccountClient {
   account: { name: string; id?: number } | null = null;
   /** Your face scan: its version (null = none), and whether reports or a moderator hid it. */
   face: FaceStatus | null = null;
+  /** "I'm the real BOR": the character you lent your face to, and whether an admin approved it. */
+  character: { character: string; approved: boolean } | null = null;
   profile: ProfileView = AccountClient.blankProfile();
   /** False until the first /api/me answer (the menu shows placeholders until then). */
   loaded = false;
@@ -109,8 +111,9 @@ export class AccountClient {
   }
 
   async refresh(): Promise<void> {
-    const r = await this.call<{ account: { name: string; id: number } | null; profile: ProfileView | null; face: FaceStatus | null }>('/api/me');
+    const r = await this.call<{ account: { name: string; id: number } | null; profile: ProfileView | null; face: FaceStatus | null; character?: { character: string; approved: boolean } | null }>('/api/me');
     this.face = r.face ?? null;
+    this.character = r.character ?? null;
     // A stale token (expired or reset elsewhere): quietly fall back to guest.
     if (this.token && !r.account) this.setToken(null);
     this.apply({ account: r.account, profile: r.profile ?? AccountClient.blankProfile() });
@@ -144,6 +147,7 @@ export class AccountClient {
     this.setToken(null);
     this.account = null;
     this.face = null;
+    this.character = null;
     await this.refresh().catch(() => this.apply({ account: null, profile: AccountClient.blankProfile() }));
   }
 
@@ -157,6 +161,14 @@ export class AccountClient {
   async removeFace(): Promise<void> {
     const r = await this.call<{ face: FaceStatus }>('/api/face/remove', {});
     this.face = r.face;
+    this.character = null;
+    this.emit();
+  }
+
+  /** Lends your face scan to your character ('' takes it back). An admin approves it. */
+  async claimCharacter(character: string): Promise<void> {
+    const r = await this.call<{ character: { character: string; approved: boolean } | null }>('/api/face/character', { character });
+    this.character = r.character;
     this.emit();
   }
 

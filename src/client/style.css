@@ -5685,3 +5685,29 @@ body.touch .ult-splash .ico {
 body.touch .ult-splash .tag {
   font-size: 17px;
 }
+
+/* Face scan: "Are you the real BOR?" */
+.face-scan .face-character {
+  width: 100%;
+  background: var(--wash);
+  border-radius: var(--r-md);
+  padding: 8px 12px;
+  text-align: left;
+}
+.face-scan .face-character .row {
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-weight: 700;
+  font-size: 14px;
+}
+.face-scan .face-character select {
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+  background: white;
+  border: 2px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 4px 8px;
+}

@@ -515,23 +515,33 @@ function resume(): void {
     setOverlay('none');
     return;
   }
+  // No Pointer Lock at all (rare, very old browsers): the only way to play is with a visible cursor.
+  if (!('requestPointerLock' in HTMLElement.prototype)) {
+    playUnlocked();
+    return;
+  }
   input.requestLock();
-  // Some browsers refuse the lock without saying so: play without it rather than ignore keys.
-  window.setTimeout(() => {
-    if (screen === 'playing' && overlay === 'click' && !input.locked && !padPlay) playUnlocked();
-  }, 1500);
 }
 
-/** Pointer lock was refused (iPad Safari, locked-down Chromebooks): aim with a visible cursor. */
+/** The browser has no Pointer Lock API: aim with a visible cursor. */
 function playUnlocked(): void {
   if (input.freeAim) return;
   input.freeAim = true;
   setOverlay('none');
-  hud.toast("Your browser won't lock the mouse, so the cursor stays visible: move it to aim, click the game to shoot, Esc or P for the menu.", 6000);
+  hud.toast("Your browser can't lock the mouse, so the cursor stays visible: move it to aim, click the game to shoot, Esc or P for the menu.", 6000);
 }
 
+// A refused lock (a click too soon after pressing Esc, or the raw-mouse option not supported, which
+// is retried without it): if we're still not locked a moment later, ask for another click. The mouse
+// always gets locked and hidden while playing.
 input.onLockError = () => {
-  if (screen === 'playing' && !touchMode && !padPlay) playUnlocked();
+  window.setTimeout(() => {
+    if (screen !== 'playing' || touchMode || padPlay || input.locked || input.freeAim) return;
+    if (overlay === 'none' || overlay === 'pause' || overlay === 'click') {
+      setOverlay('click');
+      hud.toast('Click again to lock the mouse and play.', 2500);
+    }
+  }, 350);
 };
 
 // Without pointer lock (touch devices with a keyboard, or a refused lock), Esc or P opens the menu.

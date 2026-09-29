@@ -15,6 +15,17 @@ export type UltId = (typeof ULT_IDS)[number];
 
 export const DEFAULT_ULT: UltId = 'juice';
 
+/**
+ * Popping an ult turns you into the regular it's the signature move of, for a while: their body,
+ * outfit and props (render/characters.ts), and their own face if they lent it (Store.claimCharacter).
+ */
+export const ULT_CHARACTER: Partial<Record<UltId, { body: string; name: string; seconds: number; color: string }>> = {
+  juice: { body: 'bor', name: 'BOR', seconds: 8, color: '#ff8a1f' },
+  chase: { body: 'abag', name: 'ABAG', seconds: 7, color: '#ff5fd2' },
+  cropDuster: { body: 'sol', name: 'SOL', seconds: 7, color: '#8ee000' },
+  robot: { body: 'kesty', name: 'KESTY', seconds: 7, color: '#ff3b5c' },
+};
+
 /** The ults dealt out in matches, one at random each time you spawn. */
 export const PLAYABLE_ULTS: readonly UltId[] = ['juice', 'chase', 'cropDuster', 'robot'];
 
@@ -47,7 +58,7 @@ export const ULT_INFO: Record<UltId, UltInfo> = {
     icon: '💉',
     by: "BOR's signature",
     blurb: 'Jab the giant syringe (it is full of air) and get JACKED for 8 s: heavier, faster, and your shots hit 30% harder.',
-    tagline: 'Heavier, faster, harder hits',
+    tagline: "You're BOR: heavier, faster, harder hits",
     color: '#ff8a1f',
   },
   chase: {
@@ -55,7 +66,7 @@ export const ULT_INFO: Record<UltId, UltInfo> = {
     icon: '👃',
     by: "ABAG's signature",
     blurb: 'Sniff out the nearest enemy in front of you and hunt them down: faster, endless dashes, shots curve toward them, grabs throw extra hard.',
-    tagline: 'Sniff them out. Run them down.',
+    tagline: "You're ABAG: sniff them out, run them down",
     color: '#ff5fd2',
   },
   cropDuster: {
@@ -63,7 +74,7 @@ export const ULT_INFO: Record<UltId, UltInfo> = {
     icon: '💨',
     by: "SOL's signature",
     blurb: 'Bend over and let rip: a huge green shockwave launches everyone nearby and leaves a cloud that inflates and slows.',
-    tagline: 'Everybody out of the cloud!',
+    tagline: "You're SOL: everybody out of the cloud!",
     color: '#8ee000',
   },
   robot: {
@@ -71,7 +82,7 @@ export const ULT_INFO: Record<UltId, UltInfo> = {
     icon: '🤖',
     by: "KESTY's signature",
     blurb: 'TARGET ACQUIRED. Locks on to up to 3 enemies in view, then fires a barrage of 6 homing mini-rockets.',
-    tagline: 'TARGET ACQUIRED. EXECUTING.',
+    tagline: "You're KESTY: TARGET ACQUIRED",
     color: '#ff3b5c',
   },
 };

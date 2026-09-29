@@ -85,8 +85,35 @@ export function buildFaceScan(account: AccountClient, onClose: () => void): { ro
     snapBtn.classList.add('hidden');
   };
 
+  // "I'm the real BOR": the regulars can lend their face to their character (an admin checks it).
+  const charPick = el('select', { attrs: { 'aria-label': 'Your character' } }) as HTMLSelectElement;
+  for (const [v, t] of [['', 'No'], ['bor', 'Yes, BOR'], ['abag', 'Yes, ABAG'], ['sol', 'Yes, SOL'], ['kesty', 'Yes, KESTY']]) charPick.append(el('option', { attrs: { value: v }, text: t }));
+  const charNote = el('div', { class: 'small-note' });
+  const charRow = el(
+    'div',
+    { class: 'face-character' },
+    el('label', { class: 'row' }, el('span', { text: 'Are you the real BOR, ABAG, SOL or KESTY?' }), charPick),
+    charNote,
+  );
+  charPick.addEventListener('change', async () => {
+    try {
+      await account.claimCharacter(charPick.value);
+    } catch (err) {
+      charNote.textContent = (err as Error).message;
+      return;
+    }
+    status();
+  });
   const status = () => {
     const f = account.face;
+    const claim = account.character;
+    charRow.classList.toggle('hidden', !f?.version || !!f?.banned);
+    charPick.value = claim?.character ?? '';
+    charNote.textContent = !claim
+      ? 'Pick yours and, once an admin checks it, everyone who turns into your character in an ult wears your face.'
+      : claim.approved
+        ? `Approved: everyone who turns into ${claim.character.toUpperCase()} wears your face.`
+        : `Waiting for an admin to check it's really you.`;
     if (!account.account) note.textContent = 'Make a free account to use a face scan.';
     else if (f?.banned) note.textContent = 'A moderator turned off face scans for your account.';
     else if (f?.hidden) note.textContent = 'Your face scan was reported, so it is hidden until a moderator checks it.';
@@ -215,6 +242,7 @@ export function buildFaceScan(account: AccountClient, onClose: () => void): { ro
       el('label', { class: 'row face-mine' }, mine, el('span', { text: 'This is my own face' })),
       note,
       saveBtn,
+      charRow,
       el(
         'div',
         { class: 'small-note' },

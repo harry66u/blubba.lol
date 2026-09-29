@@ -33,6 +33,9 @@ class RateLimiter {
   }
 }
 
+/** Characters whose real person can lend them their face scan (see Store.claimCharacter). */
+const CHARACTER_KEYS = ['bor', 'abag', 'sol', 'kesty'];
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -158,7 +161,12 @@ export class Api {
     switch (path) {
       case '/api/me': {
         const c = this.caller(req);
-        return { account: c.account ? { name: c.account.name, id: c.account.id } : null, profile: this.view(c), face: c.account ? this.store.faceStatus(c.account.id) : null };
+        return {
+          account: c.account ? { name: c.account.name, id: c.account.id } : null,
+          profile: this.view(c),
+          face: c.account ? this.store.faceStatus(c.account.id) : null,
+          character: c.account ? this.store.characterClaim(c.account.id) : null,
+        };
       }
       case '/api/face': {
         // Upload your own face scan (accounts only; it goes on your own tube man).
@@ -185,9 +193,36 @@ export class Api {
         this.onProfileChange?.(c.key);
         return { face: this.store.faceStatus(c.account.id) };
       }
+      case '/api/face/character': {
+        // "I'm the real BOR": lend your own face scan to your character (an admin approves it).
+        const b = await this.body(req);
+        if (!this.writeLimiter.take(ip)) throw new ApiError(429, 'slow_down', 'Slow down a little.');
+        const c = this.caller(req);
+        if (!c.account) throw new ApiError(401, 'account_required', 'Log in first.');
+        const ch = String(b.character ?? '');
+        if (ch && !CHARACTER_KEYS.includes(ch)) throw new ApiError(400, 'bad_character', 'Pick BOR, ABAG, SOL or KESTY.');
+        const st = this.store.faceStatus(c.account.id);
+        if (ch && (!st.version || st.banned)) throw new ApiError(400, 'no_face', 'Save a face scan first.');
+        this.store.claimCharacter(c.account.id, ch || null);
+        return { character: this.store.characterClaim(c.account.id) };
+      }
+      case '/api/characters':
+        // Approved character faces, for the ult transformations.
+        return { faces: this.store.characterFaces() };
       case '/api/admin/faces': {
         if (!this.isAdmin(req)) throw new ApiError(404, 'not_found', 'Not found.');
-        return { faces: this.store.listFaces(), reports: this.store.reports(100) };
+        return { faces: this.store.listFaces(), reports: this.store.reports(100), claims: this.store.listCharacterClaims() };
+      }
+      case '/api/admin/character': {
+        const b = await this.body(req);
+        if (!this.isAdmin(req)) throw new ApiError(404, 'not_found', 'Not found.');
+        const id = Number(b.id);
+        if (!Number.isInteger(id) || id <= 0) throw new ApiError(400, 'bad_id', 'Bad id.');
+        if (b.action === 'approve') this.store.approveCharacter(id);
+        else if (b.action === 'remove') this.store.claimCharacter(id, null);
+        else throw new ApiError(400, 'bad_action', 'Use approve or remove.');
+        console.log(`[admin] character claim ${b.action} for account ${id}`);
+        return { claims: this.store.listCharacterClaims() };
       }
       case '/api/admin/face': {
         const b = await this.body(req);

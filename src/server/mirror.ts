@@ -63,6 +63,12 @@ const SCHEMA = `
     at BIGINT NOT NULL,
     PRIMARY KEY (account_id, reporter)
   );
+  CREATE TABLE IF NOT EXISTS blubba_character_faces (
+    account_id BIGINT PRIMARY KEY,
+    char_key TEXT NOT NULL,
+    approved INTEGER NOT NULL DEFAULT 0,
+    at BIGINT NOT NULL
+  );
 `;
 
 const TABLES: readonly { local: string; remote: string; cols: readonly string[]; pk: readonly string[] }[] = [
@@ -72,6 +78,7 @@ const TABLES: readonly { local: string; remote: string; cols: readonly string[];
   { local: 'reports', remote: 'blubba_reports', cols: ['id', 'at', 'reporter', 'target', 'target_name', 'room', 'reason'], pk: ['id'] },
   { local: 'faces', remote: 'blubba_faces', cols: ['account_id', 'mime', 'data', 'updated_at', 'hidden', 'reports', 'banned'], pk: ['account_id'] },
   { local: 'face_reports', remote: 'blubba_face_reports', cols: ['account_id', 'reporter', 'at'], pk: ['account_id', 'reporter'] },
+  { local: 'character_faces', remote: 'blubba_character_faces', cols: ['account_id', 'char_key', 'approved', 'at'], pk: ['account_id'] },
 ];
 
 /**

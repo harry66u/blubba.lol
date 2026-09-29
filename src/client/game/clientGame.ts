@@ -87,7 +87,7 @@ import { CHASE, aimFromCamera, chaseCamera, rebaseMove } from './chaseCam';
 import { ServerClock } from './clock';
 import { TipCoach } from '../ui/tips';
 import { TOUCH_LABELS, type TouchControls } from '../input/touch';
-import { PROJ_BIG_BLOW, ULT_INFO, isUltProjectile, publicUlt, steerToward, ultOf, ultReady } from '../../shared/game/ults';
+import { PROJ_BIG_BLOW, ULT_CHARACTER, ULT_INFO, type UltId, isUltProjectile, publicUlt, steerToward, ultOf, ultReady } from '../../shared/game/ults';
 import { type UltPlayerView, UltView } from './ultView';
 
 interface HistoryEntry {
@@ -323,6 +323,11 @@ export class ClientGame {
   showChat = true;
   /** Show other players' face scans (Settings). Your own always shows. */
   showFaces = true;
+  /** Who turned into a character with their ult, until when (see transformInto). */
+  private readonly transforms = new Map<number, { body: string; until: number }>();
+  /** Faces the real BOR, ABAG, SOL and KESTY lent their characters (from /api/characters). */
+  private characterFaces: Record<string, { account: number; v: number }> = {};
+  private characterFacesAt = -1e9;
   /** Ult visuals, sounds and HUD (ultView.ts). */
   readonly ultView: UltView;
 
@@ -534,6 +539,7 @@ export class ClientGame {
     this.gadgets.clear();
     this.floaters.clear();
     this.ultView.clear();
+    this.transforms.clear();
   }
 
   // --- Network -----------------------------------------------------------------------------
@@ -807,7 +813,45 @@ export class ClientGame {
   /** What a player looks like (accents and shine are dropped in team modes, see lookFromCosmetics). */
   private lookOf(id: number): Look {
     const entry = this.roster.get(id);
-    return lookFromCosmetics(entry?.cos, entry?.color ?? 0, this.teamMode);
+    const look = lookFromCosmetics(entry?.cos, entry?.color ?? 0, this.teamMode);
+    const t = this.transformOf(id);
+    return t ? { ...look, body: t.body } : look;
+  }
+
+  /** The character someone turned into with their ult, while it lasts. */
+  private transformOf(id: number): { body: string; until: number } | null {
+    const t = this.transforms.get(id);
+    if (t && t.until <= this.time) this.transforms.delete(id);
+    return t && t.until > this.time ? t : null;
+  }
+
+  /** Popping an ult turns you into its regular (BOR, ABAG, SOL or KESTY) for a few seconds. */
+  private transformInto(id: number, kind: UltId, x: number, y: number, z: number): void {
+    const c = ULT_CHARACTER[kind];
+    if (!c) return;
+    this.transforms.set(id, { body: c.body, until: this.time + c.seconds });
+    this.effects.airPuff(x, y + 1.2, z, 12, 7, 0.3);
+    this.effects.confettiBurst(x, y + 1.5, z, 24);
+    if (id !== this.youId) this.hud.popup(tmpV.set(x, y + 3.4, z), `${c.name}!`, c.color, 1.4, 1.3, false);
+  }
+
+  /** The face lent to the character a player turned into, if an admin approved one. */
+  private charFaceOf(id: number): { account: number; v: number } | null {
+    if (!this.showFaces && id !== this.youId) return null;
+    const t = this.transformOf(id);
+    return t ? (this.characterFaces[t.body] ?? null) : null;
+  }
+
+  /** Fetches the approved character faces now and then (they rarely change). */
+  private refreshCharacterFaces(): void {
+    if (this.time - this.characterFacesAt < 60) return;
+    this.characterFacesAt = this.time;
+    fetch('/api/characters')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { faces?: Record<string, { account: number; v: number }> } | null) => {
+        if (d?.faces) this.characterFaces = d.faces;
+      })
+      .catch(() => undefined);
   }
 
   /** Team info for the scoreboard and results (null outside team modes). */
@@ -1398,6 +1442,8 @@ export class ClientGame {
         break;
       }
       case 'spawn': {
+        // Back to yourself after a knockout, whatever you'd turned into.
+        this.transforms.delete(e.id);
         if (e.id !== you) fx.airPuff(e.x, e.y + 1, e.z, 14, 3, 0.35, 0xffffff);
         a.pop(e.id === you ? null : [e.x, e.y, e.z]);
         if (e.id === you) this.trauma = 0;
@@ -1490,6 +1536,9 @@ export class ClientGame {
         break;
       }
       case 'ult':
+        this.transformInto(e.id, e.kind, e.x, e.y, e.z);
+        this.ultView.onEvent(e);
+        break;
       case 'fart':
       case 'sniff':
       case 'gotcha':
@@ -2000,6 +2049,7 @@ export class ClientGame {
       this.attract(dt);
       return;
     }
+    this.refreshCharacterFaces();
     // Fixed-step input sampling and prediction.
     this.stepAcc += dt;
     let steps = 0;
@@ -2240,8 +2290,17 @@ export class ClientGame {
 
   /** The face scan to show for a roster entry ('' = none, or face scans turned off). */
   private faceKeyOf(entry: RosterEntry | undefined): string {
+    const cf = entry ? this.charFaceOf(entry.id) : null;
+    if (cf) return `c${cf.account}.${cf.v}`;
     if (!entry?.face || (!this.showFaces && entry.id !== this.youId)) return '';
     return `${entry.face.account}.${entry.face.v}`;
+  }
+
+  /** The face texture for a roster entry: a transformed character's lent face, else their own scan. */
+  private faceTexOf(entry: RosterEntry | undefined): THREE.Texture | null {
+    const cf = entry ? this.charFaceOf(entry.id) : null;
+    if (cf) return faceTexture(cf.account, cf.v);
+    return this.faceKeyOf(entry) && entry?.face ? faceTexture(entry.face.account, entry.face.v) : null;
   }
 
   private createRemote(id: number): RemoteView {
@@ -2296,7 +2355,7 @@ export class ClientGame {
       const fk = this.faceKeyOf(entry);
       if (fk !== rv.faceKey) {
         rv.faceKey = fk;
-        rv.man.setFacePhoto(fk && entry.face ? faceTexture(entry.face.account, entry.face.v) : null);
+        rv.man.setFacePhoto(fk ? this.faceTexOf(entry) : null);
       }
     }
     const alive = c.mode !== MODE_DEAD;
@@ -2594,7 +2653,7 @@ export class ClientGame {
         this.selfMan.dispose();
       }
       this.selfMan = new TubeMan(color, { physical: this.r.profile.physical, seed: this.youId * 13.7, look });
-      if (fk && entry?.face) this.selfMan.setFacePhoto(faceTexture(entry.face.account, entry.face.v));
+      if (fk) this.selfMan.setFacePhoto(this.faceTexOf(entry));
       this.r.scene.add(this.selfMan.group);
       this.selfLookKey = key;
     }

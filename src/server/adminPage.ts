@@ -31,6 +31,7 @@ export const ADMIN_HTML = `<!doctype html>
 <h1>Blubba moderation</h1>
 <div class="row"><input id="tok" type="password" placeholder="Admin token" autocomplete="off"><button id="go">Load</button></div>
 <div id="msg" class="note">Enter the admin token (BUBBA_ADMIN_TOKEN on the server).</div>
+<h2>Character faces</h2><div class="note">Players who say they're the real BOR, ABAG, SOL or KESTY. Approve one and everyone who turns into that character in an ult wears their face scan.</div><div id="claims" class="grid"></div>
 <h2>Face scans</h2><div id="faces" class="grid"></div>
 <h2>Recent reports</h2><div style="overflow-x:auto"><table id="reports"></table></div>
 </main>
@@ -49,6 +50,7 @@ async function load() {
   const d = await r.json();
   $('msg').textContent = d.faces.length + ' face scan(s). Hidden ones were reported by ${FACE_HIDE_REPORTS}+ players.';
   render(d.faces);
+  renderClaims(d.claims || []);
   $('reports').innerHTML = '<tr><th>When</th><th>Reported</th><th>Reason</th><th>Room</th><th>By</th></tr>' + d.reports.map((x) =>
     '<tr><td>' + new Date(x.at).toLocaleString() + '</td><td>' + esc(x.target_name) + ' <span class="note">' + esc(x.target) + '</span></td><td>' + esc(x.reason) + '</td><td>' + esc(x.room) + '</td><td class="note">' + esc(x.reporter) + '</td></tr>').join('');
 }
@@ -69,6 +71,23 @@ function render(faces) {
     if (!f.banned) act('Remove', 'remove', 'warn');
     if (!f.banned) act('Remove + ban', 'ban', 'warn');
     if (f.hidden || f.banned) act('Restore', 'restore', 'ok');
+    box.append(c);
+  }
+}
+function renderClaims(claims) {
+  const box = $('claims');
+  box.innerHTML = claims.length ? '' : '<div class="note">No claims yet.</div>';
+  for (const f of claims) {
+    const c = document.createElement('div');
+    c.className = 'card';
+    c.innerHTML = '<img alt=""><div><b>' + esc(f.character.toUpperCase()) + '</b>: ' + esc(f.name) + ' <span class="meta">#' + f.id + '</span></div><div class="meta">' + (f.approved ? '<span class="tag">APPROVED</span>' : 'waiting') + ' · ' + new Date(f.at).toLocaleDateString() + '</div><div class="btns"></div>';
+    fetch('/api/admin/face/' + f.id, { headers: headers() }).then((r) => r.ok ? r.blob() : null).then((b) => { if (b) c.querySelector('img').src = URL.createObjectURL(b); });
+    const btns = c.querySelector('.btns');
+    const act = (label, action, cls) => { const b = document.createElement('button'); b.textContent = label; b.className = cls; b.onclick = async () => {
+      const r = await fetch('/api/admin/character', { method: 'POST', headers: headers(), body: JSON.stringify({ id: f.id, action }) });
+      if (r.ok) renderClaims((await r.json()).claims); }; btns.append(b); };
+    if (!f.approved) act('Approve', 'approve', 'ok');
+    act('Remove', 'remove', 'warn');
     box.append(c);
   }
 }

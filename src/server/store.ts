@@ -149,6 +149,12 @@ export class Store {
         at INTEGER NOT NULL,
         PRIMARY KEY (account_id, reporter)
       );
+      CREATE TABLE IF NOT EXISTS character_faces (
+        account_id INTEGER PRIMARY KEY,
+        char_key TEXT NOT NULL,
+        approved INTEGER NOT NULL DEFAULT 0,
+        at INTEGER NOT NULL
+      );
     `);
     this.prune();
   }
@@ -382,6 +388,7 @@ export class Store {
 
   /** Removes a face. `ban` also stops the account from uploading another one. */
   removeFace(accountId: number, ban = false): void {
+    this.claimCharacter(accountId, null);
     this.db.prepare('DELETE FROM face_reports WHERE account_id = ?').run(accountId);
     this.mirror?.deleteRows('face_reports', { account_id: accountId });
     if (ban) {
@@ -450,6 +457,60 @@ export class Store {
       .prepare('SELECT f.account_id AS id, a.name AS name, f.updated_at AS at, f.hidden AS hidden, f.banned AS banned, f.reports AS reports FROM faces f LEFT JOIN accounts a ON a.id = f.account_id ORDER BY f.updated_at DESC')
       .all() as { id: number; name: string | null; at: number; hidden: number; banned: number; reports: number }[];
     return rows.map((r) => ({ id: Number(r.id), name: r.name ?? '?', updatedAt: Number(r.at), hidden: !!Number(r.hidden), banned: !!Number(r.banned), reports: Number(r.reports) }));
+  }
+
+  // --- Character faces ---------------------------------------------------------------------------
+  // The regulars behind BOR, ABAG, SOL and KESTY can lend their own face scan to their character:
+  // they claim it themselves (from their own account, with their own face), an admin approves the
+  // claim, and from then on everyone who turns into that character in an ult wears that face.
+
+  /** Claims (or with null, drops) a character for this account's face. Needs admin approval. */
+  claimCharacter(accountId: number, character: string | null, now = Date.now()): void {
+    if (!character) {
+      this.db.prepare('DELETE FROM character_faces WHERE account_id = ?').run(accountId);
+      this.mirror?.deleteRows('character_faces', { account_id: accountId });
+      return;
+    }
+    this.db
+      .prepare('INSERT INTO character_faces (account_id, char_key, approved, at) VALUES (?, ?, 0, ?) ON CONFLICT(account_id) DO UPDATE SET char_key = excluded.char_key, approved = 0, at = excluded.at')
+      .run(accountId, character, now);
+    this.mirror?.row('character_faces', { account_id: accountId });
+  }
+
+  /** Approves a claim: that account's face becomes the character's (replacing anyone approved before). */
+  approveCharacter(accountId: number): boolean {
+    const r = this.db.prepare('SELECT char_key AS character FROM character_faces WHERE account_id = ?').get(accountId) as { character: string } | undefined;
+    if (!r) return false;
+    const others = this.db.prepare('SELECT account_id FROM character_faces WHERE char_key = ? AND approved = 1 AND account_id != ?').all(r.character, accountId) as { account_id: number }[];
+    this.db.prepare('UPDATE character_faces SET approved = 0 WHERE char_key = ? AND account_id != ?').run(r.character, accountId);
+    this.db.prepare('UPDATE character_faces SET approved = 1 WHERE account_id = ?').run(accountId);
+    for (const o of others) this.mirror?.row('character_faces', { account_id: Number(o.account_id) });
+    this.mirror?.row('character_faces', { account_id: accountId });
+    return true;
+  }
+
+  /** This account's claim, if any. */
+  characterClaim(accountId: number): { character: string; approved: boolean } | null {
+    const r = this.db.prepare('SELECT char_key AS character, approved FROM character_faces WHERE account_id = ?').get(accountId) as { character: string; approved: number } | undefined;
+    return r ? { character: r.character, approved: !!Number(r.approved) } : null;
+  }
+
+  /** Approved character faces that are showing: character -> the face to use. */
+  characterFaces(): Record<string, { account: number; v: number }> {
+    const rows = this.db
+      .prepare("SELECT c.char_key AS character, f.account_id AS id, f.updated_at AS v FROM character_faces c JOIN faces f ON f.account_id = c.account_id WHERE c.approved = 1 AND f.hidden = 0 AND f.data != ''")
+      .all() as { character: string; id: number; v: number }[];
+    const out: Record<string, { account: number; v: number }> = {};
+    for (const r of rows) out[r.character] = { account: Number(r.id), v: Number(r.v) };
+    return out;
+  }
+
+  /** Every claim with its owner, newest first (admin page). */
+  listCharacterClaims(): { id: number; name: string; character: string; approved: boolean; at: number }[] {
+    const rows = this.db
+      .prepare('SELECT c.account_id AS id, a.name AS name, c.char_key AS character, c.approved AS approved, c.at AS at FROM character_faces c LEFT JOIN accounts a ON a.id = c.account_id ORDER BY c.at DESC')
+      .all() as { id: number; name: string | null; character: string; approved: number; at: number }[];
+    return rows.map((r) => ({ id: Number(r.id), name: r.name ?? '?', character: r.character, approved: !!Number(r.approved), at: Number(r.at) }));
   }
 
   // --- Reports ---------------------------------------------------------------------------------

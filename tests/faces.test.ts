@@ -141,3 +141,30 @@ describe('face scans', () => {
     for (const c of [owner, ...reporters]) c.ws.close();
   });
 });
+
+describe('character faces', () => {
+  it('the real BOR lends his own face scan, an admin approves, and removing the face drops it', async () => {
+    const bor = await register('RealBor');
+    const faker = await register('FakeBor');
+    const auth = (t: string) => ({ authorization: `Bearer ${t}` });
+    const faces = async () => ((await (await fetch(`${base}/api/characters`)).json()) as { faces: Record<string, { account: number }> }).faces;
+    // Needs a face scan first, and only the four characters.
+    expect((await post('/api/face/character', { character: 'bor' }, auth(bor.token))).status).toBe(400);
+    expect((await post('/api/face', { image: dataUrl(PNG), mine: true }, auth(bor.token))).status).toBe(200);
+    expect((await post('/api/face/character', { character: 'nobody' }, auth(bor.token))).status).toBe(400);
+    expect((await post('/api/face/character', { character: 'bor' }, auth(bor.token))).body.character).toEqual({ character: 'bor', approved: false });
+    expect((await post('/api/face', { image: dataUrl(PNG), mine: true }, auth(faker.token))).status).toBe(200);
+    expect((await post('/api/face/character', { character: 'bor' }, auth(faker.token))).status).toBe(200);
+    // Nothing shows until an admin approves; only admins can.
+    expect(await faces()).toEqual({});
+    expect((await post('/api/admin/character', { id: bor.id, action: 'approve' })).status).toBe(404);
+    const ok = await post('/api/admin/character', { id: bor.id, action: 'approve' }, { 'x-admin-token': ADMIN });
+    expect(ok.status).toBe(200);
+    expect((ok.body.claims as { id: number; approved: boolean }[]).find((c) => c.id === bor.id)?.approved).toBe(true);
+    expect((await faces()).bor?.account).toBe(bor.id);
+    // Removing the face scan takes it off the character too.
+    expect((await post('/api/face/remove', {}, auth(bor.token))).status).toBe(200);
+    expect(await faces()).toEqual({});
+    expect(store.characterClaim(bor.id)).toBeNull();
+  });
+});
