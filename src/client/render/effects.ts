@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { heartShape, noteShape, starShape } from './shapes';
 
 interface Particle {
   x: number;
@@ -17,19 +18,31 @@ interface Particle {
   rot: number;
 }
 
-/** Pooled instanced particles (puffs, confetti). Dead particles are scaled to zero. */
+/**
+ * Pooled instanced particles (puffs, confetti, hearts). Dead particles are scaled to zero.
+ * Billboard pools (flat shapes like hearts and notes) always face the camera and only spin in
+ * the view plane, so they never vanish edge-on.
+ */
 class ParticlePool {
   readonly mesh: THREE.InstancedMesh;
   private readonly parts: Particle[] = [];
   private next = 0;
+  /** Particles alive right now; an empty pool skips its update entirely. */
+  private live = 0;
   private readonly m = new THREE.Matrix4();
   private readonly q = new THREE.Quaternion();
+  private readonly qz = new THREE.Quaternion();
   private readonly e = new THREE.Euler();
   private readonly v = new THREE.Vector3();
   private readonly s = new THREE.Vector3();
   private readonly c = new THREE.Color();
 
-  constructor(geo: THREE.BufferGeometry, mat: THREE.Material, readonly capacity: number) {
+  constructor(
+    geo: THREE.BufferGeometry,
+    mat: THREE.Material,
+    readonly capacity: number,
+    readonly billboard = false,
+  ) {
     this.mesh = new THREE.InstancedMesh(geo, mat, capacity);
     this.mesh.frustumCulled = false;
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -44,6 +57,7 @@ class ParticlePool {
     const i = this.next;
     this.next = (this.next + 1) % this.capacity;
     const part = this.parts[i];
+    if (part.life <= 0) this.live++;
     part.x = p.x;
     part.y = p.y;
     part.z = p.z;
@@ -61,13 +75,18 @@ class ParticlePool {
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
   }
 
-  /** `near`: shrink particles that drift right up to the camera so they never blot out the view. */
-  update(dt: number, near: THREE.Vector3 | null = null): void {
+  /**
+   * `near`: shrink particles that drift right up to the camera so they never blot out the view.
+   * `faceCam`: the camera's rotation, for billboard pools.
+   */
+  update(dt: number, near: THREE.Vector3 | null = null, faceCam: THREE.Quaternion | null = null): void {
+    if (this.live === 0) return;
     for (let i = 0; i < this.capacity; i++) {
       const p = this.parts[i];
       if (p.life <= 0) continue;
       p.life -= dt;
       if (p.life <= 0) {
+        this.live--;
         this.mesh.setMatrixAt(i, this.m.makeScale(0, 0, 0));
         continue;
       }
@@ -86,8 +105,12 @@ class ParticlePool {
         const d = Math.hypot(p.x - near.x, p.y - near.y, p.z - near.z) - scale;
         if (d < 1.3) scale *= Math.max(0, d / 1.3);
       }
-      this.e.set(p.rot, p.rot * 0.7, 0);
-      this.q.setFromEuler(this.e);
+      if (this.billboard && faceCam) {
+        this.q.copy(faceCam).multiply(this.qz.setFromAxisAngle(Z_AXIS, p.rot));
+      } else {
+        this.e.set(p.rot, p.rot * 0.7, 0);
+        this.q.setFromEuler(this.e);
+      }
       this.m.compose(this.v.set(p.x, p.y, p.z), this.q, this.s.set(scale, scale, scale));
       this.mesh.setMatrixAt(i, this.m);
     }
@@ -97,6 +120,29 @@ class ParticlePool {
 
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
 const tmpDirV = new THREE.Vector3();
+
+const RAINBOW = [0xff3b5c, 0xff8a1f, 0xffd60a, 0x8ee000, 0x2ec5ff, 0x3d6bff, 0x9b4dff];
+
+/** Where a player's cosmetic trail left off (one per player; see Effects.trail). */
+export interface TrailState {
+  on: boolean;
+  /** Distance moved since the last trail piece. */
+  acc: number;
+  lx: number;
+  ly: number;
+  lz: number;
+  /** Pieces spawned so far (cycles colors). */
+  n: number;
+}
+
+export function newTrailState(): TrailState {
+  return { on: false, acc: 0, lx: 0, ly: 0, lz: 0, n: 0 };
+}
+
+/** Metres flown between trail pieces at full detail (Low graphics spaces them further apart). */
+const TRAIL_STEP: Record<string, number> = { bubbles: 0.55, smoke: 0.5, confetti: 0.4, sparkles: 0.45, hearts: 0.6, notes: 0.7, fire: 0.3, rainbow: 0.2, comet: 0.2 };
+/** Speed that counts as flying for trails, besides being launched or dashing (walk 8, jump ~12). */
+export const TRAIL_FLY_SPEED = 14;
 
 let starTex: THREE.Texture | null = null;
 /** Soft star-burst texture for muzzle flashes and impacts. */
@@ -207,6 +253,10 @@ export class Effects {
   readonly root = new THREE.Group();
   private readonly puffs: ParticlePool;
   private readonly confetti: ParticlePool;
+  /** Flat camera-facing shapes for trails and knockout effects. */
+  private readonly hearts: ParticlePool;
+  private readonly notes: ParticlePool;
+  private readonly stars: ParticlePool;
   private readonly rings: Ring[] = [];
   private readonly flashes: Flash[] = [];
   private readonly balloons: Balloon[] = [];
@@ -230,13 +280,21 @@ export class Effects {
   private time = 0;
   /** Camera position, so particles right in front of the lens can fade out. */
   camPos: THREE.Vector3 | null = null;
+  /** Camera rotation, so hearts, notes and stars face the viewer. */
+  camQuat: THREE.Quaternion | null = null;
+  /** Trail detail: 1 normally, lower on Low graphics (pieces spaced further apart). */
+  trailDensity = 1;
 
   constructor() {
     const puffMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, emissive: 0x333333, transparent: true, opacity: 0.6, depthWrite: false });
     this.puffs = new ParticlePool(new THREE.IcosahedronGeometry(1, 1), puffMat, 500);
     const confMat = new THREE.MeshStandardMaterial({ color: 0xffffff, side: THREE.DoubleSide, roughness: 0.5, emissive: 0x222222 });
     this.confetti = new ParticlePool(new THREE.PlaneGeometry(0.18, 0.28), confMat, 500);
-    this.root.add(this.puffs.mesh, this.confetti.mesh);
+    const flatMat = () => new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+    this.hearts = new ParticlePool(new THREE.ShapeGeometry(heartShape(1)), flatMat(), 160, true);
+    this.notes = new ParticlePool(new THREE.ShapeGeometry(noteShape(1)), flatMat(), 120, true);
+    this.stars = new ParticlePool(new THREE.ShapeGeometry(starShape(1, 4, 0.3)), flatMat(), 200, true);
+    this.root.add(this.puffs.mesh, this.confetti.mesh, this.hearts.mesh, this.notes.mesh, this.stars.mesh);
     this.airMat = new THREE.ShaderMaterial({
       uniforms: { time: { value: 0 }, tint: { value: new THREE.Color(0x9fe8ff) } },
       vertexShader: AIR_VERT,
@@ -490,8 +548,159 @@ export class Effects {
           }
         }
         break;
+      case 'hearts':
+        for (let i = 0; i < 34; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const sp = 4 + Math.random() * 6;
+          this.hearts.spawn(
+            { x, y: y + 1, z, vx: Math.cos(a) * sp, vy: 3 + Math.random() * 6, vz: Math.sin(a) * sp, size: 0.45 + Math.random() * 0.35, grow: 0.2, max: 1.6 + Math.random() * 0.6, drag: 1.6, gravity: 2.5, spin: (Math.random() - 0.5) * 4 },
+            [0xff5fa2, 0xff2d55, 0xffa3c7, 0xffffff][i % 4],
+          );
+        }
+        this.shockwave(x, y + 1, z, 5, 0.45, 0xff5fa2);
+        break;
+      case 'popcorn':
+        // Kernels popping in three quick bursts.
+        for (let k = 0; k < 3; k++) {
+          window.setTimeout(() => {
+            for (let i = 0; i < 16; i++) {
+              this.puffs.spawn(
+                { x: x + (Math.random() - 0.5) * 1.5, y: y + 0.5, z: z + (Math.random() - 0.5) * 1.5, vx: (Math.random() - 0.5) * 7, vy: 6 + Math.random() * 7, vz: (Math.random() - 0.5) * 7, size: 0.22 + Math.random() * 0.14, grow: 0.3, max: 1.8, drag: 0.4, gravity: 14, spin: 6 },
+                i % 4 ? 0xfff8e6 : 0xffd966,
+              );
+            }
+          }, k * 160);
+        }
+        break;
+      case 'splash': {
+        // Paint blobs flung out in every direction, with rings of paint on the ground.
+        const paint = [0xff3b5c, 0xffd60a, 0x2ec5ff, 0x8ee000, 0xff5fd2];
+        for (let i = 0; i < 40; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const sp = 5 + Math.random() * 9;
+          this.puffs.spawn({ x, y: y + 0.8, z, vx: Math.cos(a) * sp, vy: 2 + Math.random() * 5, vz: Math.sin(a) * sp, size: 0.3 + Math.random() * 0.3, grow: 0.7, max: 1.3, drag: 1.2, gravity: 12 }, paint[i % paint.length]);
+        }
+        paint.slice(0, 3).forEach((c, i) => this.shockwave(x, y + 0.1 + i * 0.02, z, 3 + i * 1.5, 0.5 + i * 0.1, c, true));
+        break;
+      }
+      case 'supernova':
+        // Level reward: a blinding flash, rings in three colors and a spray of stars.
+        this.flash(x, y + 1, z, 12, 0xffffff, 0.35);
+        this.flash(x, y + 1, z, 8, 0x9fe8ff, 0.6);
+        [0xffffff, 0xffd60a, 0x9fe8ff].forEach((c, i) => window.setTimeout(() => this.shockwave(x, y + 1, z, 7 + i * 3, 0.5, c), i * 120));
+        for (let i = 0; i < 60; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const e = (Math.random() - 0.3) * Math.PI * 0.7;
+          const sp = 10 + Math.random() * 8;
+          this.stars.spawn(
+            { x, y: y + 1, z, vx: Math.cos(a) * Math.cos(e) * sp, vy: Math.sin(e) * sp, vz: Math.sin(a) * Math.cos(e) * sp, size: 0.35 + Math.random() * 0.3, grow: 0, max: 1.3, drag: 2, gravity: 1, spin: 5 },
+            [0xffffff, 0xffe066, 0x9fe8ff][i % 3],
+          );
+        }
+        this.airPuff(x, y + 1, z, 24, 6, 0.4, 0xdff8ff);
+        break;
       default:
         this.confettiBurst(x, y, z, 70);
+    }
+  }
+
+  /**
+   * A cosmetic trail behind someone flying (see the trail items). Call every frame with where
+   * they are and whether they're flying; pieces are spaced by distance, so the trail looks the
+   * same at any speed and frame rate.
+   */
+  trail(s: TrailState, kind: string, x: number, y: number, z: number, active: boolean): void {
+    const step = TRAIL_STEP[kind];
+    if (!active || !step) {
+      s.on = false;
+      return;
+    }
+    const dx = x - s.lx;
+    const dy = y - s.ly;
+    const dz = z - s.lz;
+    const d = Math.hypot(dx, dy, dz);
+    // Just started (or teleported, e.g. a respawn): pick up from here.
+    if (!s.on || d > 12) {
+      s.on = true;
+      s.acc = 0;
+      s.lx = x;
+      s.ly = y;
+      s.lz = z;
+      return;
+    }
+    s.acc += d;
+    const gap = step / Math.max(0.1, this.trailDensity);
+    const count = Math.min(6, Math.floor(s.acc / gap));
+    if (count > 0 && d > 1e-4) {
+      for (let i = 0; i < count; i++) {
+        const f = (i + 1) / count;
+        this.trailBit(kind, s.lx + dx * f, s.ly + dy * f, s.lz + dz * f, dx / d, dy / d, dz / d, s.n++);
+      }
+      s.acc -= count * gap;
+    }
+    s.lx = x;
+    s.ly = y;
+    s.lz = z;
+  }
+
+  /** One piece of a trail at (x, y, z), left by something moving along the unit vector (dx, dy, dz). */
+  trailBit(kind: string, x: number, y: number, z: number, dx: number, dy: number, dz: number, n: number): void {
+    const r = () => Math.random() - 0.5;
+    switch (kind) {
+      case 'bubbles':
+        this.puffs.spawn(
+          { x: x + r() * 0.4, y: y + r() * 0.4, z: z + r() * 0.4, vx: r(), vy: 0.8 + Math.random(), vz: r(), size: 0.1 + Math.random() * 0.12, grow: 0.4, max: 0.9 + Math.random() * 0.4, drag: 1.5, gravity: -0.6 },
+          new THREE.Color().setHSL(0.5 + Math.random() * 0.12, 0.8, 0.82),
+        );
+        break;
+      case 'smoke':
+        this.puffs.spawn({ x: x + r() * 0.3, y, z: z + r() * 0.3, vx: r() * 0.6, vy: 0.5, vz: r() * 0.6, size: 0.2, grow: 2.2, max: 0.9, drag: 2, gravity: -0.8 }, [0xd8dce6, 0xb8bdc9, 0x9aa0ad][n % 3]);
+        break;
+      case 'confetti':
+        this.confetti.spawn({ x, y, z, vx: r() * 3, vy: 1 + Math.random() * 2, vz: r() * 3, size: 0.7, grow: 0, max: 1.1, drag: 2, gravity: 6, spin: 10 }, RAINBOW[n % RAINBOW.length]);
+        break;
+      case 'sparkles':
+        this.stars.spawn({ x: x + r() * 0.6, y: y + r() * 0.6, z: z + r() * 0.6, vx: r() * 0.5, vy: 0.3, vz: r() * 0.5, size: 0.2 + Math.random() * 0.15, grow: 0.3, max: 0.7, drag: 1, spin: 4 }, [0xffffff, 0xffe066, 0x9fe8ff][n % 3]);
+        break;
+      case 'hearts':
+        this.hearts.spawn({ x: x + r() * 0.4, y, z: z + r() * 0.4, vx: r() * 0.6, vy: 0.9, vz: r() * 0.6, size: 0.28, grow: 0.2, max: 1.1, drag: 1.2, gravity: -0.4, spin: r() * 2 }, [0xff5fa2, 0xff2d55, 0xffa3c7][n % 3]);
+        break;
+      case 'notes':
+        this.notes.spawn({ x: x + r() * 0.4, y, z: z + r() * 0.4, vx: r() * 0.5, vy: 0.8, vz: r() * 0.5, size: 0.36, grow: 0, max: 1.3, drag: 1, gravity: -0.3, spin: n % 2 ? 1.2 : -1.2 }, RAINBOW[n % RAINBOW.length]);
+        break;
+      case 'fire':
+        this.puffs.spawn(
+          { x: x + r() * 0.3, y: y + r() * 0.3, z: z + r() * 0.3, vx: r(), vy: 1, vz: r(), size: 0.18 + Math.random() * 0.12, grow: 1, max: 0.35 + Math.random() * 0.2, drag: 3, gravity: -4 },
+          [0xfff3a0, 0xffc933, 0xff8a1f, 0xff4a1f][Math.floor(Math.random() * 4)],
+        );
+        if (n % 4 === 0) this.puffs.spawn({ x, y: y + 0.2, z, vx: 0, vy: 1.2, vz: 0, size: 0.2, grow: 2, max: 0.8, drag: 2, gravity: -1 }, 0x6b6470);
+        break;
+      case 'rainbow': {
+        // Seven stacked bands across the direction of travel (straight up, unless flying vertically).
+        let ax = -dx * dy;
+        let ay = 1 - dy * dy;
+        let az = -dz * dy;
+        let al = Math.hypot(ax, ay, az);
+        if (al < 0.3) {
+          ax = dz;
+          ay = 0;
+          az = -dx;
+          al = Math.hypot(ax, az) || 1;
+        }
+        for (let b = 0; b < RAINBOW.length; b++) {
+          const off = ((RAINBOW.length - 1) / 2 - b) * 0.08;
+          this.puffs.spawn({ x: x + (ax / al) * off, y: y + (ay / al) * off, z: z + (az / al) * off, size: 0.07, grow: 0, max: 0.6, drag: 0 }, RAINBOW[b]);
+        }
+        break;
+      }
+      case 'comet':
+        // Level reward: a bright white-blue streak with sparks.
+        this.puffs.spawn({ x, y, z, size: 0.34, grow: -0.7, max: 0.45, drag: 4 }, 0xdff8ff);
+        this.puffs.spawn({ x: x + r() * 0.2, y: y + r() * 0.2, z: z + r() * 0.2, size: 0.2, grow: -0.5, max: 0.6, drag: 3 }, 0x7fe0ff);
+        if (n % 3 === 0) this.stars.spawn({ x: x + r() * 0.5, y: y + r() * 0.5, z: z + r() * 0.5, vx: r() * 2, vy: r() * 2, vz: r() * 2, size: 0.22, grow: 0, max: 0.5, drag: 2, spin: 6 }, 0xffffff);
+        break;
+      default:
+        break;
     }
   }
 
@@ -744,6 +953,9 @@ export class Effects {
     this.airMat.uniforms.time.value = this.time;
     this.puffs.update(dt, this.camPos);
     this.confetti.update(dt, this.camPos);
+    this.hearts.update(dt, this.camPos, this.camQuat);
+    this.notes.update(dt, this.camPos, this.camQuat);
+    this.stars.update(dt, this.camPos, this.camQuat);
     for (const r of this.rings) {
       if (r.life <= 0) continue;
       r.life -= dt;

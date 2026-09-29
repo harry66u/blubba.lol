@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { ReplayData } from '../../shared/game/sim';
 import type { WeaponId } from '../../shared/loadout';
-import type { Effects } from '../render/effects';
+import { type Effects, type TrailState, newTrailState } from '../render/effects';
 import { type Look, TubeMan, type TubeManPose, defaultPose } from '../render/tubeMan';
 
 interface Actor {
@@ -11,6 +11,7 @@ interface Actor {
   lastX: number;
   lastY: number;
   lastZ: number;
+  trail: TrailState;
 }
 
 const FIELDS = 7;
@@ -52,7 +53,7 @@ export class ReplayView {
       const man = new TubeMan(colorOf(id), { seed: id * 3.3, look: lookOf?.(id) });
       man.setWeapon(weaponOf(id));
       this.root.add(man.group);
-      this.actors.set(id, { man, pose: defaultPose(), visible: false, lastX: 0, lastY: 0, lastZ: 0 });
+      this.actors.set(id, { man, pose: defaultPose(), visible: false, lastX: 0, lastY: 0, lastZ: 0, trail: newTrailState() });
     }
     this.camAngle = Math.random() * Math.PI * 2;
     this.active = true;
@@ -111,6 +112,8 @@ export class ReplayView {
       p.dt = dt * this.speed;
       actor.man.group.position.set(x, y, z);
       actor.man.update(p);
+      // Trails show off best here: the longest launch, in slow motion.
+      this.effects.trail(actor.trail, actor.man.trail, x, y + 1, z, p.launched);
       actor.man.setVisible(true);
       actor.visible = true;
       seen.add(id);

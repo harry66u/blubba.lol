@@ -164,12 +164,15 @@ export class Api {
         const item = ITEM_BY_ID.get(String(b.itemId ?? ''));
         if (!item) throw new ApiError(404, 'no_item', "That item doesn't exist.");
         const p = this.store.profile(c.key);
+        const level = levelForXp(p.xp).level;
+        // Level rewards are earned by playing, never bought.
+        if (item.levelReq) throw new ApiError(409, 'level_reward', `That one isn't for sale. Reach level ${item.levelReq} to unlock it.`);
         if (item.price === 0 || p.owned.includes(item.id)) throw new ApiError(409, 'owned', 'You already have that.');
         if (p.coins < item.price) throw new ApiError(402, 'coins', `You need ${item.price - p.coins} more coins.`);
         p.coins -= item.price;
         p.owned.push(item.id);
         // Wear it straight away; that's almost always what people want.
-        p.cosmetics = sanitizeCosmetics({ ...p.cosmetics, [item.slot]: item.id }, p.owned);
+        p.cosmetics = sanitizeCosmetics({ ...p.cosmetics, [item.slot]: item.id }, p.owned, level);
         this.store.saveProfile(c.key);
         this.onProfileChange?.(c.key);
         return { profile: this.view(c) };
@@ -180,7 +183,7 @@ export class Api {
         const c = this.caller(req);
         if (!c.key) throw new ApiError(400, 'no_player', 'Refresh the page and try again.');
         const p = this.store.profile(c.key);
-        p.cosmetics = sanitizeCosmetics(b.cosmetics, p.owned);
+        p.cosmetics = sanitizeCosmetics(b.cosmetics, p.owned, levelForXp(p.xp).level);
         this.store.saveProfile(c.key);
         this.onProfileChange?.(c.key);
         return { profile: this.view(c) };

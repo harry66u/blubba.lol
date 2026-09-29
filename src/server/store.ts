@@ -224,7 +224,8 @@ export class Store {
       try {
         const parsed = JSON.parse(row.data) as Partial<ProfileData>;
         data = { ...data, ...parsed, stats: { ...emptyStats(), ...(parsed.stats ?? {}) } };
-        data.cosmetics = sanitizeCosmetics(data.cosmetics, data.owned);
+        // Level rewards count as owned from your level; slots added since the save get defaults.
+        data.cosmetics = sanitizeCosmetics(data.cosmetics, data.owned, levelForXp(data.xp).level);
         // Profiles saved before daily challenges existed have no `daily` (sanitize fills it in).
         data.daily = sanitizeDaily(parsed.daily);
       } catch {

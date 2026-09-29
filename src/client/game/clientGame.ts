@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { BALANCE } from '../../shared/balance';
 import { PLAYER_COLORS, TEAM_COLORS } from '../../shared/colors';
 import { MODE_INFO, type ModeId, isTeamMode } from '../../shared/game/modes';
-import { type Cosmetics, type ProgressReport, QUICK_CHAT, cosmeticKey } from '../../shared/economy';
+import { type ProgressReport, QUICK_CHAT, cosmeticKey } from '../../shared/economy';
 import type { GameEvent } from '../../shared/game/events';
 import { type InputFrame, emptyInput, quantizeInput } from '../../shared/input';
 import { getMap } from '../../shared/maps';
@@ -54,11 +54,11 @@ import type { ReplayData } from '../../shared/game/sim';
 import type { Audio } from '../audio/audio';
 import { type Action, type InputManager, codeLabel } from '../input/input';
 import type { Connection } from '../net/connection';
-import { Effects, LandingCircles, type Projectile3D } from '../render/effects';
+import { Effects, LandingCircles, type Projectile3D, TRAIL_FLY_SPEED, type TrailState, newTrailState } from '../render/effects';
 import { MapView } from '../render/mapView';
 import { BeachBall } from '../render/beachBall';
 import type { Renderer } from '../render/renderer';
-import { type Look, TubeMan, defaultPose, type TubeManPose } from '../render/tubeMan';
+import { type Look, TubeMan, defaultPose, lookFromCosmetics, type TubeManPose } from '../render/tubeMan';
 import { ViewModel } from '../render/viewModel';
 import { type Settings, saveSettings } from '../settings';
 import { esc, hexColor } from '../ui/dom';
@@ -96,15 +96,22 @@ interface RemoteView {
   /** Inflation from your own confirmed hit, shown before the snapshots catch up. */
   inflHint: number;
   hintUntil: number;
+  trail: TrailState;
 }
 
 const UTIL_ICONS: Record<string, string> = { 'Bounce Pad': '🟣', 'Air Grenade': '💥', 'Inflatable Wall': '🧱', 'Vacuum Grenade': '🌀' };
 
-function lookOf(cos: Partial<Cosmetics> | undefined): Look {
-  return { pattern: cosmeticKey(cos, 'pattern'), face: cosmeticKey(cos, 'face'), hat: cosmeticKey(cos, 'hat'), finish: cosmeticKey(cos, 'finish') };
-}
-
-const TAUNT_TEXT: Record<string, string> = { burp: 'BUURRP!', wave: 'HI!', spin: 'WHEEE!', noodle: 'NOODLE!', flex: 'FLEX!' };
+const TAUNT_TEXT: Record<string, string> = {
+  burp: 'BUURRP!',
+  wave: 'HI!',
+  spin: 'WHEEE!',
+  noodle: 'NOODLE!',
+  flex: 'FLEX!',
+  bow: 'THANK YOU!',
+  dance: 'GROOVY!',
+  deflate: 'PFFFSSSHH...',
+  backflip: 'HUP!',
+};
 /** Visual versions of every sound pack (the game is fully playable muted). */
 const PACK_TEXT: Record<string, string> = { boing: 'BOING!', kazoo: 'BZZ-BZZ!', duck: 'QUACK!', slide: 'WHOOEEE!', trumpet: 'TA-DAA!' };
 
@@ -232,6 +239,7 @@ export class ClientGame {
   private selfMan: TubeMan | null = null;
   private readonly selfPose = defaultPose();
   private selfLookKey = '';
+  private readonly selfTrail = newTrailState();
   /** Where the camera sat last frame: third-person shots aim along its center ray. */
   private readonly camPos = new THREE.Vector3();
   /** Current chase-camera distance (pulls in instantly on walls, eases back out). */
@@ -275,6 +283,7 @@ export class ClientGame {
     r.setTheme(this.map.theme);
     input.onAnyPress = (a) => this.tips.used(a);
     this.effects.camPos = r.camera.position;
+    this.effects.camQuat = r.camera.quaternion;
   }
 
   private makeCtx(features: StepContext['features']): StepContext {
@@ -642,6 +651,12 @@ export class ClientGame {
     const entry = this.roster.get(id);
     if (this.teamMode && entry && entry.team >= 0) return this.teamColors[entry.team];
     return PLAYER_COLORS[entry?.color ?? 0]?.hex ?? 0xffffff;
+  }
+
+  /** What a player looks like (accents and shine are dropped in team modes, see lookFromCosmetics). */
+  private lookOf(id: number): Look {
+    const entry = this.roster.get(id);
+    return lookFromCosmetics(entry?.cos, entry?.color ?? 0, this.teamMode);
   }
 
   /** Team info for the scoreboard and results (null outside team modes). */
@@ -1498,6 +1513,8 @@ export class ClientGame {
     this.mapView.update(dt, this.time);
     for (const v of this.entities.vacuums) this.effects.vacuumSwirl(v.x, v.y, v.z, BALANCE.utilities.vacuumGrenade.radius, dt);
     this.entities.update(dt, this.clock.tickAt(performance.now()));
+    // Low graphics: trails leave half as many pieces.
+    this.effects.trailDensity = this.r.quality === 'low' ? 0.5 : 1;
     this.effects.update(dt);
     this.updateCircles();
     this.hud.updatePopups(this.r.camera, dt);
@@ -1641,11 +1658,25 @@ export class ClientGame {
   private createRemote(id: number): RemoteView {
     const entry = this.roster.get(id);
     const color = this.colorOf(id);
-    const look = lookOf(entry?.cos);
+    const look = this.lookOf(id);
     const man = new TubeMan(color, { physical: this.r.profile.physical, seed: id * 13.7, look });
     this.r.scene.add(man.group);
     const tag = this.hud.createNametag(entry?.name ?? '...', entry?.bot ?? false, this.tagTeam(id));
-    return { id, man, pose: defaultPose(), tag, color, name: entry?.name ?? '...', bot: entry?.bot ?? false, cur: null, lastTagText: '', lookKey: JSON.stringify(look), inflHint: 0, hintUntil: 0 };
+    return {
+      id,
+      man,
+      pose: defaultPose(),
+      tag,
+      color,
+      name: entry?.name ?? '...',
+      bot: entry?.bot ?? false,
+      cur: null,
+      lastTagText: '',
+      lookKey: JSON.stringify(look),
+      inflHint: 0,
+      hintUntil: 0,
+      trail: newTrailState(),
+    };
   }
 
   private removeRemote(rv: RemoteView): void {
@@ -1666,7 +1697,7 @@ export class ClientGame {
       rv.lastTagText = '';
     }
     if (entry) {
-      const look = lookOf(entry.cos);
+      const look = this.lookOf(rv.id);
       const key = JSON.stringify(look);
       if (key !== rv.lookKey) {
         rv.lookKey = key;
@@ -1677,6 +1708,7 @@ export class ClientGame {
     rv.man.setVisible(alive);
     if (!alive) {
       rv.tag.el.style.display = 'none';
+      rv.trail.on = false;
       return;
     }
     if (this.time < rv.hintUntil && rv.inflHint > c.inflation) c.inflation = rv.inflHint;
@@ -1712,6 +1744,7 @@ export class ClientGame {
       const d = lookDir(c.yaw, c.pitch, tmpDir);
       this.effects.leafStream(tmpV3.x, tmpV3.y, tmpV3.z, d.x, d.y, d.z, c.charge, dt);
     }
+    this.trailFor(rv.trail, rv.man, p, c.px, c.py, c.pz);
 
     // Name tag with inflation percentage above the head.
     const headY = c.py + rv.man.headHeight(c.inflation) + 0.35;
@@ -1902,11 +1935,12 @@ export class ClientGame {
   private poseSelf(dt: number, x: number, y: number, z: number, visible: boolean): void {
     if (!visible) {
       this.selfMan?.setVisible(false);
+      // Your own trail only shows in third person: first person keeps your view clear.
+      this.selfTrail.on = false;
       return;
     }
-    const entry = this.roster.get(this.youId);
     const color = this.colorOf(this.youId);
-    const look = lookOf(entry?.cos);
+    const look = this.lookOf(this.youId);
     const key = `${color}|${JSON.stringify(look)}|${this.r.profile.physical}`;
     if (!this.selfMan || key !== this.selfLookKey) {
       if (this.selfMan) {
@@ -1947,6 +1981,13 @@ export class ClientGame {
     pose.protected = p.spawnProt > 0;
     man.setWeapon(this.weapon.id);
     man.update(pose);
+    this.trailFor(this.selfTrail, man, pose, x, y, z);
+  }
+
+  /** The cosmetic trail behind a tube man while launched, dashing or flying fast. */
+  private trailFor(s: TrailState, man: TubeMan, pose: TubeManPose, x: number, y: number, z: number): void {
+    const flying = pose.launched || pose.dashing || (!pose.onGround && Math.hypot(pose.vx, pose.vy, pose.vz) > TRAIL_FLY_SPEED);
+    this.effects.trail(s, man.trail, x, y + 0.9 * inflationScale(pose.inflation), z, flying);
   }
 
   /** Where your shots visibly leave from: your character's gun in third person, else the view model. */
@@ -2253,7 +2294,7 @@ export class ClientGame {
       data,
       (id) => this.colorOf(id),
       (id) => (id === this.youId ? this.viewModel.weapon : (this.remotes.get(id)?.man.weapon ?? null)),
-      (id) => lookOf(this.roster.get(id)?.cos),
+      (id) => this.lookOf(id),
     );
     this.hud.show(false);
     this.audio.setCharge(0);
