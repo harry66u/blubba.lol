@@ -19,6 +19,7 @@ import { type Settings, loadIdentity, loadSettings, saveIdentity, saveSettings }
 import { clear } from './ui/dom';
 import { buildReconnecting } from './ui/reconnect';
 import { type AccountTab, buildAccountChip, buildAccountPanel, buildDailyCard, buildProfile, buildQueue } from './ui/accountUi';
+import { buildFaceScan } from './ui/faceScan';
 import { buildLocker } from './ui/locker';
 import { Hud } from './ui/hud';
 import { type PlayMode, buildClickToPlay, buildHowTo, buildMainMenu, buildPause, buildReplayBanner, buildResults, buildRoomJoin, buildScoreboard, buildSettings } from './ui/menus';
@@ -82,7 +83,7 @@ uiRoot.append(hud.root, ...(touch ? [touch.root] : []), scoreLayer, menuLayer, o
 
 type Screen = 'menu' | 'room-join' | 'connecting' | 'queue' | 'playing' | 'reconnecting';
 let screen: Screen = 'menu';
-let overlay: 'none' | 'pause' | 'settings' | 'howto' | 'click' | 'results' | 'loadout' | 'replay' | 'locker' | 'profile' | 'account' = 'none';
+let overlay: 'none' | 'pause' | 'settings' | 'howto' | 'click' | 'results' | 'loadout' | 'replay' | 'locker' | 'profile' | 'account' | 'face' = 'none';
 let accountTab: AccountTab = 'signup';
 let lockerDispose: (() => void) | null = null;
 let pendingJoin: JoinRequest | null = null;
@@ -308,11 +309,23 @@ function setOverlay(next: typeof overlay): void {
     }
     case 'profile':
       overlayLayer.append(
-        buildProfile(account, back, () => openAccount('signup'), () => {
-          void account.logout().then(() => (screen === 'menu' ? showMenu() : back()));
-        }),
+        buildProfile(
+          account,
+          back,
+          () => openAccount('signup'),
+          () => {
+            void account.logout().then(() => (screen === 'menu' ? showMenu() : back()));
+          },
+          () => setOverlay('face'),
+        ),
       );
       break;
+    case 'face': {
+      const scan = buildFaceScan(account, () => setOverlay('profile'));
+      lockerDispose = scan.dispose;
+      overlayLayer.append(scan.root);
+      break;
+    }
     case 'account':
       overlayLayer.append(buildAccountPanel(account, accountTab, back, back));
       break;
@@ -439,6 +452,7 @@ function applySettings(s: Settings): void {
   fpsEl.classList.toggle('hidden', !s.showFps);
   game.refreshTeamColors();
   game.showChat = s.showQuickChat;
+  game.showFaces = s.showFaces;
 }
 
 function resume(): void {

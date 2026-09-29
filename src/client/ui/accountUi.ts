@@ -239,7 +239,7 @@ function buildDailyMini(d: DailyView): HTMLElement | null {
 const MODE_ORDER: ModeId[] = ['knockout', 'teamKnockout', 'ball', 'pump', 'duel'];
 
 /** Profile: level, coins, rank, lifetime stats, and the ranked leaderboard. */
-export function buildProfile(account: AccountClient, onClose: () => void, onAccount: () => void, onLogout: () => void): HTMLElement {
+export function buildProfile(account: AccountClient, onClose: () => void, onAccount: () => void, onLogout: () => void, onFaceScan?: () => void): HTMLElement {
   const p = account.profile;
   const s = p.stats;
   const stat = (k: string, v: string) => el('div', { class: 'stat' }, el('div', { class: 'v', text: v }), el('div', { class: 'k', text: k }));
@@ -321,6 +321,7 @@ export function buildProfile(account: AccountClient, onClose: () => void, onAcco
         'div',
         { class: 'row', style: 'justify-content:center;margin-top:14px' },
         el('button', { class: 'btn', text: 'DONE', on: { click: onClose } }),
+        onFaceScan ? el('button', { class: 'btn small blue', text: account.face?.version ? '📸 Change face scan' : '📸 Face scan', on: { click: account.account ? onFaceScan : onAccount } }) : null,
         account.account ? el('button', { class: 'btn small ghost', text: 'Log out', on: { click: onLogout } }) : null,
       ),
     ),

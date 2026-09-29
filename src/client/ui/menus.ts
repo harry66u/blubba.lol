@@ -668,6 +668,7 @@ export function buildSettings(s: Settings, cb: SettingsCallbacks, tab: 'controls
       ], () => s.quality, (v) => (s.quality = v as Settings['quality']));
       check('Colorblind-friendly team colors', () => s.colorblindTeams, (v) => (s.colorblindTeams = v));
       check("Show other players' quick chat", () => s.showQuickChat, (v) => (s.showQuickChat = v));
+      check("Show other players' face scans", () => s.showFaces, (v) => (s.showFaces = v));
       check('Show FPS', () => s.showFps, (v) => (s.showFps = v));
       body.append(grid);
     }

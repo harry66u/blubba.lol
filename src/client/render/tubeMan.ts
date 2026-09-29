@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { buildFacePhoto, disposeFacePhoto } from './facePhoto';
 import { inflationScale } from '../../shared/player';
 import type { WeaponId } from '../../shared/loadout';
 import { FlexTube, noise1 } from './flexTube';
@@ -230,6 +231,8 @@ export class TubeMan {
   private look: Look = { ...DEFAULT_LOOK };
   private hat: THREE.Group;
   private faceExtras: THREE.Group;
+  /** A player's face scan, worn instead of the cartoon eyes and mouth. */
+  private facePhoto: THREE.Group | null = null;
   private tauntStyle = '';
   private tauntT = 0;
 
@@ -315,6 +318,20 @@ export class TubeMan {
     this.rebuildHat();
   }
 
+  /** Puts a face scan on the head (null goes back to the cartoon face). */
+  setFacePhoto(tex: THREE.Texture | null): void {
+    if (this.facePhoto) {
+      this.face.remove(this.facePhoto);
+      disposeFacePhoto(this.facePhoto);
+      this.facePhoto = null;
+    }
+    const cartoon = [...this.eyes, ...this.pupils, this.mouthSmile, this.mouthO, this.faceExtras];
+    for (const o of cartoon) o.visible = !tex;
+    if (!tex) return;
+    this.facePhoto = buildFacePhoto(tex);
+    this.face.add(this.facePhoto);
+  }
+
   /** Changes pattern, face, hat and weapon finish. */
   setLook(look: Partial<Look>): void {
     const next = { ...this.look, ...look };
@@ -329,6 +346,7 @@ export class TubeMan {
       this.face.remove(this.faceExtras);
       disposeGroup(this.faceExtras);
       this.faceExtras = buildFaceExtras(next.face);
+      this.faceExtras.visible = !this.facePhoto;
       this.face.add(this.faceExtras);
       this.applyFaceBase();
     }
@@ -536,12 +554,19 @@ export class TubeMan {
     const right = SV3.crossVectors(up, fwd).normalize();
     const m = SM.makeBasis(right, up, fwd);
     this.face.quaternion.setFromRotationMatrix(m);
+    if (this.facePhoto) {
+      // Sized to the head (it grows as you inflate) and squashed a little when you get hit.
+      const k = (hr * 0.8) / this.face.scale.x;
+      this.facePhoto.scale.set(k * (p.doubled ? 1.12 : 1), k * (p.launched ? 1.1 : p.doubled ? 0.85 : 1), k);
+      // The face group sits just under the skin; the photo goes on top of it.
+      this.facePhoto.position.z = (hr * 0.12) / this.face.scale.x;
+    }
 
     // Expressions.
     const scared = p.launched;
     const ouch = p.doubled;
-    this.mouthO.visible = scared && !ouch;
-    this.mouthSmile.visible = !this.mouthO.visible;
+    this.mouthO.visible = scared && !ouch && !this.facePhoto;
+    this.mouthSmile.visible = !this.mouthO.visible && !this.facePhoto;
     this.mouthSmile.rotation.z = ouch ? 0 : Math.PI;
     this.mouthSmile.position.y = ouch ? -0.26 : -0.2;
     const face = this.look.face;
@@ -699,6 +724,7 @@ export class TubeMan {
     this.bodyMat.dispose();
     disposeGroup(this.hat);
     disposeGroup(this.faceExtras);
+    if (this.facePhoto) disposeFacePhoto(this.facePhoto);
   }
 }
 

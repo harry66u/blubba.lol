@@ -61,6 +61,11 @@ export class TubePreview {
     this.man.setWeapon(weapon);
   }
 
+  /** Shows a face scan on the preview (null: the cartoon face). */
+  setFace(tex: THREE.Texture | null): void {
+    this.man.setFacePhoto(tex);
+  }
+
   /** Plays a taunt so you can see what you're buying. */
   taunt(style: string): void {
     this.man.taunt(style);

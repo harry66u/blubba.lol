@@ -17,13 +17,21 @@ export interface LeaderboardRow {
   level: number;
 }
 
+export interface FaceStatus {
+  version: number | null;
+  hidden: boolean;
+  banned: boolean;
+}
+
 /**
  * The player's account (optional) and saved progress. Guests are identified by their browser's
  * guest id; accounts by a session token. The server is the source of truth for everything here.
  */
 export class AccountClient {
   token: string | null = storage()?.getItem(TOKEN_KEY) ?? null;
-  account: { name: string } | null = null;
+  account: { name: string; id?: number } | null = null;
+  /** Your face scan: its version (null = none), and whether reports or a moderator hid it. */
+  face: FaceStatus | null = null;
   profile: ProfileView = AccountClient.blankProfile();
   /** False until the first /api/me answer (the menu shows placeholders until then). */
   loaded = false;
@@ -98,7 +106,8 @@ export class AccountClient {
   }
 
   async refresh(): Promise<void> {
-    const r = await this.call<{ account: { name: string } | null; profile: ProfileView | null }>('/api/me');
+    const r = await this.call<{ account: { name: string; id: number } | null; profile: ProfileView | null; face: FaceStatus | null }>('/api/me');
+    this.face = r.face ?? null;
     // A stale token (expired or reset elsewhere): quietly fall back to guest.
     if (this.token && !r.account) this.setToken(null);
     this.apply({ account: r.account, profile: r.profile ?? AccountClient.blankProfile() });
@@ -108,6 +117,7 @@ export class AccountClient {
     const r = await this.call<{ token: string; recoveryCode: string; account: { name: string }; profile: ProfileView }>('/api/account/register', { name, password, guestId: this.guestId });
     this.setToken(r.token);
     this.apply(r);
+    void this.refresh().catch(() => undefined);
     return r.recoveryCode;
   }
 
@@ -115,6 +125,8 @@ export class AccountClient {
     const r = await this.call<{ token: string; account: { name: string }; profile: ProfileView }>('/api/account/login', { name, password });
     this.setToken(r.token);
     this.apply(r);
+    // Picks up the account id and face scan.
+    void this.refresh().catch(() => undefined);
   }
 
   async reset(name: string, recoveryCode: string, password: string): Promise<string> {
@@ -128,7 +140,21 @@ export class AccountClient {
     await this.call('/api/account/logout', {}).catch(() => undefined);
     this.setToken(null);
     this.account = null;
+    this.face = null;
     await this.refresh().catch(() => this.apply({ account: null, profile: AccountClient.blankProfile() }));
+  }
+
+  /** Saves a face scan (a small square image as a data URL) on your own account. */
+  async uploadFace(image: string): Promise<void> {
+    const r = await this.call<{ face: FaceStatus }>('/api/face', { image, mine: true });
+    this.face = r.face;
+    this.emit();
+  }
+
+  async removeFace(): Promise<void> {
+    const r = await this.call<{ face: FaceStatus }>('/api/face/remove', {});
+    this.face = r.face;
+    this.emit();
   }
 
   async buy(itemId: string): Promise<void> {

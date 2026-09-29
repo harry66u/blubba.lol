@@ -55,6 +55,7 @@ import type { Audio } from '../audio/audio';
 import { type Action, type InputManager, codeLabel } from '../input/input';
 import type { Connection } from '../net/connection';
 import { Effects, LandingCircles, type Projectile3D } from '../render/effects';
+import { faceTexture } from '../render/facePhoto';
 import { MapView } from '../render/mapView';
 import { BeachBall } from '../render/beachBall';
 import type { Renderer } from '../render/renderer';
@@ -93,6 +94,8 @@ interface RemoteView {
   cur: PublicPlayer | null;
   lastTagText: string;
   lookKey: string;
+  /** Which face scan they're wearing ('' = the cartoon face). */
+  faceKey: string;
   /** Inflation from your own confirmed hit, shown before the snapshots catch up. */
   inflHint: number;
   hintUntil: number;
@@ -254,6 +257,8 @@ export class ClientGame {
   /** Players whose quick chat you've hidden (this session). */
   readonly muted = new Set<number>();
   showChat = true;
+  /** Show other players' face scans (Settings). Your own always shows. */
+  showFaces = true;
 
   constructor(
     readonly r: Renderer,
@@ -1638,6 +1643,12 @@ export class ClientGame {
     }
   }
 
+  /** The face scan to show for a roster entry ('' = none, or face scans turned off). */
+  private faceKeyOf(entry: RosterEntry | undefined): string {
+    if (!entry?.face || (!this.showFaces && entry.id !== this.youId)) return '';
+    return `${entry.face.account}.${entry.face.v}`;
+  }
+
   private createRemote(id: number): RemoteView {
     const entry = this.roster.get(id);
     const color = this.colorOf(id);
@@ -1645,7 +1656,7 @@ export class ClientGame {
     const man = new TubeMan(color, { physical: this.r.profile.physical, seed: id * 13.7, look });
     this.r.scene.add(man.group);
     const tag = this.hud.createNametag(entry?.name ?? '...', entry?.bot ?? false, this.tagTeam(id));
-    return { id, man, pose: defaultPose(), tag, color, name: entry?.name ?? '...', bot: entry?.bot ?? false, cur: null, lastTagText: '', lookKey: JSON.stringify(look), inflHint: 0, hintUntil: 0 };
+    return { id, man, pose: defaultPose(), tag, color, name: entry?.name ?? '...', bot: entry?.bot ?? false, cur: null, lastTagText: '', lookKey: JSON.stringify(look), faceKey: '', inflHint: 0, hintUntil: 0 };
   }
 
   private removeRemote(rv: RemoteView): void {
@@ -1671,6 +1682,11 @@ export class ClientGame {
       if (key !== rv.lookKey) {
         rv.lookKey = key;
         rv.man.setLook(look);
+      }
+      const fk = this.faceKeyOf(entry);
+      if (fk !== rv.faceKey) {
+        rv.faceKey = fk;
+        rv.man.setFacePhoto(fk && entry.face ? faceTexture(entry.face.account, entry.face.v) : null);
       }
     }
     const alive = c.mode !== MODE_DEAD;
@@ -1907,13 +1923,15 @@ export class ClientGame {
     const entry = this.roster.get(this.youId);
     const color = this.colorOf(this.youId);
     const look = lookOf(entry?.cos);
-    const key = `${color}|${JSON.stringify(look)}|${this.r.profile.physical}`;
+    const fk = this.faceKeyOf(entry);
+    const key = `${color}|${JSON.stringify(look)}|${this.r.profile.physical}|${fk}`;
     if (!this.selfMan || key !== this.selfLookKey) {
       if (this.selfMan) {
         this.r.scene.remove(this.selfMan.group);
         this.selfMan.dispose();
       }
       this.selfMan = new TubeMan(color, { physical: this.r.profile.physical, seed: this.youId * 13.7, look });
+      if (fk && entry?.face) this.selfMan.setFacePhoto(faceTexture(entry.face.account, entry.face.v));
       this.r.scene.add(this.selfMan.group);
       this.selfLookKey = key;
     }

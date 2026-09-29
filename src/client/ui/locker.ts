@@ -3,6 +3,7 @@ import { COSMETIC_SLOTS, type CosmeticItem, type CosmeticSlot, ITEMS, SLOT_INFO,
 import type { WeaponId } from '../../shared/loadout';
 import type { Audio } from '../audio/audio';
 import type { AccountClient } from '../net/account';
+import { faceTexture } from '../render/facePhoto';
 import { TubePreview } from '../render/preview';
 import type { Look } from '../render/tubeMan';
 import { clear, el, hexColor } from './dom';
@@ -90,6 +91,9 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
   let preview: TubePreview | null = null;
   try {
     preview = new TubePreview(colorOf(), lookOf(), opts.weapon);
+    // Your face scan, if you have one showing.
+    const f = account.face;
+    if (f?.version && !f.hidden && account.account?.id) preview.setFace(faceTexture(account.account.id, f.version));
   } catch {
     // No WebGL for a second canvas: the locker still works, just without the 3D preview.
     preview = null;

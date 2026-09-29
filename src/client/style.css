@@ -2797,3 +2797,48 @@ body.touch .inflation .self-gain {
   left: 40px;
   font-size: 24px;
 }
+
+/* --- Face scan ------------------------------------------------------------------------------- */
+.face-scan {
+  width: min(420px, 94vw);
+  max-height: 94vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+.face-scan .face-stage {
+  width: min(240px, 60vw, 42vh);
+  aspect-ratio: 1;
+  border-radius: 20px;
+  border: 4px solid var(--ink);
+  touch-action: none;
+  cursor: grab;
+  background: #e9e6ff;
+}
+.face-scan .face-row {
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.face-scan .face-zoom,
+.face-scan .face-mine {
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+}
+.face-scan .face-zoom input {
+  width: 160px;
+}
+.face-scan .face-mine input {
+  width: 20px;
+  height: 20px;
+}
+.face-scan .face-note {
+  min-height: 2.6em;
+}
+.face-scan .hidden {
+  display: none;
+}

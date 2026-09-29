@@ -20,6 +20,8 @@ export interface Settings {
   colorblindTeams: boolean;
   /** Show other players' quick-chat messages. */
   showQuickChat: boolean;
+  /** Show other players' face scans (off: everyone else wears the cartoon face). */
+  showFaces: boolean;
   showFps: boolean;
   bindings: Record<string, string[]>;
   padBindings: Record<string, number[]>;
@@ -39,6 +41,7 @@ export const DEFAULT_SETTINGS: Settings = {
   volumes: { master: 0.8, effects: 0.9, announcer: 0.9, music: 0.4, muted: false },
   colorblindTeams: false,
   showQuickChat: true,
+  showFaces: true,
   showFps: false,
   bindings: {},
   padBindings: {},
