@@ -4,9 +4,10 @@ import type { GameEvent } from './game/events';
 import type { DynamicSolidInfo, MatchPhase, MatchResult, ModeId, Pickup } from './game/sim';
 import type { Loadout } from './loadout';
 import type { ChaosEvent } from './game/chaos';
+import type { Tornado } from './game/loot';
 import type { Cosmetics, ProgressReport, ReportReason } from './economy';
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 // --- Binary message ids -------------------------------------------------------------------
 export const MSG_INPUTS = 1;
@@ -49,7 +50,11 @@ export type ClientMessage =
   | { type: 'debug'; action: 'chaos'; kind: string }
   | { type: 'debug'; action: 'endIn'; seconds: number }
   | { type: 'debug'; action: 'bots'; count: number }
-  | { type: 'debug'; action: 'streak'; count: number };
+  | { type: 'debug'; action: 'streak'; count: number }
+  /** Drop a supply crate next to you (optionally forcing what's inside), or a normal one somewhere on the map. */
+  | { type: 'debug'; action: 'loot'; kind?: string; far?: boolean }
+  /** Equip any two gadgets right away, ignoring unlocks. */
+  | { type: 'debug'; action: 'gadgets'; utils: string[] };
 
 export interface RosterEntry {
   id: number;
@@ -95,6 +100,10 @@ export type ServerMessage =
       pads: { id: number; x: number; y: number; z: number; half: number; strength: number; until: number }[];
       chaos: (ChaosEvent | null)[];
       crownId: number;
+      /** Supply crates, Air Mines and tornados already in the world (absent from older servers). */
+      crates?: { id: number; x: number; y: number; z: number; falling: boolean; fall: number }[];
+      mines?: { id: number; owner: number; x: number; y: number; z: number; arm: number }[];
+      tornados?: Tornado[];
     }
   | { type: 'pong'; t: number; tick: number }
   /** Ranked matchmaking status while you wait. */

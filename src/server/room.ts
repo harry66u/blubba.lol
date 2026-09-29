@@ -280,6 +280,11 @@ export class Room {
             p.streak = msg.count;
             this.sim.streakReward(p);
           }
+        } else if (msg.action === 'loot') {
+          if (msg.far) this.sim.dropLoot();
+          else this.sim.debugDropLoot(conn.playerId, typeof msg.kind === 'string' ? msg.kind : undefined);
+        } else if (msg.action === 'gadgets' && Array.isArray(msg.utils)) {
+          this.sim.debugSetUtilities(conn.playerId, msg.utils);
         } else if (msg.action === 'endIn' && typeof msg.seconds === 'number') {
           // Jump the match clock forward (to see the final 30 seconds).
           this.sim.phaseEndsAt = this.sim.time + msg.seconds;

@@ -191,6 +191,9 @@ export const UNLOCKS: { level: number; kind: 'mod' | 'utility'; id: ModId | Util
   { level: 6, kind: 'mod', id: 'bigTank' },
   { level: 7, kind: 'mod', id: 'chargeValve' },
   { level: 8, kind: 'mod', id: 'longBarrel' },
+  { level: 9, kind: 'utility', id: 'airMine' },
+  { level: 10, kind: 'utility', id: 'heliumBomb' },
+  { level: 12, kind: 'utility', id: 'tornado' },
 ];
 
 export function unlockLevel(id: string): number {

@@ -16,12 +16,15 @@ for (const mode of MODE_IDS) {
     let outs = 0;
     let kos = 0;
     let falls = 0;
+    // Supply drops and the newer gadgets, to see bots use them.
+    const extra: Record<string, number> = { loot: 0, lootGrab: 0, mine: 0, helium: 0, tornado: 0 };
     const start = sim.time;
     while (sim.phase !== 'results' && sim.time - start < 400) {
       sim.step();
       for (const e of sim.drainEvents()) {
         if (e.t === 'goal') goals++;
         if (e.t === 'ballOut') outs++;
+        if (e.t in extra) extra[e.t]++;
         if (e.t === 'ko') {
           if (e.killer >= 0) kos++;
           else falls++;
@@ -35,7 +38,8 @@ for (const mode of MODE_IDS) {
       `${mode.padEnd(13)} ${mapId.padEnd(12)} ${len}s kos=${kos} falls=${falls}` +
         (sim.ballGame ? ` goals=${goals} outs=${outs}` : '') +
         pump +
-        (r?.teams ? ` teams=${r.teams.scores.join('-')} winner=${r.teams.winner}` : ` top=${r?.standings[0]?.name}:${r?.standings[0]?.score}`),
+        (r?.teams ? ` teams=${r.teams.scores.join('-')} winner=${r.teams.winner}` : ` top=${r?.standings[0]?.name}:${r?.standings[0]?.score}`) +
+        ` loot=${extra.lootGrab}/${extra.loot} mines=${extra.mine} helium=${extra.helium} tornados=${extra.tornado}`,
     );
   }
 }

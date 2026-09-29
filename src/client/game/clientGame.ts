@@ -47,6 +47,8 @@ import { type MatchPhase, type MatchResult, rayCapsule } from '../../shared/game
 import { World } from '../../shared/world';
 import { DEFAULT_LOADOUT, type Loadout, UTILITY_INFO, WEAPON_IDS, WEAPON_INFO, type WeaponStats, computeWeaponStats, sanitizeLoadout } from '../../shared/loadout';
 import { EntityView } from '../render/entities';
+import { GadgetView } from '../render/gadgets';
+import { LOOT_INFO } from '../../shared/game/loot';
 import { CHAOS_INFO, type ChaosEvent, type Environment, NORMAL_ENV, envAt } from '../../shared/game/chaos';
 import { Announcer } from '../audio/announcer';
 import { ReplayView } from './replayView';
@@ -94,7 +96,6 @@ interface RemoteView {
   lookKey: string;
 }
 
-const UTIL_ICONS: Record<string, string> = { 'Bounce Pad': '🟣', 'Air Grenade': '💥', 'Inflatable Wall': '🧱', 'Vacuum Grenade': '🌀' };
 
 function lookOf(cos: Partial<Cosmetics> | undefined): Look {
   return { pattern: cosmeticKey(cos, 'pattern'), face: cosmeticKey(cos, 'face'), hat: cosmeticKey(cos, 'hat'), finish: cosmeticKey(cos, 'finish') };
@@ -160,7 +161,14 @@ export class ClientGame {
   readonly circles = new LandingCircles();
   readonly viewModel = new ViewModel(0xff3b5c);
   readonly entities = new EntityView();
+  /** Supply crates, Air Mines, helium clouds and tornados. */
+  readonly gadgets = new GadgetView();
+  /** Players floating on helium, until this tick. */
+  private floaters = new Map<number, number>();
+  private lastDropToast = -99;
   loadout: Loadout = { ...DEFAULT_LOADOUT };
+  /** The gadgets the server says you're carrying (usually your loadout's). */
+  private equippedUtils: Loadout['utils'] = [...DEFAULT_LOADOUT.utils];
   weapon: WeaponStats = computeWeaponStats('airCannon', []);
   private streamStrength = 0;
   readonly announcer = new Announcer();
@@ -256,7 +264,8 @@ export class ClientGame {
     this.world = new World(this.map);
     this.mapView = new MapView(this.map, this.world);
     this.ctx = this.makeCtx({ ...ALL_FEATURES });
-    r.scene.add(this.mapView.root, this.effects.root, this.circles.root, this.entities.root);
+    r.scene.add(this.mapView.root, this.effects.root, this.circles.root, this.entities.root, this.gadgets.root);
+    this.gadgets.setMap(this.map);
     r.scene.add(r.camera);
     r.camera.add(this.viewModel.root);
     this.replay = new ReplayView(r.scene, this.effects);
@@ -278,6 +287,7 @@ export class ClientGame {
   }
 
   private applyWeapon(l: Loadout): void {
+    this.equippedUtils = [...l.utils];
     this.weapon = computeWeaponStats(l.weapon, l.mods);
     this.ctx.weapon = this.weapon;
     this.viewModel.setWeapon(l.weapon);
@@ -295,6 +305,8 @@ export class ClientGame {
     this.r.setTheme(this.map.theme);
     this.ctx = this.makeCtx(this.ctx.features);
     this.entities.clear();
+    this.gadgets.clear();
+    this.gadgets.setMap(this.map);
     this.setupModeProps();
   }
 
@@ -355,6 +367,8 @@ export class ClientGame {
     this.ctx = this.makeCtx(msg.room.features);
     this.hud.showAbilities(msg.room.features);
     this.entities.clear();
+    this.gadgets.clear();
+    this.floaters.clear();
     for (let i = this.world.staticCount; i < this.world.solids.length; i++) this.world.setSolidAt(i, null);
     this.clock.reset();
     this.clock.observe(msg.tick, performance.now());
@@ -395,6 +409,8 @@ export class ClientGame {
     this.audio.setCharge(0);
     this.audio.setBlower(0);
     this.entities.clear();
+    this.gadgets.clear();
+    this.floaters.clear();
   }
 
   // --- Network -----------------------------------------------------------------------------
@@ -464,6 +480,12 @@ export class ClientGame {
         }
         this.chaos = msg.chaos.filter((c): c is ChaosEvent => !!c);
         this.crownId = msg.crownId;
+        {
+          const tick = Math.round(this.renderTick);
+          for (const c of msg.crates ?? []) this.gadgets.addCrate(c.id, c.x, c.y, c.z, c.falling ? (this.world.groundBelow(c.x, c.y, c.z) ?? c.y) : c.y, c.fall, c.falling, tick);
+          for (const m of msg.mines ?? []) this.gadgets.addMine(m.id, m.x, m.y, m.z, m.arm);
+          for (const t of msg.tornados ?? []) this.gadgets.addTornado(t, tick);
+        }
         break;
       case 'error':
         if (msg.code === 'kicked') this.onKicked?.(msg.message);
@@ -582,6 +604,12 @@ export class ClientGame {
         return true;
       case 'pickup':
         return e.by === you;
+      case 'lootGrab':
+        return e.by === you;
+      case 'floaty':
+        return e.id === you;
+      case 'swept':
+        return e.target === you;
       case 'streak':
         return e.id === you;
       case 'pop':
@@ -815,6 +843,109 @@ export class ClientGame {
           }
         } else if (e.active && e.kind === 'pin') {
           this.hud.toast('A PIN appeared! It pops anyone at 100% inflation.', 3000);
+        }
+        break;
+      }
+      case 'loot': {
+        this.gadgets.addCrate(e.id, e.x, e.y, e.z, e.groundY, e.fall, true, e.tick);
+        // One notice per wave of drops, so a burst of crates doesn't spam the screen.
+        if (this.time - this.lastDropToast > 4) {
+          this.lastDropToast = this.time;
+          this.hud.toast('📦 Supply drop incoming! Grab it before anyone else.', 2600);
+          a.supplyDrop();
+        }
+        break;
+      }
+      case 'lootLand':
+        this.gadgets.landCrate(e.id, e.x, e.y, e.z, e.tick);
+        break;
+      case 'lootGrab': {
+        this.gadgets.removeCrate(e.id);
+        const info = LOOT_INFO[e.kind];
+        fx.confettiBurst(e.x, e.y + 0.6, e.z, 40, [0xffa630, 0x2ec5ff, 0xffffff, 0xffd60a]);
+        fx.shockwave(e.x, e.y + 0.6, e.z, 2.2, 0.35, 0xffd60a, false, this.r.camera.position);
+        const p = this.posOf(e.by);
+        const at = p ? tmpV.set(p.x, p.y + 2.8, p.z) : tmpV.set(e.x, e.y + 2, e.z);
+        this.hud.popup(at, `${info.icon} ${info.name.toUpperCase()}!`, info.color, 1.1, 1.5, e.by !== you);
+        if (e.by === you) {
+          this.hud.toast(`${info.icon} ${info.name}! ${info.blurb}.`, 3200);
+          this.hud.flash('rgba(255, 214, 10, 0.35)', 300);
+          a.powerUp();
+        } else {
+          a.lootGrab([e.x, e.y, e.z]);
+          this.hud.addKill(`<b style="color:${hexColor(this.colorOf(e.by))}">${esc(this.nameOf(e.by))}</b> grabbed ${info.icon} <b>${esc(info.name)}</b>`, false);
+        }
+        break;
+      }
+      case 'lootGone': {
+        const v = this.gadgets.removeCrate(e.id);
+        if (v && e.why !== 'reset') fx.airPuff(v.state.x, v.state.y + 0.5, v.state.z, 10, 2, 0.3, 0xffe0a0);
+        break;
+      }
+      case 'mine': {
+        const rs = this.remoteShots.get(e.proj);
+        if (rs) {
+          fx.removeProjectile(e.proj);
+          this.remoteShots.delete(e.proj);
+        }
+        this.gadgets.addMine(e.id, e.x, e.y, e.z, e.arm);
+        a.beep([e.x, e.y, e.z]);
+        break;
+      }
+      case 'mineGone': {
+        this.gadgets.removeMine(e.id);
+        if (e.boom) {
+          const R = BALANCE.utilities.airMine.radius;
+          this.showBlast(e.x, e.y + 0.4, e.z, R, 1.2);
+          fx.groundRing(e.x, e.y, e.z, 2, 0xff5a7a);
+          fx.airPuff(e.x, e.y + 0.3, e.z, 16, 7, 0.3);
+          a.kaboom(e.owner === you ? null : [e.x, e.y, e.z]);
+          this.hud.popup(tmpV.set(e.x, e.y + 2, e.z), 'KA-BLAM!', '#ff5a7a', 1.5, 1.1);
+          if (e.owner === you) this.hud.callout('MINE TRIGGERED!', '', 1.2, '#ff5a7a');
+        } else {
+          fx.airPuff(e.x, e.y + 0.2, e.z, 5, 1.2, 0.18);
+        }
+        break;
+      }
+      case 'helium': {
+        if (this.remoteShots.has(e.id)) {
+          fx.removeProjectile(e.id);
+          this.remoteShots.delete(e.id);
+        }
+        this.gadgets.addCloud(e.x, e.y, e.z, e.r, e.until);
+        fx.confettiBurst(e.x, e.y, e.z, 24, [0xffb3e6, 0xffffff, 0xd9c2ff]);
+        a.helium([e.x, e.y, e.z]);
+        this.hud.popup(tmpV.set(e.x, e.y + 1.5, e.z), 'FWSSSH!', '#ff8fd8', 1.2, 1.1, true);
+        break;
+      }
+      case 'floaty': {
+        this.floaters.set(e.id, e.until);
+        if (e.id === you) {
+          this.hud.callout('FLOATING!', 'Helium! You drift up and fly farther when hit. Dash to steer.', 1.8, '#ff8fd8');
+        } else {
+          const p = this.posOf(e.id);
+          if (p) this.hud.popup(tmpV.set(p.x, p.y + 2.8, p.z), 'WHEEE!', '#ff8fd8', 0.9, 1, true);
+        }
+        break;
+      }
+      case 'tornado': {
+        this.gadgets.addTornado({ id: e.id, owner: e.owner, x: e.x, y: e.y, z: e.z, dx: e.dx, dz: e.dz, speed: e.speed, until: e.until }, e.tick);
+        fx.groundRing(e.x, e.y, e.z, 1.6, 0xe8f0ff);
+        this.hud.popup(tmpV.set(e.x, e.y + 3, e.z), 'WHOOOSH!', '#cfe6ff', 1.2, 1.1, e.owner !== you);
+        break;
+      }
+      case 'tornadoGone': {
+        const v = this.gadgets.removeTornado(e.id);
+        if (v) fx.airPuff(v.state.x, v.state.y + 2, v.state.z, 14, 4, 0.4, 0xeef4ff);
+        break;
+      }
+      case 'swept': {
+        if (e.target === you) {
+          this.hud.callout('CAUGHT IN A TORNADO!', 'Dash to break out!', 1.4, '#9fd4ff');
+          this.trauma = Math.min(1, this.trauma + 0.3);
+        } else {
+          const p = this.posOf(e.target);
+          if (p) this.hud.popup(tmpV.set(p.x, p.y + 2.6, p.z), 'WHIRL!', '#cfe6ff', 1, 1, true);
         }
         break;
       }
@@ -1263,6 +1394,11 @@ export class ClientGame {
         fx.groundRing(e.x, e.y, e.z, 0.6);
         a.boing(pos);
         break;
+      case 'spring':
+        fx.groundRing(e.x, e.y, e.z, 1.2, 0xff9fd0);
+        a.boing(pos, true);
+        this.hud.popup(tmpV.set(e.x, e.y + 2, e.z), 'SPROING!', '#ff5fd2', 1, 0.9, true);
+        break;
       case 'djump':
         fx.airPuff(e.x, e.y + 0.2, e.z, 8, 2.5, 0.25);
         a.boing(pos);
@@ -1299,8 +1435,9 @@ export class ClientGame {
     const a = this.audio;
     const fx = this.effects;
     if (out.jumped) {
-      fx.groundRing(p.px, p.py, p.pz, 0.5);
-      a.boing(null);
+      fx.groundRing(p.px, p.py, p.pz, out.springJump ? 1.2 : 0.5, out.springJump ? 0xff9fd0 : 0xffffff);
+      a.boing(null, out.springJump);
+      if (out.springJump) this.hud.popup(tmpV.set(p.px, p.py + 0.5, p.pz), 'SPROING!', '#ff5fd2', 1, 0.9);
     }
     if (out.doubleJumped) {
       fx.airPuff(p.px, p.py + 0.1, p.pz, 8, 2.5, 0.25);
@@ -1455,9 +1592,41 @@ export class ClientGame {
     this.mapView.update(dt, this.time);
     for (const v of this.entities.vacuums) this.effects.vacuumSwirl(v.x, v.y, v.z, BALANCE.utilities.vacuumGrenade.radius, dt);
     this.entities.update(dt, this.clock.tickAt(performance.now()));
+    this.gadgets.update(
+      dt,
+      this.renderTick,
+      this.world,
+      this.effects,
+      this.r.camera.position,
+      (x, y, z) => {
+        this.effects.groundRing(x, y, z, 1.1, 0xffe0a0);
+        this.audio.thud([x, y, z], 10);
+      },
+      (x, y, z) => this.audio.tornadoWind([x, y, z]),
+    );
+    this.updateFloaters();
     this.effects.update(dt);
     this.updateCircles();
     this.hud.updatePopups(this.r.camera, dt);
+  }
+
+  /** Bubbles around anyone floating on helium (and a feathery trail on you). */
+  private updateFloaters(): void {
+    const tick = this.renderTick;
+    for (const [id, until] of this.floaters) {
+      if (tick >= until) {
+        this.floaters.delete(id);
+        continue;
+      }
+      if (id === this.youId) continue;
+      const p = this.posOf(id);
+      if (p && Math.random() < 0.6) this.effects.heliumFizz(p.x, p.y + 1.2, p.z, 0.9, 1);
+    }
+    const me = this.pred;
+    if (this.havePred && me.mode !== MODE_DEAD && (me.heliumTimer > 0 || me.floatTimer > 0) && Math.random() < 0.35) {
+      if (me.heliumTimer > 0) this.effects.heliumFizz(me.px, me.py + 0.4, me.pz, 0.8, 1);
+      else this.effects.sparkle(me.px + (Math.random() - 0.5), me.py + 0.2, me.pz + (Math.random() - 0.5));
+    }
   }
 
   private predictStep(): void {
@@ -2001,11 +2170,14 @@ export class ClientGame {
         alive,
         weaponName: WEAPON_INFO[w.id].name.toUpperCase(),
         stream: w.kind === 'stream',
-        u1Ready: 1 - Math.min(1, p.u1Cool / BALANCE.utilities[this.loadout.utils[0]].cooldown),
-        u2Ready: 1 - Math.min(1, p.u2Cool / BALANCE.utilities[this.loadout.utils[1]].cooldown),
+        u1Ready: 1 - Math.min(1, p.u1Cool / BALANCE.utilities[this.equippedUtils[0]].cooldown),
+        u2Ready: 1 - Math.min(1, p.u2Cool / BALANCE.utilities[this.equippedUtils[1]].cooldown),
         pin: p.pinTimer,
         turbo: alive ? p.turboTimer : 0,
         mega: alive ? p.megaShots : 0,
+        feather: alive ? p.floatTimer : 0,
+        helium: alive ? p.heliumTimer : 0,
+        spring: alive ? p.springJumps : 0,
       },
       dt,
     );
@@ -2023,11 +2195,11 @@ export class ClientGame {
       brace: 1 - p.braceCool / BALANCE.brace.cooldown,
       grab: 1 - Math.min(1, p.grabCool / BALANCE.grab.cooldown),
       grapple: 1 - Math.min(1, p.grappleCool / BALANCE.grapple.cooldown),
-      u1: 1 - Math.min(1, p.u1Cool / BALANCE.utilities[this.loadout.utils[0]].cooldown),
-      u2: 1 - Math.min(1, p.u2Cool / BALANCE.utilities[this.loadout.utils[1]].cooldown),
+      u1: 1 - Math.min(1, p.u1Cool / BALANCE.utilities[this.equippedUtils[0]].cooldown),
+      u2: 1 - Math.min(1, p.u2Cool / BALANCE.utilities[this.equippedUtils[1]].cooldown),
       reloading: p.reloadTimer > 0,
       features: this.ctx.features,
-      utilIcons: [UTIL_ICONS[UTILITY_INFO[this.loadout.utils[0]].name] ?? '?', UTIL_ICONS[UTILITY_INFO[this.loadout.utils[1]].name] ?? '?'],
+      utilIcons: [UTILITY_INFO[this.equippedUtils[0]].icon, UTILITY_INFO[this.equippedUtils[1]].icon],
     });
     const k = (a: Action) => this.key(a);
     this.hud.setKeys(
@@ -2038,7 +2210,7 @@ export class ClientGame {
       active: alive && this.input.enabled && this.match.phase !== 'results' && !this.replay.active,
       features: this.ctx.features,
       keyOf: k,
-      utilName: (i) => UTILITY_INFO[this.loadout.utils[i]].name,
+      utilName: (i) => UTILITY_INFO[this.equippedUtils[i]].name,
     });
     this.hud.ping.textContent = `${Math.round(this.net.rtt)} ms`;
   }

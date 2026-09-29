@@ -885,6 +885,146 @@ export class Audio {
     bp.connect(cg).connect(out);
   }
 
+  // --- Floor loot and gadgets --------------------------------------------------------------
+
+  /** Supply drop announced: a friendly two-note chime and a falling whistle. */
+  supplyDrop(): void {
+    if (!this.throttle('supplyDrop', 800)) return;
+    const out = this.out(null, 0.28);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    [
+      [1175, 0],
+      [880, 0.16],
+    ].forEach(([f, dt]) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = f;
+      const g = ctx.createGain();
+      this.env(g, t + dt, 0.005, 0.55, 0.5);
+      osc.connect(g).connect(out);
+      osc.start(t + dt);
+      osc.stop(t + dt + 0.6);
+    });
+    const w = ctx.createOscillator();
+    w.type = 'sine';
+    w.frequency.setValueAtTime(2200, t + 0.35);
+    w.frequency.exponentialRampToValueAtTime(700, t + 1.2);
+    const wg = ctx.createGain();
+    this.env(wg, t + 0.35, 0.05, 0.12, 0.85);
+    w.connect(wg).connect(out);
+    w.start(t + 0.35);
+    w.stop(t + 1.3);
+  }
+
+  /** Someone else grabbed a crate: a quick sparkly arpeggio at the crate. */
+  lootGrab(pos: [number, number, number] | null): void {
+    const out = this.out(pos, 0.35);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    [784, 988, 1175, 1568].forEach((f, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.value = f;
+      const g = ctx.createGain();
+      const t0 = t + i * 0.05;
+      this.env(g, t0, 0.004, 0.4, 0.2);
+      osc.connect(g).connect(out);
+      osc.start(t0);
+      osc.stop(t0 + 0.25);
+    });
+  }
+
+  /** Air Mine going off: a deep thump under a burst of air. */
+  kaboom(pos: [number, number, number] | null): void {
+    const out = this.out(pos, 0.9);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(140, t);
+    osc.frequency.exponentialRampToValueAtTime(32, t + 0.35);
+    const og = ctx.createGain();
+    this.env(og, t, 0.002, 1.1, 0.4);
+    osc.connect(og).connect(out);
+    osc.start(t);
+    osc.stop(t + 0.45);
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.setValueAtTime(5000, t);
+    f.frequency.exponentialRampToValueAtTime(250, t + 0.45);
+    const g = ctx.createGain();
+    this.env(g, t, 0.003, 0.9, 0.45);
+    f.connect(g).connect(out);
+    this.noise(f, t, 0.5);
+  }
+
+  /** Helium hiss with a squeaky rising "wheee". */
+  helium(pos: [number, number, number] | null): void {
+    const out = this.out(pos, 0.55);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 3500;
+    const hg = ctx.createGain();
+    this.env(hg, t, 0.02, 0.5, 0.7);
+    hp.connect(hg).connect(out);
+    this.noise(hp, t, 0.8);
+    const osc = ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(700, t + 0.1);
+    osc.frequency.exponentialRampToValueAtTime(2100, t + 0.6);
+    const vib = ctx.createOscillator();
+    vib.frequency.value = 14;
+    const vg = ctx.createGain();
+    vg.gain.value = 60;
+    vib.connect(vg).connect(osc.frequency);
+    const og = ctx.createGain();
+    this.env(og, t + 0.1, 0.03, 0.22, 0.55);
+    osc.connect(og).connect(out);
+    osc.start(t + 0.1);
+    vib.start(t + 0.1);
+    osc.stop(t + 0.75);
+    vib.stop(t + 0.75);
+  }
+
+  /** A whirling gust (repeated while a tornado is around). */
+  tornadoWind(pos: [number, number, number] | null): void {
+    const out = this.out(pos, 0.5);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.Q.value = 2.5;
+    f.frequency.setValueAtTime(400, t);
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 5;
+    const lg = ctx.createGain();
+    lg.gain.value = 260;
+    lfo.connect(lg).connect(f.frequency);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.8, t + 0.25);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.25);
+    f.connect(g).connect(out);
+    this.noise(f, t, 1.3);
+    lfo.start(t);
+    lfo.stop(t + 1.3);
+    const rumble = ctx.createBiquadFilter();
+    rumble.type = 'lowpass';
+    rumble.frequency.value = 180;
+    const rg = ctx.createGain();
+    this.env(rg, t, 0.2, 0.6, 1.0);
+    rumble.connect(rg).connect(out);
+    this.noise(rumble, t, 1.3);
+  }
+
   /** Two-tone alert for random events and the final countdown. */
   siren(): void {
     const out = this.out(null, 0.25);

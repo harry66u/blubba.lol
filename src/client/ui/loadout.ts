@@ -38,7 +38,7 @@ export function saveLoadout(l: Loadout): void {
 }
 
 const WEAPON_ICON: Record<WeaponId, string> = { airCannon: '💨', leafBlower: '🍃', airHorn: '📯', pumpRifle: '🎯' };
-const UTIL_ICON: Record<UtilityId, string> = { bouncePad: '🟣', airGrenade: '💥', inflatableWall: '🧱', vacuumGrenade: '🌀' };
+const UTIL_ICON = Object.fromEntries(UTILITY_IDS.map((u) => [u, UTILITY_INFO[u].icon])) as Record<UtilityId, string>;
 
 /** 0..1 ratings used for the little stat bars on each weapon card. */
 function ratings(id: WeaponId, mods: ModId[]): [string, number][] {

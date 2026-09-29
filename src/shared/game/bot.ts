@@ -184,7 +184,7 @@ export class BotBrain {
       this.aimFeet = rnd() < 0.35;
     }
     const target = sim.players.get(this.targetId);
-    const obj = this.objective(sim, me, target);
+    const obj = this.objective(sim, me, target) ?? this.lootObjective(sim, me);
 
     // --- Aim. ---
     const turnRate = (2.5 + this.skill * 6) * sim.dt;
@@ -330,9 +330,12 @@ export class BotBrain {
       if (cool > 0 || !target) continue;
       const u = utils[slot];
       const want =
-        ((u === 'airGrenade' || u === 'vacuumGrenade') && dist > 5 && dist < 14 && rnd() < 0.004 * this.skill) ||
+        ((u === 'airGrenade' || u === 'vacuumGrenade' || u === 'heliumBomb') && dist > 5 && dist < 14 && rnd() < 0.004 * this.skill) ||
         (u === 'bouncePad' && s.onGround && rnd() < 0.0015) ||
-        (u === 'inflatableWall' && dist < 10 && rnd() < 0.0015);
+        (u === 'inflatableWall' && dist < 10 && rnd() < 0.0015) ||
+        // Mines get lobbed where the target is headed; tornados get sent rolling at them.
+        (u === 'airMine' && s.onGround && dist > 3 && dist < 12 && rnd() < 0.001 + 0.003 * this.skill) ||
+        (u === 'tornado' && s.onGround && dist > 3 && dist < 14 && aimError < 0.3 && rnd() < 0.001 + 0.003 * this.skill);
       if (want) {
         this.press(slot === 0 ? 'util1' : 'util2');
         break;
@@ -360,6 +363,40 @@ export class BotBrain {
       f.buttons = s.ammo > 0 && s.reloadTimer <= 0 && sim.time >= this.nextShotAt ? BTN_FIRE : 0;
     }
     return { ...f };
+  }
+
+  /** Supply crates this bot has decided to chase (or ignore), by crate id. */
+  private lootPlans = new Map<number, boolean>();
+
+  /** Sometimes run for a nearby supply crate that's on (or nearly on) our level and reachable on foot. */
+  private lootObjective(sim: GameSim, me: SimPlayer): Objective | null {
+    const s = me.state;
+    if (!sim.crates.length) return null;
+    let best: { x: number; z: number } | null = null;
+    let bestD = Infinity;
+    for (const c of sim.crates) {
+      const d = Math.hypot(c.x - s.px, c.z - s.pz);
+      if (d > 26) continue;
+      // Wait for falling crates to get low, and skip ones up on another level.
+      if (c.falling ? c.y - s.py > 9 : Math.abs(c.y - s.py) > 1.5) continue;
+      let go = this.lootPlans.get(c.id);
+      if (go === undefined) {
+        go = this.rng() < 0.35 + this.skill * 0.45;
+        if (this.lootPlans.size > 40) this.lootPlans.clear();
+        this.lootPlans.set(c.id, go);
+      }
+      if (go && d < bestD) {
+        bestD = d;
+        best = c;
+      }
+    }
+    if (!best) return null;
+    // Only walk there if there's floor all the way.
+    for (let k = 1; k <= 5; k++) {
+      const f = k / 6;
+      if (sim.world.groundBelow(s.px + (best.x - s.px) * f, s.py + 1.5, s.pz + (best.z - s.pz) * f, 4) === null) return null;
+    }
+    return { move: { x: best.x, z: best.z }, arrive: 0.3, hold: false, aim: null, shoot: true };
   }
 
   private validTarget(sim: GameSim, id: number): boolean {
