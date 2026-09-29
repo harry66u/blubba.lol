@@ -2,6 +2,7 @@ import type { WebSocket } from 'ws';
 import { BALANCE } from '../shared/balance';
 import { RANKED } from '../shared/economy';
 import { MODE_IDS, type ModeId } from '../shared/game/modes';
+import { KNOCKOUT_MAPS, mapForMode } from '../shared/maps';
 import type { Loadout } from '../shared/loadout';
 import { checkName, randomGuestName } from '../shared/names';
 import { type ClientMessage, type JoinRequest, PROTOCOL_VERSION, type ServerMessage } from '../shared/protocol';
@@ -23,6 +24,11 @@ export function normalizeCode(raw: string): string {
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, '')
     .slice(0, CODE_LENGTH);
+}
+
+/** A quick-play map pick that fits the mode (Ball and Pump have their own arenas), or null for any map. */
+export function wantedMap(mode: ModeId, map: unknown): string | null {
+  return typeof map === 'string' && mapForMode(mode) === null && KNOCKOUT_MAPS.includes(map) ? map : null;
 }
 
 /** Someone waiting for a ranked opponent. */
@@ -110,16 +116,21 @@ export class Lobby {
 
   /**
    * Quick play for a mode. The busiest room with space wins so people end up playing together;
-   * for 1v1 that means the room where someone is already waiting (sparring with a bot).
+   * for 1v1 that means the room where someone is already waiting (sparring with a bot). With a
+   * map picked, only rooms on that map count, and if there are none a new room opens on it. New
+   * rooms without a pick start on a random knockout map.
    */
-  findPublicRoom(mode: ModeId = 'knockout'): Room {
+  findPublicRoom(mode: ModeId = 'knockout', map: string | null = null): Room {
+    const want = wantedMap(mode, map);
     let best: Room | null = null;
     for (const r of this.rooms.values()) {
       if (r.isPrivate || r.mode !== mode || !r.canJoin()) continue;
+      if (want && r.settings.mapId !== want) continue;
       if (!best || r.humanCount > best.humanCount) best = r;
     }
     if (best) return best;
-    const room = new Room(this.newCode(), false, { mode }, this.store);
+    const mapId = want ?? KNOCKOUT_MAPS[Math.floor(Math.random() * KNOCKOUT_MAPS.length)];
+    const room = new Room(this.newCode(), false, { mode, mapId }, this.store);
     this.rooms.set(room.code, room);
     return room;
   }
@@ -182,6 +193,8 @@ export class Lobby {
     }
 
     let room: Room | undefined;
+    /** The map this player picked for quick play (the room stays on it while they're in). */
+    let picked: string | null = null;
     if (join.kind === 'code') {
       room = this.rooms.get(normalizeCode(String(join.code ?? '')));
       if (!room || room.closed || room.ranked) return fail('not_found', "That room doesn't exist anymore. Check the code or start a new room.");
@@ -197,9 +210,10 @@ export class Lobby {
       this.rooms.set(room.code, room);
     } else {
       const mode = typeof join.mode === 'string' && (MODE_IDS as readonly string[]).includes(join.mode) ? join.mode : 'knockout';
-      room = this.findPublicRoom(mode);
+      picked = wantedMap(mode, join.map);
+      room = this.findPublicRoom(mode, picked);
     }
-    const conn = room.join(ws, name, guestId, msg.loadout, identity);
+    const conn = room.join(ws, name, guestId, msg.loadout, identity, picked);
     if (!conn) return fail('full', 'That room is full (10 players).');
     this.connRoom.set(ws, { room, conn });
   }

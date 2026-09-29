@@ -56,6 +56,7 @@ decor.push({ type: 'tubeMan', x: -19.5, y: 7, z: 19.5, color: 0x34c759 });
 export const BOUNCE_HOUSE: MapDef = {
   id: 'bounceHouse',
   name: 'Bounce Castle',
+  icon: '🏰',
   solids,
   bouncePads: [],
   spawns: [

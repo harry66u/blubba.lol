@@ -22,6 +22,8 @@ export interface MenuCallbacks {
   onPlay: (name: string, mode: PlayMode) => void;
   onChallenge: (name: string) => void;
   onModeChange: (mode: PlayMode) => void;
+  /** The map picked for quick play (null: any map). */
+  onMapChange: (map: string | null) => void;
   onCreate: (name: string) => void;
   onJoinCode: (name: string, code: string) => void;
   onSettings: () => void;
@@ -126,6 +128,62 @@ export interface TeamView {
   percent: boolean;
 }
 
+/**
+ * The map row under the mode picker: any map, or one of the knockout maps, each a small tile in
+ * that map's sky colors with its icon; the picked map's name shows above. Modes with their own
+ * arena (and ranked) say so instead.
+ */
+function mapPicker(initial: string | null, onChange: (map: string | null) => void): { el: HTMLElement; setMode: (m: PlayMode) => void } {
+  let picked = initial;
+  let mode: PlayMode = 'knockout';
+  const label = (id: string | null) => (id ? MAPS[id].name : 'Any map');
+  const name = el('span', { class: 'map-name', attrs: { 'aria-live': 'polite' } });
+  const tiles = el('div', { class: 'map-tiles', attrs: { role: 'radiogroup', 'aria-label': 'Map' } });
+  const wrap = el('div', { class: 'map-picker' }, el('div', { class: 'map-head' }, el('span', { class: 'label', text: 'Map' }), name), tiles);
+  const refresh = () => {
+    const forced = mode === 'ranked' ? null : mapForMode(mode);
+    const fixed = mode === 'ranked' || !!forced;
+    wrap.classList.toggle('fixed', fixed);
+    name.textContent = forced ? `${MAPS[forced].name} (its own arena)` : mode === 'ranked' ? 'Picked for you' : label(picked);
+    for (const b of tiles.querySelectorAll('button')) {
+      const on = !fixed && (b.dataset.map || null) === picked;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-checked', String(on));
+      b.disabled = fixed;
+    }
+  };
+  for (const id of [null, ...KNOCKOUT_MAPS]) {
+    const b = el(
+      'button',
+      {
+        class: 'map-tile',
+        attrs: { 'data-map': id ?? '', role: 'radio', title: label(id), 'aria-label': label(id) },
+        on: {
+          click: () => {
+            picked = id;
+            onChange(id);
+            refresh();
+          },
+        },
+      },
+      el('span', { class: 'ico', text: id ? (MAPS[id].icon ?? '🗺️') : '🎲', attrs: { 'aria-hidden': 'true' } }),
+    );
+    if (id) {
+      b.style.setProperty('--sky-top', hexColor(MAPS[id].theme.skyTop));
+      b.style.setProperty('--sky-mid', hexColor(MAPS[id].theme.skyHorizon));
+    }
+    tiles.append(b);
+  }
+  refresh();
+  return {
+    el: wrap,
+    setMode: (m) => {
+      mode = m;
+      refresh();
+    },
+  };
+}
+
 /** `side` sits beside the main card on wide screens and below it on narrow ones (the daily challenges). */
 export function buildMainMenu(
   name: string,
@@ -134,6 +192,7 @@ export function buildMainMenu(
   initialMode: PlayMode = 'knockout',
   accountName: string | null = null,
   side: HTMLElement | null = null,
+  initialMap: string | null = null,
 ): HTMLElement {
   const err = el('div', { class: 'error-text' });
   const nameInput = nameField(accountName ?? name, cb.onNameChange, err);
@@ -158,6 +217,7 @@ export function buildMainMenu(
     },
   });
   let mode: PlayMode = initialMode;
+  const maps = mapPicker(initialMap, cb.onMapChange);
   const blurb = el('div', { class: 'mode-blurb', attrs: { 'aria-live': 'polite' } });
   const picker = el('div', { class: 'mode-picker', attrs: { role: 'radiogroup', 'aria-label': 'Game mode' } });
   const play = el('button', {
@@ -178,6 +238,7 @@ export function buildMainMenu(
       b.setAttribute('aria-checked', String(b.dataset.mode === m));
     }
     blurb.textContent = info(m).blurb;
+    maps.setMode(m);
   };
   for (const m of [...MODE_IDS, 'ranked'] as PlayMode[]) {
     const b = el(
@@ -249,6 +310,7 @@ export function buildMainMenu(
     el('div', { class: 'name-row' }, el('label', { class: 'label', text: 'Your name' }), el('div', { class: 'row' }, nameInput, accountName ? null : dice)),
     picker,
     blurb,
+    maps.el,
     play,
     el('div', { class: 'row split' }, create, challenge),
     el('div', { class: 'row code-row' }, el('div', { class: 'grow code-label', text: 'Got a code?' }), codeInput, joinBtn),
@@ -325,7 +387,7 @@ export function buildRoomJoin(
 export function buildConnecting(join: JoinRequest, onCancel: () => void): HTMLElement {
   const title =
     join.kind === 'quick'
-      ? `Finding a ${MODE_INFO[join.mode ?? 'knockout']?.name ?? ''} match`
+      ? `Finding a ${MODE_INFO[join.mode ?? 'knockout']?.name ?? ''} match${join.map && MAPS[join.map] ? ` on ${MAPS[join.map].name}` : ''}`
       : join.kind === 'create'
         ? 'Making your room'
         : join.kind === 'challenge'

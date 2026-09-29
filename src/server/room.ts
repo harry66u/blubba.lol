@@ -44,6 +44,8 @@ export interface Conn {
   chatTimes: number[];
   /** Players this connection already reported (one report each). */
   reported: Set<number>;
+  /** The map they picked for quick play (null: any map). A public room stays on it while they're in. */
+  wantMap: string | null;
 }
 
 const CHAT_MIN_GAP_MS = 1200;
@@ -166,7 +168,7 @@ export class Room {
     return idx;
   }
 
-  join(ws: WebSocket, name: string, guestId: string, loadout?: Loadout, identity: Identity = { key: null, accountId: null }): Conn | null {
+  join(ws: WebSocket, name: string, guestId: string, loadout?: Loadout, identity: Identity = { key: null, accountId: null }, wantMap: string | null = null): Conn | null {
     if (!this.canJoin()) return null;
     // Make room by removing a bot if needed.
     if (this.playerCount >= BALANCE.match.maxPlayers) this.removeOneBot();
@@ -174,7 +176,7 @@ export class Room {
     const cos = profile ? { ...profile.cosmetics } : { ...DEFAULT_COSMETICS };
     const clean = sanitizeLoadout(loadout, this.allowed(identity));
     const p = this.sim.addPlayer(name, { loadout: clean, cos, color: this.colorFor(cos.color, -1) });
-    const conn: Conn = { ws, playerId: p.id, guestId, name, rtt: 0, inputMsgs: 0, key: identity.key, accountId: identity.accountId, chatTimes: [], reported: new Set() };
+    const conn: Conn = { ws, playerId: p.id, guestId, name, rtt: 0, inputMsgs: 0, key: identity.key, accountId: identity.accountId, chatTimes: [], reported: new Set(), wantMap };
     this.conns.set(p.id, conn);
     if (this.ranked && identity.key) this.rankedKeys.set(p.id, identity.key);
     if (this.hostId < 0 || !this.conns.has(this.hostId)) this.hostId = p.id;
@@ -361,8 +363,18 @@ export class Room {
     this.broadcastJson({ type: 'entities', ...fresh.entitySnapshot() });
   }
 
-  /** Public knockout rooms move to the next map when the results screen ends. */
+  /** Someone here picked this room's map, so it doesn't rotate away from it. */
+  get mapPinned(): boolean {
+    for (const c of this.conns.values()) if (c.wantMap === this.settings.mapId) return true;
+    return false;
+  }
+
+  /**
+   * Public knockout rooms move to the next map when the results screen ends, unless someone in
+   * the room picked the map they're on.
+   */
   private rotateMap(): void {
+    if (this.mapPinned) return;
     this.rotation = (this.rotation + 1) % KNOCKOUT_MAPS.length;
     this.settings = { ...this.settings, mapId: KNOCKOUT_MAPS[this.rotation] };
     this.rebuild();

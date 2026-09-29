@@ -1,10 +1,12 @@
+import { balloonArch, foodTruck } from './props';
 import type { DecorDef, MapDef, SolidDef } from './types';
 
 /**
  * "Sky Motors": a used-car lot floating in the sky. Fictional; not based on any real business.
  *
  * Layout (top view, +x east, +z south):
- *   - Main asphalt lot 50 x 40 with parked cars for cover.
+ *   - Main asphalt lot 50 x 40. For cover: a few cars for sale, a hot dog truck, a stage of tube
+ *     men for sale and a balloon arch.
  *   - Glass showroom in the north-east corner with a climbable roof (crate steps).
  *   - North sales island, reached by jumping.
  *   - South island reached by a moving flatbed.
@@ -40,12 +42,22 @@ decor.push({ type: 'lines', x: 0, y: 0, z: 0 });
 
 // Cars (muted pastels so the players stay the brightest things on screen).
 car(-13, -5, false, 0xd98c8c);
-car(-7.5, -5, false, 0xd9c98c);
 car(7, 5.5, false, 0x8cb3d9);
-car(12.5, 5.5, false, 0x9dd98c);
 car(-14, 10, true, 0xc79ad9);
 car(0.5, -12.5, true, 0xd9a98c);
-car(-2, 11, true, 0x8cd9cf);
+
+// Not everything on the lot is a car: a hot dog truck (climb its cab to the roof), a stage of tube
+// men for sale, and a balloon arch.
+foodTruck(solids, decor, -2, 0, 11.5, { alongX: true, color: 0xfff1d6, text: 'HOT DOGS', snack: 'hotdog' });
+box([10.5, 0, 4.2], [14.5, 0.4, 6.8], 'crate', { ledge: true, color: 0xf4e3c3 });
+decor.push({ type: 'tubeMan', x: 11.6, y: 0.4, z: 5.5, color: 0xff2d55, scale: 1 });
+decor.push({ type: 'tubeMan', x: 13.4, y: 0.4, z: 5.5, color: 0x5ac8fa, scale: 1 });
+decor.push({ type: 'banner', x: 14.9, y: 0, z: 7.2, data: { text: '$99' } });
+balloonArch(solids, decor, -7.5, 0, -5, 6, true);
+decor.push({ type: 'banner', x: 10.8, y: 0, z: -9, data: { text: 'SALE' } });
+decor.push({ type: 'banner', x: -24, y: 0, z: 7.5, data: { text: 'DEALS' } });
+decor.push({ type: 'cone', x: 2.8, y: 0, z: 9.8 });
+decor.push({ type: 'cone', x: 3.4, y: 0, z: 12.8 });
 
 // Showroom building (north-east) with crate steps to its roof.
 box([13, 0, -19], [24, 4.6, -10.5], 'glass', { ledge: true });
@@ -107,6 +119,7 @@ decor.push({ type: 'tires', x: -22.5, y: 0, z: -12 });
 export const DEALERSHIP: MapDef = {
   id: 'dealership',
   name: 'Sky Motors',
+  icon: '🚗',
   solids,
   bouncePads: [
     { x: -35, y: -0.6, z: 0, half: 1.3, strength: 21, pushX: 11, pushZ: 0 },

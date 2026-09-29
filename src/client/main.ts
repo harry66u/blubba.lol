@@ -1,6 +1,7 @@
 import { BALANCE } from '../shared/balance';
 import { QUICK_CHAT, unlockedAt } from '../shared/economy';
 import { sanitizeLoadout } from '../shared/loadout';
+import { KNOCKOUT_MAPS } from '../shared/maps';
 import { randomGuestName } from '../shared/names';
 import type { ModeId } from '../shared/game/modes';
 import type { JoinRequest, ServerMessage } from '../shared/protocol';
@@ -136,6 +137,33 @@ function rememberMode(m: PlayMode): void {
   }
 }
 
+/** The map picked for quick play (null: any map). */
+const MAP_KEY = 'bubba.map.v1';
+function loadMap(): string | null {
+  try {
+    const m = window.localStorage.getItem(MAP_KEY);
+    if (m && KNOCKOUT_MAPS.includes(m)) return m;
+  } catch {
+    // Storage blocked: any map.
+  }
+  return null;
+}
+let lastMap = loadMap();
+function rememberMap(m: string | null): void {
+  lastMap = m;
+  try {
+    if (m) window.localStorage.setItem(MAP_KEY, m);
+    else window.localStorage.removeItem(MAP_KEY);
+  } catch {
+    // Not remembered; fine.
+  }
+}
+
+/** Quick play for a mode on the picked map. */
+function quickJoin(mode: ModeId): JoinRequest {
+  return lastMap ? { kind: 'quick', mode, map: lastMap } : { kind: 'quick', mode };
+}
+
 function setPath(path: string): void {
   if (location.pathname !== path) history.replaceState(null, '', path);
 }
@@ -159,18 +187,19 @@ function renderMenu(notice?: MenuNotice | string): void {
       onLocker: () => setOverlay('locker'),
       onProfile: () => setOverlay('profile'),
       onPlay: (name, mode) => {
-        if (mode !== 'ranked') return startJoin(name, { kind: 'quick', mode });
+        if (mode !== 'ranked') return startJoin(name, quickJoin(mode));
         if (!account.account) return openAccount('signup');
         startJoin(name, { kind: 'ranked' });
       },
       onChallenge: (name) => startJoin(name, { kind: 'challenge' }),
       onModeChange: rememberMode,
+      onMapChange: rememberMap,
       onCreate: (name) => startJoin(name, { kind: 'create' }),
       onJoinCode: (name, code) => startJoin(name, { kind: 'code', code }),
       onSettings: () => setOverlay('settings'),
       onHowTo: () => setOverlay('howto'),
       onNameChange: rememberName,
-    }, notice, lastMode, account.account?.name ?? null, buildDailyCard(account)),
+    }, notice, lastMode, account.account?.name ?? null, buildDailyCard(account), lastMap),
     buildAccountChip(account, () => openAccount('signup'), () => setOverlay('profile')),
   );
 }
@@ -258,7 +287,7 @@ function scheduleReconnect(): void {
   if (reconnectTimer !== null) return;
   const room = lastRoom;
   if (!room || reconnectAttempt >= RECONNECT_DELAYS.length) {
-    const retry: JoinRequest | null = room ? (room.isPrivate ? { kind: 'code', code: room.code } : { kind: 'quick', mode: room.mode }) : null;
+    const retry: JoinRequest | null = room ? (room.isPrivate ? { kind: 'code', code: room.code } : quickJoin(room.mode)) : null;
     showMenu({
       title: 'Lost connection',
       text: "Couldn't reach the server. Check your Wi-Fi and try again.",
@@ -274,7 +303,7 @@ function scheduleReconnect(): void {
   reconnectTimer = window.setTimeout(() => {
     reconnectTimer = null;
     if (screen !== 'reconnecting') return;
-    const join: JoinRequest = room.isPrivate ? { kind: 'code', code: room.code } : { kind: 'quick', mode: room.mode };
+    const join: JoinRequest = room.isPrivate ? { kind: 'code', code: room.code } : quickJoin(room.mode);
     pendingJoin = join;
     const tried = reconnectAttempt;
     net.join(identity.name, identity.guestId, join, game.loadout, account.token ?? undefined).catch(() => {
