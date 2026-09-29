@@ -210,6 +210,22 @@ export interface LockerOptions {
   onSignup: () => void;
 }
 
+/** The category list, in groups (a thin line between groups). */
+const CATEGORY_GROUPS: readonly (readonly CosmeticSlot[])[] = (() => {
+  const groups: CosmeticSlot[][] = [
+    ['body', 'color', 'accent', 'pattern'],
+    ['face', 'eyes', 'hat'],
+    ['base', 'trail', 'finish'],
+    ['taunt', 'koFx', 'sound'],
+  ];
+  // A slot added later still gets a row.
+  const listed = new Set(groups.flat());
+  const rest = COSMETIC_SLOTS.filter((s) => !listed.has(s));
+  return rest.length ? [...groups, rest] : groups;
+})();
+
+const categoryName = (s: CosmeticSlot): string => (s === 'body' ? 'Body' : SLOT_INFO[s].plural);
+
 /**
  * The locker: customize your tube man and buy cosmetics at fixed prices. Nothing here changes
  * how you play. Tap something you don't own to try it on in the preview, tap again to buy.
@@ -221,12 +237,17 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
   /** An item you're trying on (not owned yet): shown in the preview only. */
   let trying: CosmeticItem | null = null;
   const note = el('div', { class: 'locker-note' });
-  const slotNote = el('div', { class: 'small-note slot-note' });
-  const coins = el('div', { class: 'coins' });
-  const tabs = el('div', { class: 'tabs locker-tabs' });
+  const slotNote = el('div', { class: 'slot-note' });
+  const coins = el('div', { class: 'locker-coins', attrs: { title: 'Your coins' } });
+  const cats = el('div', { class: 'locker-cats', attrs: { role: 'tablist', 'aria-label': 'Categories' } });
   const grid = el('div', { class: 'item-grid' });
-  // NEW badges: anything not seen before this visit stays marked until you close the locker.
+  // NEW badges: anything not seen before this visit stays marked until you close the locker. On
+  // your very first visit everything is new, so nothing is marked (it would all be NEW).
   const seen = loadSeen();
+  if (seen.size === 0) {
+    for (const i of ITEMS) seen.add(i.id);
+    saveSeen(seen);
+  }
   const fresh = new Set(ITEMS.filter((i) => !seen.has(i.id)).map((i) => i.id));
   const viewed = new Set<CosmeticSlot>();
   const wearing = (): Partial<Cosmetics> => (trying ? { ...account.profile.cosmetics, [trying.slot]: trying.id } : account.profile.cosmetics);
@@ -302,40 +323,62 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
     return '';
   };
 
+  /** Scrolls the category list (not the page) so a row is fully in view. */
+  const reveal = (b: HTMLElement) => {
+    const c = cats.getBoundingClientRect();
+    const r = b.getBoundingClientRect();
+    const dx = r.left < c.left ? r.left - c.left - 12 : r.right > c.right ? r.right - c.right + 12 : 0;
+    const dy = r.top < c.top ? r.top - c.top - 6 : r.bottom > c.bottom ? r.bottom - c.bottom + 6 : 0;
+    if (dx || dy) cats.scrollBy({ left: dx, top: dy, behavior: 'smooth' });
+  };
+
+  // The category list is built once (so its scroll position stays put) and restyled on draw.
+  const catRows = new Map<CosmeticSlot, { btn: HTMLButtonElement; dot: HTMLElement }>();
+  CATEGORY_GROUPS.forEach((group, gi) => {
+    if (gi > 0) cats.append(el('div', { class: 'cat-sep', attrs: { 'aria-hidden': 'true' } }));
+    for (const s of group) {
+      const dot = el('span', { class: 'new-dot', attrs: { title: 'Something new in here' } });
+      const btn = el(
+        'button',
+        {
+          class: 'cat',
+          attrs: { role: 'tab', title: SLOT_INFO[s].plural },
+          on: {
+            click: () => {
+              slot = s;
+              pending = null;
+              trying = null;
+              note.textContent = '';
+              draw();
+              grid.scrollTop = 0;
+              reveal(btn);
+            },
+          },
+        },
+        el('span', { class: 'cat-icon', text: SLOT_ICONS[s], attrs: { 'aria-hidden': 'true' } }),
+        el('span', { class: 'cat-name', text: categoryName(s) }),
+        dot,
+      );
+      catRows.set(s, { btn, dot });
+      cats.append(btn);
+    }
+  });
+
   const draw = () => {
     const p = account.profile;
-    coins.textContent = `🪙 ${p.coins}`;
-    // Everything in this tab has now been seen (the badges stay up until the locker closes).
+    coins.textContent = `🪙 ${p.coins.toLocaleString('en-US')}`;
+    // Everything in this category has now been seen (the badges stay up until the locker closes).
     if (!viewed.has(slot)) {
       viewed.add(slot);
       for (const i of ITEMS) if (i.slot === slot) seen.add(i.id);
       saveSeen(seen);
     }
     preview?.showTrails(slot === 'trail');
-    clear(tabs);
-    for (const s of COSMETIC_SLOTS) {
-      const newCount = viewed.has(s) ? 0 : ITEMS.filter((i) => i.slot === s && fresh.has(i.id)).length;
-      tabs.append(
-        el(
-          'button',
-          {
-            class: `tab${s === slot ? ' on' : ''}`,
-            attrs: { title: SLOT_INFO[s].plural },
-            on: {
-              click: () => {
-                slot = s;
-                pending = null;
-                trying = null;
-                note.textContent = '';
-                draw();
-              },
-            },
-          },
-          el('span', { class: 'tab-icon', text: SLOT_ICONS[s] }),
-          el('span', { class: 'tab-label', text: SLOT_INFO[s].plural }),
-          newCount > 0 ? el('span', { class: 'new-dot', text: String(newCount) }) : null,
-        ),
-      );
+    for (const [s, row] of catRows) {
+      const on = s === slot;
+      row.btn.classList.toggle('on', on);
+      row.btn.setAttribute('aria-selected', String(on));
+      row.dot.classList.toggle('hidden', viewed.has(s) || !ITEMS.some((i) => i.slot === s && fresh.has(i.id)));
     }
     slotNote.textContent = slotHint(slot);
     clear(grid);
@@ -343,17 +386,18 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
       const owned = ownsItem(p.owned, item.id, p.level);
       const levelLocked = !!item.levelReq && !owned;
       const equipped = p.cosmetics[item.slot] === item.id;
-      let status: HTMLElement;
-      if (equipped) status = el('div', { class: 'status on', text: 'WEARING' });
-      else if (levelLocked) status = el('div', { class: 'status level', text: `Reach level ${item.levelReq}` });
-      else if (owned) status = el('div', { class: 'status', text: item.levelReq ? `Level ${item.levelReq} reward` : item.price === 0 ? 'Free' : 'Owned' });
+      // One short status line, only when it matters (nothing for things you own).
+      let status: HTMLElement | null = null;
+      if (equipped) status = el('div', { class: 'status on', text: '✓ Wearing' });
+      else if (levelLocked) status = el('div', { class: 'status level', text: `🔒 Lv ${item.levelReq}` });
+      else if (owned) status = null;
       else if (pending === item.id) status = el('div', { class: 'status buy', text: `Tap again to buy · 🪙 ${item.price}` });
       else status = el('div', { class: `status price${p.coins < item.price ? ' short' : ''}`, text: `🪙 ${item.price}` });
       const card = el(
         'button',
         {
           class: `item${equipped ? ' equipped' : ''}${owned ? '' : ' locked'}${levelLocked ? ' level-locked' : ''}${trying?.id === item.id ? ' trying' : ''}`,
-          attrs: { title: item.blurb ?? item.name },
+          attrs: { title: item.blurb ?? item.name, 'aria-pressed': String(equipped) },
           on: {
             click: async () => {
               tryItem(item);
@@ -370,7 +414,7 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
                 } else if (!p.isAccount) {
                   trying = item;
                   note.textContent = 'Make a free account to buy things. Your coins and progress come with you.';
-                  note.append(el('button', { class: 'btn small blue', style: 'margin-left:10px', text: 'Sign up', on: { click: opts.onSignup } }));
+                  note.append(el('button', { class: 'btn small blue', text: 'Sign up', on: { click: opts.onSignup } }));
                 } else if (p.coins < item.price) {
                   trying = item;
                   note.textContent = `You need ${item.price - p.coins} more coins. Coins come from playing matches.`;
@@ -392,7 +436,6 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
           },
         },
         swatch(item),
-        levelLocked ? el('div', { class: 'lock', text: '🔒' }) : null,
         fresh.has(item.id) ? el('div', { class: 'new-badge', text: 'NEW' }) : null,
         el('div', { class: 'name', text: item.name }),
         status,
@@ -406,23 +449,29 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
   draw();
   preview?.start();
 
+  const head = el(
+    'div',
+    { class: 'locker-head' },
+    el('h2', { text: 'Locker' }),
+    coins,
+    el(
+      'button',
+      { class: 'btn small ghost randomize', attrs: { title: 'Wear a random mix of things you own', 'aria-label': 'Randomize' }, on: { click: randomize } },
+      '🎲',
+      el('span', { class: 'randomize-word', text: ' Randomize' }),
+    ),
+    el('button', { class: 'btn done-top', text: 'DONE', on: { click: opts.onClose } }),
+  );
   const left = el(
     'div',
     { class: 'locker-left' },
     preview ? preview.canvas : el('div', { class: 'preview-canvas no-3d', text: '🎈' }),
-    el('div', { class: 'locker-coins-row' }, coins, el('button', { class: 'btn small ghost randomize', text: '🎲 Randomize', attrs: { title: 'Wear a random mix of things you own' }, on: { click: randomize } })),
-    el('div', { class: 'small-note', text: 'Everything here is just for looks. Nothing changes how you play.' }),
+    el('div', { class: 'looks-note', text: 'Everything here is just for looks. Nothing changes how you play.' }),
   );
   const root = el(
     'div',
     { class: 'overlay interactive' },
-    el(
-      'div',
-      { class: 'panel locker' },
-      el('h2', { text: 'Locker' }),
-      el('div', { class: 'locker-body' }, left, el('div', { class: 'locker-right' }, tabs, grid, slotNote, note)),
-      el('div', { class: 'locker-done' }, el('button', { class: 'btn', text: 'DONE', on: { click: opts.onClose } })),
-    ),
+    el('div', { class: 'panel locker' }, head, el('div', { class: 'locker-body' }, left, cats, el('div', { class: 'locker-right' }, slotNote, grid, note))),
   );
   return {
     root,

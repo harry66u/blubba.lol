@@ -186,11 +186,18 @@ export interface BuilderOptions {
   looks?: GunLooks;
 }
 
+type BuilderTab = 'weapon' | 'parts' | 'gadgets';
+const TAB_IDS: readonly BuilderTab[] = ['weapon', 'parts', 'gadgets'];
+const TAB_LABEL: Record<BuilderTab, string> = { weapon: 'Weapon', parts: 'Parts', gadgets: 'Gadgets' };
+/** The tab that was open when the builder last closed (this visit to the page only). */
+let lastTab: BuilderTab = 'weapon';
+
 /**
- * The gun builder: pick a weapon, then a part for each slot (every part is a trade-off), with a
- * live 3D view of the gun and stat bars that show what a change does (green better, red worse).
- * Up to three named builds can be saved in this browser to switch quickly. Also picks the two
- * utilities. `locked` (from account progression) lists what's still locked.
+ * The gun builder. Three tabs on the left, one shown at a time: the weapon, a part for each slot
+ * (every part is a trade-off) and the two gadgets (utilities). The live 3D view of the gun, its
+ * finish and the stat bars stay on the right and show what a change does (green better, red
+ * worse; hovering or tapping something previews it). Up to three named builds can be saved in
+ * this browser to switch quickly. `locked` (from account progression) lists what's still locked.
  */
 export function buildLoadout(opts: BuilderOptions): { root: HTMLElement; dispose: () => void } {
   const locked = opts.locked ?? { parts: [], utils: [] };
@@ -201,6 +208,7 @@ export function buildLoadout(opts: BuilderOptions): { root: HTMLElement; dispose
   let hover: Loadout | null = null;
   let builds = loadBuilds();
   let tip = '';
+  let tab: BuilderTab = lastTab;
 
   let preview: GunPreview | null = null;
   try {
@@ -217,15 +225,26 @@ export function buildLoadout(opts: BuilderOptions): { root: HTMLElement; dispose
   const gunFinish = () => cosmeticKey(opts.looks?.cosmetics(), 'finish');
 
   // Layout: the parts that get redrawn.
-  const buildsRow = el('div', { class: 'builds-row' });
+  const tabBar = el('div', { class: 'builder-tabs', attrs: { role: 'tablist', 'aria-label': 'Loadout' } });
+  const tabs = {} as Record<BuilderTab, { btn: HTMLButtonElement; icon: HTMLElement; sub: HTMLElement }>;
   const weaponRow = el('div', { class: 'weapon-row' });
+  const weaponBlurb = el('div', { class: 'weapon-blurb' });
   const partRows = el('div', { class: 'part-rows' });
-  const utilRow = el('div', { class: 'chip-row util-row' });
+  const utilGrid = el('div', { class: 'util-grid' });
+  const buildsRow = el('div', { class: 'builds-row' });
   const gunName = el('div', { class: 'gun-name' });
-  const gunBlurb = el('div', { class: 'gun-blurb' });
+  const gunRole = el('div', { class: 'gun-role' });
   const statBox = el('div', { class: 'stat-box' });
   const tipBox = el('div', { class: 'part-tip' });
   const finishRow = el('div', { class: 'finish-row' });
+  const noGl = preview ? null : el('div', { class: 'gun-canvas no-3d' });
+  const pane = (t: BuilderTab, ...children: HTMLElement[]) =>
+    el('div', { class: `builder-pane pane-${t}`, attrs: { role: 'tabpanel', id: `builder-pane-${t}`, 'aria-labelledby': `builder-tab-${t}` } }, ...children);
+  const panes: Record<BuilderTab, HTMLElement> = {
+    weapon: pane('weapon', weaponRow, weaponBlurb),
+    parts: pane('parts', el('p', { class: 'pane-intro', text: 'Every part is a trade-off. More unlock as you level up.' }), partRows),
+    gadgets: pane('gadgets', el('p', { class: 'pane-intro', text: 'Pick two. A new pick replaces the older one.' }), utilGrid),
+  };
 
   const commit = (next: Loadout) => {
     const clean = sanitizeLoadout(next, allowed);
@@ -277,6 +296,60 @@ export function buildLoadout(opts: BuilderOptions): { root: HTMLElement; dispose
     tipBox.classList.toggle('muted', !tip);
   };
 
+  const drawTabs = () => {
+    const changed = PART_SLOTS.filter((s) => l.parts[s] !== 'standard').length;
+    tabs.weapon.icon.textContent = WEAPON_ICON[l.weapon];
+    tabs.weapon.sub.textContent = WEAPON_INFO[l.weapon].name;
+    tabs.parts.sub.textContent = changed ? `${changed} changed` : 'Standard';
+    tabs.gadgets.sub.textContent = l.utils.map((u) => UTIL_ICON[u] ?? '✨').join(' ');
+    tabs.gadgets.sub.title = l.utils.map((u) => UTILITY_INFO[u].name).join(' + ');
+    for (const t of TAB_IDS) {
+      const on = t === tab;
+      tabs[t].btn.classList.toggle('on', on);
+      tabs[t].btn.setAttribute('aria-selected', String(on));
+      tabs[t].btn.tabIndex = on ? 0 : -1;
+      panes[t].classList.toggle('hidden', !on);
+    }
+  };
+
+  const setTab = (t: BuilderTab, focus = false) => {
+    tab = lastTab = t;
+    drawTabs();
+    if (focus) tabs[t].btn.focus();
+    // One scrolling column (phones held upright): bring the choices up under the header.
+    if (panel.scrollHeight > panel.clientHeight + 2) {
+      const top = panes[t].getBoundingClientRect().top - panel.getBoundingClientRect().top;
+      const under = head.offsetHeight + 8;
+      // (An instant jump: Chrome drops a smooth scroll started while the content just grew.)
+      if (top > panel.clientHeight * 0.6 || top < under) panel.scrollTop += top - under;
+    }
+  };
+
+  for (const t of TAB_IDS) {
+    const icon = el('span', { class: 'bt-icon', text: t === 'parts' ? '🔧' : t === 'gadgets' ? '🧰' : '', attrs: { 'aria-hidden': 'true' } });
+    const sub = el('span', { class: 'bt-sub' });
+    const btn = el(
+      'button',
+      {
+        class: 'builder-tab',
+        attrs: { role: 'tab', id: `builder-tab-${t}`, 'aria-controls': `builder-pane-${t}` },
+        on: {
+          click: () => setTab(t),
+          keydown: (e: KeyboardEvent) => {
+            const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+            if (!d) return;
+            e.preventDefault();
+            setTab(TAB_IDS[(TAB_IDS.indexOf(t) + d + TAB_IDS.length) % TAB_IDS.length], true);
+          },
+        },
+      },
+      icon,
+      el('span', { class: 'bt-text' }, el('span', { class: 'bt-label', text: TAB_LABEL[t] }), sub),
+    );
+    tabs[t] = { btn, icon, sub };
+    tabBar.append(btn);
+  }
+
   const drawBuilds = () => {
     clear(buildsRow);
     builds.forEach((b, i) => {
@@ -285,22 +358,29 @@ export function buildLoadout(opts: BuilderOptions): { root: HTMLElement; dispose
         class: 'build-name',
         attrs: { type: 'text', maxlength: '16', value: b?.name ?? '', placeholder: `Build ${i + 1}`, 'aria-label': `Build ${i + 1} name`, spellcheck: 'false' },
         on: {
-          click: (e: Event) => e.stopPropagation(),
-          change: (e: Event) => {
-            const v = cleanBuildName((e.target as HTMLInputElement).value, `Build ${i + 1}`);
-            if (builds[i]) builds[i] = { ...builds[i]!, name: v };
-            saveBuilds(builds);
-            drawBuilds();
+          click: (e: Event) => {
+            // The first click on a saved build switches to it; once it's in use, clicks edit its name.
+            e.stopPropagation();
+            if (b && !active) commit(b.loadout);
           },
-          keydown: (e: Event) => {
-            if ((e as KeyboardEvent).key === 'Enter') (e.target as HTMLInputElement).blur();
+          change: (e: Event) => {
+            // Renames a saved build in place. (No redraw: that would swallow a click on SAVE
+            // right after typing; an empty slot's name is used when SAVE is pressed.)
+            if (!builds[i]) return;
+            builds[i] = { ...builds[i]!, name: cleanBuildName((e.target as HTMLInputElement).value, `Build ${i + 1}`) };
+            saveBuilds(builds);
+          },
+          keydown: (e: KeyboardEvent) => {
+            // Typing a name must not also trigger the build (Enter) or anything else.
+            e.stopPropagation();
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
           },
         },
       });
       const save = el('button', {
         class: 'build-save',
-        text: b ? 'SAVE' : 'SAVE HERE',
-        attrs: { title: 'Save the current build in this slot' },
+        text: 'SAVE',
+        attrs: { title: b ? `Save the current build over ${b.name}` : 'Save the current build in this slot' },
         on: {
           click: (e: Event) => {
             e.stopPropagation();
@@ -316,23 +396,20 @@ export function buildLoadout(opts: BuilderOptions): { root: HTMLElement; dispose
           'div',
           {
             class: `build${active ? ' active' : ''}${b ? '' : ' empty'}`,
-            attrs: b ? { role: 'button', tabindex: '0', title: `Use ${b.name}` } : {},
+            attrs: b ? { role: 'button', tabindex: '0', title: `Use ${b.name} (${WEAPON_INFO[b.loadout.weapon].name})`, 'aria-pressed': String(active) } : {},
             on: b
               ? {
                   click: () => commit(b.loadout),
-                  keydown: (e: Event) => {
-                    if ((e as KeyboardEvent).key === 'Enter') commit(b.loadout);
+                  keydown: (e: KeyboardEvent) => {
+                    if (e.key === 'Enter') commit(b.loadout);
                   },
                 }
               : {},
           },
-          el('div', { class: 'build-top' }, el('span', { class: 'build-num', text: String(i + 1) }), name),
-          el(
-            'div',
-            { class: 'build-bottom' },
-            el('span', { class: 'build-gun', text: b ? `${WEAPON_ICON[b.loadout.weapon]} ${WEAPON_INFO[b.loadout.weapon].name}${active ? ' · ON' : ''}` : 'Empty' }),
-            save,
-          ),
+          el('span', { class: 'build-num', text: String(i + 1) }),
+          name,
+          el('span', { class: 'build-gun', text: b ? WEAPON_ICON[b.loadout.weapon] : '', attrs: { 'aria-hidden': 'true' } }),
+          save,
         ),
       );
     });
@@ -348,7 +425,7 @@ export function buildLoadout(opts: BuilderOptions): { root: HTMLElement; dispose
           'button',
           {
             class: `weapon-btn${on ? ' selected' : ''}`,
-            attrs: { title: WEAPON_INFO[id].blurb },
+            attrs: { title: WEAPON_INFO[id].blurb, 'aria-pressed': String(on) },
             on: {
               click: () => commit(next),
               mouseenter: () => !on && setHover(next, `${WEAPON_INFO[id].name}: ${WEAPON_INFO[id].blurb}`),
@@ -361,71 +438,104 @@ export function buildLoadout(opts: BuilderOptions): { root: HTMLElement; dispose
         ),
       );
     }
+    const info = WEAPON_INFO[l.weapon];
+    clear(weaponBlurb);
+    weaponBlurb.append(
+      el('span', { class: 'wb-icon', text: WEAPON_ICON[l.weapon], attrs: { 'aria-hidden': 'true' } }),
+      el('div', {}, el('div', { class: 'wb-title' }, el('b', { text: info.name }), el('span', { class: 'wb-role', text: info.role })), el('div', { class: 'wb-text', text: info.blurb })),
+    );
+  };
+
+  /** A part's full description (the tip line and the button's tooltip). */
+  const partDesc = (slot: PartSlot, id: PartId) => {
+    if (id === 'standard') return `Standard ${PART_SLOT_INFO[slot].name.toLowerCase()}: ${PART_SLOT_INFO[slot].standard}`;
+    const info = PART_INFO[id];
+    return `${info.name}: ${info.blurb} + ${info.plus}. − ${info.minus}.`;
   };
 
   const partButton = (slot: PartSlot, id: PartId) => {
     const on = l.parts[slot] === id;
     const isLocked = id !== 'standard' && locked.parts.includes(id);
-    const info = id === 'standard' ? null : PART_INFO[id];
     const next: Loadout = { ...l, parts: { ...l.parts, [slot]: id } };
-    const desc = info ? `${info.name}: ${info.blurb} + ${info.plus}. − ${info.minus}.` : `Standard ${PART_SLOT_INFO[slot].name.toLowerCase()}: ${PART_SLOT_INFO[slot].standard}`;
+    const desc = isLocked ? `${partDesc(slot, id)} Unlocks at level ${unlockLevel(id)}.` : partDesc(slot, id);
     return el(
       'button',
       {
         class: `part-btn${on ? ' selected' : ''}${isLocked ? ' locked' : ''}`,
-        attrs: isLocked ? { disabled: 'true', title: `Unlocks at level ${unlockLevel(id)}` } : { title: desc },
+        attrs: isLocked ? { 'aria-disabled': 'true', title: `Unlocks at level ${unlockLevel(id)}` } : { title: desc, 'aria-pressed': String(on) },
         on: {
           click: () => {
             if (!isLocked) commit(next);
             tip = desc;
             drawStats();
           },
-          mouseenter: () => setHover(on || isLocked ? null : next, isLocked ? `${partName(id)} unlocks at level ${unlockLevel(id)}.` : desc),
+          mouseenter: () => setHover(on || isLocked ? null : next, desc),
           mouseleave: () => setHover(null),
         },
       },
-      el('span', { class: 'p-name', text: `${isLocked ? '🔒 ' : ''}${partName(id)}` }),
-      isLocked
-        ? el('span', { class: 'p-lock', text: `Level ${unlockLevel(id)}` })
-        : info
-          ? el('span', { class: 'p-desc' }, el('span', { class: 'plus', text: `+ ${info.plus}` }), el('span', { class: 'minus', text: `− ${info.minus}` }))
-          : el('span', { class: 'p-desc std', text: PART_SLOT_INFO[slot].standard }),
+      isLocked ? el('span', { class: 'p-lock-icon', text: '🔒', attrs: { 'aria-hidden': 'true' } }) : null,
+      el('span', { class: 'p-name', text: partName(id) }),
+      isLocked ? el('span', { class: 'p-lock', text: `Lv ${unlockLevel(id)}` }) : null,
     );
   };
 
   const drawParts = () => {
     clear(partRows);
     for (const slot of PART_SLOTS) {
-      const row = el('div', { class: 'part-row' }, el('div', { class: 'slot-label' }, el('span', { class: 'slot-icon', text: SLOT_ICON[slot] }), el('b', { text: PART_SLOT_INFO[slot].name }), el('small', { text: PART_SLOT_INFO[slot].blurb })));
-      const optsEl = el('div', { class: `part-opts n${SLOT_PARTS[slot].length}` });
+      const optsEl = el('div', { class: 'part-opts' });
       for (const id of SLOT_PARTS[slot]) optsEl.append(partButton(slot, id));
-      row.append(optsEl);
-      partRows.append(row);
+      // What's fitted now, in one quiet line (so every option doesn't need its own +/− box).
+      const fitted = l.parts[slot];
+      const info = fitted === 'standard' ? null : PART_INFO[fitted];
+      const desc = info
+        ? el('div', { class: 'part-desc' }, el('b', { text: `${info.name}: ` }), el('span', { class: 'plus', text: `+ ${info.plus}` }), ' · ', el('span', { class: 'minus', text: `− ${info.minus}` }))
+        : el('div', { class: 'part-desc' }, el('b', { text: 'Standard: ' }), PART_SLOT_INFO[slot].standard);
+      partRows.append(
+        el(
+          'div',
+          { class: 'part-row' },
+          el(
+            'div',
+            { class: 'slot-label' },
+            el('span', { class: 'slot-icon', text: SLOT_ICON[slot], attrs: { 'aria-hidden': 'true' } }),
+            el('div', { class: 'slot-text' }, el('b', { text: PART_SLOT_INFO[slot].name }), el('small', { text: PART_SLOT_INFO[slot].blurb })),
+          ),
+          el('div', { class: 'part-main' }, optsEl, desc),
+        ),
+      );
     }
   };
 
   const drawUtils = () => {
-    clear(utilRow);
+    clear(utilGrid);
     for (const id of UTILITY_IDS) {
       const slot = l.utils.indexOf(id);
       const isLocked = locked.utils.includes(id);
-      utilRow.append(
+      const info = UTILITY_INFO[id as UtilityId];
+      utilGrid.append(
         el(
           'button',
           {
-            class: `chip${slot >= 0 ? ' selected' : ''}`,
-            attrs: isLocked ? { disabled: 'true', title: `Unlocks at level ${unlockLevel(id)}` } : { title: UTILITY_INFO[id as UtilityId].blurb },
+            class: `gadget${slot >= 0 ? ' selected' : ''}${isLocked ? ' locked' : ''}`,
+            attrs: isLocked ? { 'aria-disabled': 'true', title: `Unlocks at level ${unlockLevel(id)}` } : { title: info.blurb, 'aria-pressed': String(slot >= 0) },
             on: {
               click: () => {
+                if (isLocked) {
+                  tip = `${info.name} unlocks at level ${unlockLevel(id)}.`;
+                  drawStats();
+                  return;
+                }
                 if (slot >= 0) return;
                 // Replace the older of the two picks.
                 commit({ ...l, utils: [l.utils[1], id] });
               },
             },
           },
-          el('div', { class: 'title', text: `${isLocked ? '🔒 ' : ''}${UTIL_ICON[id] ?? '✨'} ${UTILITY_INFO[id as UtilityId].name}` }),
-          isLocked ? el('div', { class: 'lock-note', text: `Unlocks at level ${unlockLevel(id)}` }) : el('div', { class: 'blurb', text: UTILITY_INFO[id as UtilityId].blurb }),
-          slot >= 0 ? el('div', { class: 'slot', text: slot === 0 ? 'Utility 1' : 'Utility 2' }) : null,
+          el('span', { class: 'g-icon', text: UTIL_ICON[id] ?? '✨', attrs: { 'aria-hidden': 'true' } }),
+          el('span', { class: 'g-name', text: info.name }),
+          el('span', { class: 'g-blurb', text: info.blurb }),
+          slot >= 0 ? el('span', { class: 'g-badge', text: String(slot + 1), attrs: { title: `Gadget ${slot + 1}` } }) : null,
+          isLocked ? el('span', { class: 'g-lock', text: `🔒 Lv ${unlockLevel(id)}` }) : null,
         ),
       );
     }
@@ -444,7 +554,7 @@ export function buildLoadout(opts: BuilderOptions): { root: HTMLElement; dispose
       finishRow.append(
         el('button', {
           class: `finish-swatch${on ? ' selected' : ''}`,
-          attrs: { title: item.name, 'aria-label': `${item.name} finish` },
+          attrs: { title: item.name, 'aria-label': `${item.name} finish`, 'aria-pressed': String(on) },
           style: { background: item.key === 'team' ? `#${gunColor().toString(16).padStart(6, '0')}` : (FINISH_CSS[item.key] ?? '#ccc') },
           on: {
             click: () => {
@@ -460,12 +570,13 @@ export function buildLoadout(opts: BuilderOptions): { root: HTMLElement; dispose
   const drawGun = () => {
     const info = WEAPON_INFO[l.weapon];
     gunName.textContent = `${WEAPON_ICON[l.weapon]} ${info.name}`;
-    const custom = PART_SLOTS.filter((s) => l.parts[s] !== 'standard').map((s) => partName(l.parts[s]));
-    gunBlurb.textContent = custom.length ? custom.join(' · ') : info.blurb;
+    gunRole.textContent = info.role;
+    if (noGl) noGl.textContent = WEAPON_ICON[l.weapon];
     preview?.setGun(l.weapon, l.parts, gunColor(), gunFinish());
   };
 
   const draw = () => {
+    drawTabs();
     drawBuilds();
     drawWeapons();
     drawParts();
@@ -479,46 +590,32 @@ export function buildLoadout(opts: BuilderOptions): { root: HTMLElement; dispose
     drawFinishes();
     drawGun();
   });
-  draw();
 
-  const gunView = el(
+  const head = el(
     'div',
-    { class: 'gun-view' },
-    preview ? preview.canvas : el('div', { class: 'gun-canvas no-3d', text: WEAPON_ICON[l.weapon] }),
-    el('div', { class: 'gun-caption' }, gunName, gunBlurb),
+    { class: 'builder-head' },
+    el('h2', { text: 'Loadout' }),
+    tabBar,
+    el('button', { class: 'btn done-top', text: 'DONE', on: { click: opts.onClose } }),
+    opts.note ? el('div', { class: 'note', text: opts.note }) : null,
   );
-  const root = el(
+  const panel = el(
     'div',
-    { class: 'overlay interactive' },
+    { class: 'panel loadout builder' },
+    head,
+    el('div', { class: 'builder-left' }, panes.weapon, panes.parts, panes.gadgets),
     el(
       'div',
-      { class: 'panel loadout builder' },
-      el(
-        'div',
-        { class: 'builder-head' },
-        el('h2', { text: 'Loadout' }),
-        el('div', { class: 'builds-wrap' }, el('div', { class: 'label', text: 'Saved builds' }), buildsRow),
-        el('button', { class: 'btn done-top', text: 'DONE', on: { click: opts.onClose } }),
-      ),
-      opts.note ? el('div', { class: 'note', text: opts.note }) : null,
-      el(
-        'div',
-        { class: 'builder-main' },
-        el(
-          'div',
-          { class: 'builder-left' },
-          el('div', { class: 'label', text: 'Weapon' }),
-          weaponRow,
-          el('div', { class: 'label', text: 'Parts · every part is a trade-off; more unlock as you level up' }),
-          partRows,
-        ),
-        el('div', { class: 'builder-right' }, gunView, finishRow, statBox, tipBox),
-      ),
-      el('div', { class: 'label', text: 'Utilities (pick 2)' }),
-      utilRow,
-      el('div', { class: 'done-bottom' }, el('button', { class: 'btn', text: 'DONE', on: { click: opts.onClose } })),
+      { class: 'builder-right' },
+      el('div', { class: 'gun-view' }, preview ? preview.canvas : noGl, el('div', { class: 'gun-caption' }, gunName, gunRole)),
+      finishRow,
+      statBox,
+      tipBox,
     ),
+    el('div', { class: 'builds-bar' }, el('div', { class: 'label', text: 'Saved builds' }), buildsRow),
   );
+  draw();
+  const root = el('div', { class: 'overlay interactive' }, panel);
   return {
     root,
     dispose: () => {

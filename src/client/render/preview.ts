@@ -105,7 +105,8 @@ export class TubePreview {
       this.last = now;
       const w = this.canvas.clientWidth || 260;
       const h = this.canvas.clientHeight || 320;
-      if (this.canvas.width !== Math.round(w * this.renderer.getPixelRatio())) {
+      const pr = this.renderer.getPixelRatio();
+      if (this.canvas.width !== Math.round(w * pr) || this.canvas.height !== Math.round(h * pr)) {
         this.renderer.setSize(w, h, false);
         this.camera.aspect = w / h;
         this.camera.updateProjectionMatrix();

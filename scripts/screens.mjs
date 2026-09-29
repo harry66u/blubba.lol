@@ -56,8 +56,20 @@ for (const vpName of which) {
     await page.screenshot({ path: `${out}/${vpName}-${name}.png` });
     const wide = await page.evaluate(() => {
       const w = document.documentElement.clientWidth;
+      // Items in a row made to scroll sideways (like the locker's categories on a phone) are
+      // contained by that row, as long as the row itself fits.
+      const inSideScroller = (e) => {
+        for (let a = e.parentElement; a && a.id !== 'ui'; a = a.parentElement) {
+          const cs = getComputedStyle(a);
+          if ((cs.overflowX === 'auto' || cs.overflowX === 'scroll') && cs.overflowY === 'hidden') {
+            const r = a.getBoundingClientRect();
+            return r.left >= -1 && r.right <= w + 1;
+          }
+        }
+        return false;
+      };
       return [...document.querySelectorAll('#ui *')]
-        .filter((e) => { const r = e.getBoundingClientRect(); return r.width && r.height && (r.right > w + 1 || r.left < -1) && !e.closest('.touch-controls, .hud'); })
+        .filter((e) => { const r = e.getBoundingClientRect(); return r.width && r.height && (r.right > w + 1 || r.left < -1) && !e.closest('.touch-controls, .hud') && !inSideScroller(e); })
         .slice(0, 3)
         .map((e) => `${e.tagName}.${[...e.classList].join('.')}`);
     });
@@ -109,7 +121,8 @@ for (const vpName of which) {
     await clickText('How to play');
     await shot('05-howto');
     await clickText('GOT IT');
-    await page.click('.account-chip .chip-main');
+    // (On a phone held upright the chip sits partly above the top of the screen: click it directly.)
+    await domClick('.account-chip .chip-main');
     await shot('06-profile-guest', 900);
     await page.locator('.profile button:has-text("DONE")').click();
     await page.locator('.account-chip button:has-text("Sign up")').click();
