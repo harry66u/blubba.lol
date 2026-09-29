@@ -1,4 +1,5 @@
 import { type Cosmetics, DEFAULT_COSMETICS, type ProfileView, emptyStats, unlockedAt } from '../../shared/economy';
+import { PART_IDS, UTILITY_IDS } from '../../shared/loadout';
 
 const TOKEN_KEY = 'bubba.token.v1';
 
@@ -47,11 +48,11 @@ export class AccountClient {
   }
 
   /** What's locked in the loadout screen at the current level. */
-  get locked(): { mods: string[]; utils: string[] } {
+  get locked(): { parts: string[]; utils: string[] } {
     const u = unlockedAt(this.profile.level);
     return {
-      mods: ['wideNozzle', 'bigTank', 'chargeValve', 'quickValve', 'longBarrel'].filter((m) => !u.mods.includes(m as never)),
-      utils: ['bouncePad', 'airGrenade', 'inflatableWall', 'vacuumGrenade'].filter((x) => !u.utils.includes(x as never)),
+      parts: PART_IDS.filter((m) => !u.parts.includes(m)),
+      utils: UTILITY_IDS.filter((x) => !u.utils.includes(x)),
     };
   }
 

@@ -152,7 +152,7 @@ export class Room {
   }
 
   /** Mods and utilities this connection has unlocked. */
-  private allowed(conn: { key: string | null }): { mods: string[]; utils: string[] } {
+  private allowed(conn: { key: string | null }): { parts: string[]; utils: string[] } {
     return conn.key && this.store ? allowedLoadout(this.store.profile(conn.key)) : unlockedAt(1);
   }
 

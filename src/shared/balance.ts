@@ -131,7 +131,7 @@ export const BALANCE = {
       /** Range = projSpeed × projLifetime (about 49 m). */
       projLifetime: 0.65,
       projGravity: 0,
-      blastRadius: 2.6,
+      blastRadius: 2.4,
       /** Inflation added by a full-power direct hit. */
       inflation: 0.15,
       knockback: 1.0,
@@ -175,9 +175,9 @@ export const BALANCE = {
       fireCooldown: 0.45,
       chargeTime: 0.6,
       tapPower: 0.4,
-      range: 6.5,
+      range: 7,
       cone: 0.62,
-      knockback: 1.45,
+      knockback: 1.5,
       inflation: 0.13,
       /** Push back on the shooter (lets you use it to recover). */
       recoil: 7,
@@ -209,15 +209,126 @@ export const BALANCE = {
       cone: 0,
       recoil: 0,
     },
+    /**
+     * Bubble Shotgun: a fixed pattern of bubble pellets (one in the middle, the rest in a ring).
+     * Every pellet that connects adds its share of the shot; charging tightens the ring so it
+     * reaches further. Brutal up close, a tickle at range.
+     */
+    bubbleShotgun: {
+      kind: 'spread',
+      ammo: 4,
+      reloadTime: 1.9,
+      fireCooldown: 0.5,
+      chargeTime: 0.55,
+      tapPower: 0.55,
+      /** Pellets fly (instantly, lag compensated) this far. */
+      range: 20,
+      /** Pellet radius: forgiving, but the ring still misses at range. */
+      rayRadius: 0.17,
+      pellets: 7,
+      /** Half-angle of the pellet ring on a tap (radians). */
+      spread: 0.15,
+      /** The ring shrinks to this fraction at full charge. */
+      spreadCharged: 0.45,
+      /** Pellets lose this fraction of their punch between `falloffStart` and max range. */
+      falloff: 0.65,
+      falloffStart: 3.5,
+      /** Knockback and inflation when every pellet lands. */
+      knockback: 1.05,
+      inflation: 0.15,
+      recoil: 2.5,
+      projSpeed: 0,
+      projRadius: 0,
+      projLifetime: 0,
+      projGravity: 0,
+      blastRadius: 0,
+      cone: 0,
+    },
+    /** Balloon Mortar: lobs a heavy water balloon on an arc; a huge splash knocks groups over. */
+    balloonMortar: {
+      kind: 'projectile',
+      ammo: 2,
+      reloadTime: 2.3,
+      fireCooldown: 0.85,
+      chargeTime: 0.8,
+      tapPower: 0.55,
+      projSpeed: 27,
+      projRadius: 0.75,
+      projLifetime: 3,
+      projGravity: 20,
+      /** Added to the aim's vertical direction so a level shot still arcs. */
+      projLoft: 0.3,
+      blastRadius: 4.6,
+      inflation: 0.18,
+      knockback: 1.4,
+      range: 0,
+      cone: 0,
+      rayRadius: 0,
+      recoil: 1.5,
+    },
+    /**
+     * Pop Gun: hold to spray small fast corks. Each one pushes a little and inflates a little
+     * (no launch, no hit-stop), so the pressure builds the longer you stay on target.
+     */
+    popGun: {
+      kind: 'projectile',
+      /** Fires while held instead of on release. */
+      auto: 1,
+      /** Hits push instead of launching. */
+      light: 1,
+      ammo: 24,
+      reloadTime: 1.4,
+      fireCooldown: 0.085,
+      /** Spin-up: the first shots come at up to 2.5x the cooldown. */
+      chargeTime: 0.3,
+      tapPower: 1,
+      projSpeed: 85,
+      projRadius: 0.3,
+      projLifetime: 0.4,
+      projGravity: 0,
+      blastRadius: 0,
+      /** Push per cork (scaled like knockback: more on inflated targets). */
+      knockback: 0.14,
+      inflation: 0.021,
+      /** A Mega Blast lasts 1 / megaCost corks per "shot". */
+      megaCost: 0.125,
+      range: 0,
+      cone: 0,
+      rayRadius: 0,
+      recoil: 0,
+    },
   },
 
-  /** Every mod is a trade-off (multipliers on the weapon's stats). */
-  mods: {
-    wideNozzle: { radius: 1.35, blast: 1.25, cone: 1.35, range: 0.7 },
-    bigTank: { ammo: 1.6, reload: 1.4 },
-    chargeValve: { knockback: 1.2, inflation: 1.1, fireCooldown: 1.6, chargeTime: 1.2 },
-    quickValve: { fireCooldown: 0.6, chargeTime: 0.7, knockback: 0.82, inflation: 0.9 },
-    longBarrel: { range: 1.35, radius: 0.75, cone: 0.7, blast: 0.85 },
+  /**
+   * Weapon parts (the builder). Every slot applies to every weapon, and every option is a
+   * trade-off (multipliers on the weapon's stats; see computeWeaponStats). "range" stretches how
+   * far shots go, "width" is aim forgiveness (shot size, cone, spread, hitbox), "blast" is the
+   * splash radius, "move" is walking speed.
+   */
+  parts: {
+    // Barrel: reach vs. forgiveness.
+    longBarrel: { range: 1.35, speed: 1.15, width: 0.78, blast: 0.85 },
+    stubbyBarrel: { range: 0.72, width: 1.28, blast: 1.18 },
+    // Tank: ammo vs. reload and weight.
+    bigTank: { ammo: 1.6, reload: 1.4, move: 0.95 },
+    miniTank: { ammo: 0.6, reload: 0.55, move: 1.05 },
+    // Valve: charge speed vs. power.
+    chargeValve: { knockback: 1.2, inflation: 1.1, fireCooldown: 1.5, chargeTime: 1.25 },
+    quickValve: { knockback: 0.82, inflation: 0.9, fireCooldown: 0.65, chargeTime: 0.7 },
+    /** Quick taps hit almost as hard as charged shots, but charged shots hit a bit softer. */
+    hairTrigger: { tapPower: 0.3, knockback: 0.88, inflation: 0.92, spinUp: 0.4 },
+    // Nozzle: splash vs. focus.
+    wideNozzle: { width: 1.3, blast: 1.3, knockback: 0.88 },
+    jetNozzle: { width: 0.75, blast: 0.7, knockback: 1.15 },
+    pumpNozzle: { inflation: 1.25, knockback: 0.85 },
+    // Grip: handling.
+    sprintGrip: { move: 1.1, chargeMove: 1, knockback: 0.9 },
+    anchorStock: { recoil: 0.3, knockback: 1.08, move: 0.9 },
+    kickStock: { recoilMult: 1.4, recoilAdd: 3, blastJump: 1.4, knockback: 0.92 },
+    /** Auto weapons feel valve fire-rate changes at this strength (full strength would melt). */
+    autoRateScale: 0.5,
+    /** Auto weapons get this share of the kick stock's extra recoil per shot. */
+    autoRecoilScale: 0.15,
   },
 
   utilities: {

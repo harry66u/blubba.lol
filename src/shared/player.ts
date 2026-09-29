@@ -446,7 +446,9 @@ function stepMove(
   }
 
   // --- Friction and acceleration ---------------------------------------------------------
-  const moveMult = (doubled ? K.doubleOverMoveMult : 1) * (p.charging ? P.chargingMoveMult : 1) * (p.holding >= 0 ? 0.6 : 1);
+  // Weapon parts change walking speed (tanks, grips) and the slow-down while charging.
+  const W = ctx.weapon;
+  const moveMult = (doubled ? K.doubleOverMoveMult : 1) * (p.charging ? W.chargeMove : 1) * W.moveMult * (p.holding >= 0 ? 0.6 : 1);
   if (p.onGround && !jumpedNow) {
     const sliding = p.slideTimer > 0;
     // Caught in a leaf blower's stream: you skid instead of gripping the ground.
@@ -895,6 +897,14 @@ function stepWeapon(p: PlayerState, inp: InputFrame, ctx: StepContext, out: Step
       p.ammo = Math.max(0, p.ammo - dt);
       p.spawnProt = 0;
       out.stream = W.tapPower + (1 - W.tapPower) * p.charge;
+      if (W.recoil > 0 && p.mode === MODE_NORMAL) {
+        // A kick stock turns the blower into a (weak) jet pack.
+        lookDir(p.yaw, p.pitch, tmpDir);
+        const k = W.recoil * 5 * out.stream * dt;
+        p.vx -= tmpDir.x * k;
+        p.vz -= tmpDir.z * k;
+        if (tmpDir.y < -0.3 && !p.onGround) p.vy -= tmpDir.y * k;
+      }
       // Aimed at the ground while airborne: hover.
       if (p.pitch < -0.75 && !p.onGround && p.hoverTimer > 0 && p.mode === MODE_NORMAL) {
         const g = ctx.world.groundBelow(p.px, p.py + 0.1, p.pz, 7);
@@ -917,53 +927,78 @@ function stepWeapon(p: PlayerState, inp: InputFrame, ctx: StepContext, out: Step
     return;
   }
 
+  if (W.auto) {
+    // Pop Gun: sprays while held. The spin-up (chargeTime) ramps the fire rate up to full.
+    if (fireHeld && p.ammo >= 1 && p.reloadTimer <= 0) {
+      p.charging = 1;
+      p.charge = Math.min(1, p.charge + dt / Math.max(0.01, W.chargeTime));
+      if (p.fireCool <= 0) {
+        fireShot(p, W, out, rate, true);
+        p.fireCool = (W.fireCooldown * (1 + (1 - p.charge) * 1.5)) / rate;
+      }
+    } else {
+      p.charging = 0;
+      p.charge = Math.max(0, p.charge - dt * 4);
+    }
+    return;
+  }
+
   if (p.charging) {
     if (fireHeld) {
       p.charge = Math.min(1, p.charge + dt / W.chargeTime);
     } else {
-      // Mega Blast shots always fire at full charge.
-      const mega = p.megaShots > 0;
-      if (mega) {
-        p.megaShots -= 1;
-        p.charge = 1;
-      }
-      const power = W.tapPower + (1 - W.tapPower) * p.charge;
-      lookDir(p.yaw, p.pitch, tmpDir);
-      const eye = eyeHeight(p);
-      out.fired = {
-        ox: p.px + tmpDir.x * 0.5,
-        oy: p.py + eye + tmpDir.y * 0.5,
-        oz: p.pz + tmpDir.z * 0.5,
-        dx: tmpDir.x,
-        dy: tmpDir.y,
-        dz: tmpDir.z,
-        power,
-        charge: p.charge,
-        mega,
-      };
-      p.ammo -= 1;
+      fireShot(p, W, out, rate, false);
       p.fireCool = W.fireCooldown / rate;
       p.charging = 0;
       p.charge = 0;
-      p.spawnProt = 0;
-      if (W.recoil > 0 && p.mode === MODE_NORMAL) {
-        // The Air Horn kicks you backwards (and up if you fire at the floor).
-        const k = W.recoil * power;
-        p.vx -= tmpDir.x * k;
-        p.vz -= tmpDir.z * k;
-        if (tmpDir.y < -0.3) {
-          p.vy = Math.max(p.vy, 0) - tmpDir.y * k;
-          p.onGround = 0;
-        }
-      }
-      if (p.ammo <= 0) {
-        p.ammo = 0;
-        p.reloadTimer = W.reloadTime / rate;
-        out.reloadStart = true;
-      }
     }
   } else if (fireHeld && p.fireCool <= 0 && p.reloadTimer <= 0 && p.ammo >= 1) {
     p.charging = 1;
     p.charge = Math.min(1, dt / W.chargeTime);
+  }
+}
+
+/** Fires one shot (or one pellet volley) with the current charge; spends ammo and applies recoil. */
+function fireShot(p: PlayerState, W: WeaponStats, out: StepResult, rate: number, auto: boolean): void {
+  // Mega Blast shots always fire at full charge (auto weapons spend a fraction per shot).
+  const mega = p.megaShots > 0;
+  if (mega) {
+    p.megaShots = Math.max(0, p.megaShots - W.megaCost);
+    if (p.megaShots < 1e-4) p.megaShots = 0;
+    if (!auto) p.charge = 1;
+  }
+  const charge = auto ? 1 : p.charge;
+  const power = W.tapPower + (1 - W.tapPower) * charge;
+  lookDir(p.yaw, p.pitch, tmpDir);
+  const eye = eyeHeight(p);
+  out.fired = {
+    ox: p.px + tmpDir.x * 0.5,
+    oy: p.py + eye + tmpDir.y * 0.5,
+    oz: p.pz + tmpDir.z * 0.5,
+    dx: tmpDir.x,
+    dy: tmpDir.y,
+    dz: tmpDir.z,
+    power,
+    charge,
+    mega,
+  };
+  p.ammo -= 1;
+  p.spawnProt = 0;
+  if (W.recoil > 0 && p.mode === MODE_NORMAL) {
+    // Kick: the Air Blaster (and any kick stock) shoves you backwards, and up if you fire at the
+    // floor. Auto weapons only push a little per shot and never reset a fall.
+    const k = W.recoil * power;
+    p.vx -= tmpDir.x * k;
+    p.vz -= tmpDir.z * k;
+    if (tmpDir.y < -0.3) {
+      p.vy = auto ? p.vy - tmpDir.y * k : Math.max(p.vy, 0) - tmpDir.y * k;
+      if (!auto || p.vy > 0) p.onGround = 0;
+    }
+  }
+  if (p.ammo <= 0) {
+    p.ammo = 0;
+    p.charging = 0;
+    p.reloadTimer = W.reloadTime / rate;
+    out.reloadStart = true;
   }
 }
