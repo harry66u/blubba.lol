@@ -3,9 +3,19 @@ import type { Action, InputManager } from './input';
 /** True on phones and tablets (a touch screen with no fine pointer like a mouse). */
 export function isTouchDevice(): boolean {
   if (typeof window === 'undefined') return false;
+  // iPads always get the touch layout, even with a keyboard or trackpad attached (their Safari
+  // won't reliably lock the pointer); the keyboard works alongside the on-screen controls.
+  if (isIPad()) return true;
   const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
   const fine = window.matchMedia?.('(any-pointer: fine)').matches ?? false;
   return (coarse && !fine) || (navigator.maxTouchPoints > 0 && !fine);
+}
+
+/** iPads, including iPadOS Safari's desktop mode (which says "Macintosh" but has a touch screen). */
+export function isIPad(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  return /iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
 }
 
 /** Readiness of each button's action (0..1, 1 = ready) plus what the utility slots hold. */

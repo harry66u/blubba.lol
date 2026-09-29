@@ -444,7 +444,10 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
       );
     }
   } else {
-    panel.append(el('div', { class: 'room-banner', text: `Public match · ${MODE_INFO[room?.settings.mode ?? 'knockout'].name} · ${MAPS[room?.mapId ?? 'dealership']?.name ?? ''}` }));
+    panel.append(
+      el('div', { class: 'room-banner', text: `Public match · ${MODE_INFO[room?.settings.mode ?? 'knockout'].name} · ${MAPS[room?.mapId ?? 'dealership']?.name ?? ''}` }),
+      el('div', { class: 'small-note', style: 'text-align:center', text: 'Bots fill public matches. Want no bots? Make a PRIVATE ROOM and switch them off.' }),
+    );
   }
   panel.append(
     el(

@@ -117,6 +117,13 @@ export class InputManager {
   private bindings: Record<Action, string[]> = { ...DEFAULT_BINDINGS };
   private codeToActions = new Map<string, Action[]>();
   enabled = false;
+  /**
+   * Playing without pointer lock (the browser refused it): the mouse still aims while it moves
+   * and clicks on the game still fire, but the cursor stays visible.
+   */
+  freeAim = false;
+  /** The browser refused pointer lock. */
+  onLockError: (() => void) | null = null;
   locked = false;
   private ignoreNextMove = false;
   onScoreboard: ((show: boolean) => void) | null = null;
@@ -166,6 +173,8 @@ export class InputManager {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) this.releaseAll();
     });
+    // Some browsers (iPad Safari, some school-managed Chromebooks) refuse pointer lock.
+    document.addEventListener('pointerlockerror', () => this.onLockError?.());
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.canvas;
       this.ignoreNextMove = true;
@@ -312,10 +321,12 @@ export class InputManager {
       cb(code);
       return;
     }
-    if (!this.locked) {
+    if (!this.locked && !this.freeAim) {
       if (!down) this.release(code);
       return;
     }
+    // Aiming without a lock: clicks on menus and buttons are theirs, not shots.
+    if (!this.locked && down && e.target !== this.canvas) return;
     if (down) this.press(code);
     else this.release(code);
   }
@@ -345,7 +356,7 @@ export class InputManager {
   }
 
   private onMouseMove(e: MouseEvent): void {
-    if (!this.locked || !this.enabled) return;
+    if (!(this.locked || this.freeAim) || !this.enabled) return;
     let dx = e.movementX;
     let dy = e.movementY;
     // Browsers sometimes report a huge jump right after locking.

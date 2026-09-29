@@ -5136,3 +5136,208 @@ body.touch .inflation .self-gain {
     padding: 6px 10px;
   }
 }
+
+/* --- Pause menu -------------------------------------------------------------------------------- */
+.pause-panel {
+  width: min(560px, 94vw);
+  max-height: 92vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pause-panel h2 {
+  margin: 0;
+}
+.pause-panel > .btn.big {
+  width: 100%;
+}
+.room-ticket {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--wash);
+  border: 2px solid var(--line);
+  border-radius: var(--r-md);
+}
+.room-ticket .label {
+  margin: 0;
+}
+.room-ticket .code {
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: 5px;
+  line-height: 1.1;
+}
+.host-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 2px dashed var(--line);
+  border-radius: var(--r-md);
+}
+.host-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-weight: 800;
+}
+.host-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+.host-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.host-field .label {
+  margin: 0;
+  font-size: 12px;
+}
+.host-field .field {
+  width: 100%;
+  font-size: 16px;
+  padding: 7px 10px;
+}
+.host-field.toggle-field {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.pause-nav {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.pause-nav .nav-btn {
+  justify-content: center;
+}
+.pause-panel .leave {
+  align-self: center;
+}
+@media (max-width: 480px) {
+  .host-grid,
+  .pause-nav {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-height: 500px) {
+  .pause-panel {
+    gap: 8px;
+    padding: 12px 16px;
+  }
+  .pause-panel > .btn.big {
+    padding: 8px;
+    font-size: 26px;
+  }
+}
+
+/* --- Settings, how to play, scoreboard: layout the polish pass left unstyled ------------------ */
+/* The sticky footer sits at the very bottom of the panel (under its padding), so nothing shows
+   below DONE / GOT IT while the panel scrolls. */
+.overlay .panel .panel-foot {
+  bottom: calc(-1 * var(--pad-y, 22px));
+  background: linear-gradient(180deg, rgba(248, 246, 255, 0), #f8f6ff 22%);
+}
+.overlay .panel.settings-panel,
+.overlay .panel.howto-panel {
+  width: min(720px, 94vw);
+  max-width: min(720px, 94vw);
+}
+.settings-note {
+  margin: 12px 0 0;
+}
+/* Key bindings: action, key, reset on one line. */
+.bind-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, auto) auto;
+  gap: 6px 10px;
+  align-items: center;
+  margin-top: 8px;
+}
+.bind-grid .lbl {
+  font-weight: 700;
+  font-size: 15px;
+}
+.bind-grid .keycap {
+  min-width: 120px;
+  justify-content: center;
+  font-size: 14px;
+  padding: 5px 12px;
+}
+.bind-grid .keycap.listening {
+  background: var(--yellow);
+}
+.bind-grid .icon-btn {
+  padding: 5px 9px;
+}
+/* How to play: four cards with an icon, then the controls. */
+.howto-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 6px 0 4px;
+}
+.howto-card {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  background: var(--wash);
+  border: 2px solid var(--line);
+  border-radius: var(--r-md);
+}
+.howto-card .ico {
+  flex: none;
+  font-size: 26px;
+  line-height: 1;
+}
+.howto-card .ttl {
+  font-weight: 900;
+  font-size: 16px;
+  margin-bottom: 2px;
+}
+.howto-card .txt {
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+/* Scoreboard rows span every column (ping included). */
+.scoreboard-panel {
+  width: min(640px, 94vw);
+}
+@media (max-width: 560px) {
+  .howto-cards {
+    grid-template-columns: 1fr;
+  }
+  .bind-grid {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+  .bind-grid .keycap {
+    min-width: 90px;
+  }
+}
+@media (max-height: 500px) {
+  .overlay .pause-panel h2 {
+    font-size: 22px;
+  }
+  .overlay .pause-panel > .btn.big {
+    padding: 6px 10px;
+    font-size: 24px;
+  }
+  .overlay .pause-panel .room-ticket .code {
+    font-size: 20px;
+  }
+  .overlay .pause-panel .host-field .field {
+    font-size: 14px;
+    padding: 4px 8px;
+  }
+}

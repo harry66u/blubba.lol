@@ -331,6 +331,9 @@ function setOverlay(next: typeof overlay): void {
   const redraw = next === 'results' && overlay === 'results';
   const resultsScroll = redraw ? (overlayLayer.querySelector('.results .panel')?.scrollTop ?? 0) : 0;
   overlay = next;
+  // Menus need the mouse: a menu opened while it's still locked to the game (the controller's
+  // Menu button, for one) would send every click to the game instead.
+  if (next !== 'none' && next !== 'click' && next !== 'replay' && input.locked) input.exitLock();
   clear(overlayLayer);
   lockerDispose?.();
   lockerDispose = null;
@@ -486,7 +489,7 @@ function setOverlay(next: typeof overlay): void {
     default:
       break;
   }
-  input.enabled = screen === 'playing' && (next === 'none' || next === 'results' || next === 'replay') && (input.locked || padPlay || touchMode);
+  input.enabled = screen === 'playing' && (next === 'none' || next === 'results' || next === 'replay') && (input.locked || padPlay || touchMode || input.freeAim);
 }
 
 function applySettings(s: Settings): void {
@@ -508,9 +511,36 @@ function applySettings(s: Settings): void {
 
 function resume(): void {
   audio.unlock();
-  if (padPlay || touchMode) setOverlay('none');
-  else input.requestLock();
+  if (padPlay || touchMode || input.freeAim) {
+    setOverlay('none');
+    return;
+  }
+  input.requestLock();
+  // Some browsers refuse the lock without saying so: play without it rather than ignore keys.
+  window.setTimeout(() => {
+    if (screen === 'playing' && overlay === 'click' && !input.locked && !padPlay) playUnlocked();
+  }, 1500);
 }
+
+/** Pointer lock was refused (iPad Safari, locked-down Chromebooks): aim with a visible cursor. */
+function playUnlocked(): void {
+  if (input.freeAim) return;
+  input.freeAim = true;
+  setOverlay('none');
+  hud.toast("Your browser won't lock the mouse, so the cursor stays visible: move it to aim, click the game to shoot, Esc or P for the menu.", 6000);
+}
+
+input.onLockError = () => {
+  if (screen === 'playing' && !touchMode && !padPlay) playUnlocked();
+};
+
+// Without pointer lock (touch devices with a keyboard, or a refused lock), Esc or P opens the menu.
+window.addEventListener('keydown', (e) => {
+  if (screen !== 'playing' || input.locked || (e.code !== 'Escape' && e.code !== 'KeyP')) return;
+  if ((e.target as HTMLElement | null)?.tagName === 'INPUT') return;
+  if (overlay === 'none' && (touchMode || input.freeAim)) setOverlay('pause');
+  else if (overlay === 'pause' && e.code === 'Escape') resume();
+});
 
 // Controller: Menu toggles pause, any button starts playing without a mouse, B closes menus.
 input.onMenuButton = () => {
