@@ -2042,315 +2042,499 @@ select.field:disabled {
 }
 
 /* ---------- Loadout: the gun builder ---------- */
+/* A header (title, Weapon / Parts / Gadgets tabs, DONE), one tab's choices on the left, the 3D
+   gun, its finish and stats always on the right, saved builds along the bottom. The panel has a
+   fixed height on desktop so switching tabs doesn't resize it; the left side scrolls on its own.
+   Thin lines and soft washes for everything else; the ink outline and lip only mark what's
+   picked (and the DONE button). */
 
 .overlay .panel.builder {
-  width: min(1240px, 97vw);
-  max-width: 97vw;
-  max-height: 96vh;
-  padding: 14px 18px 16px;
+  --pad-x: 22px;
+  --pad-y: 16px;
+  --pick: #fff3b8;
+  width: min(1120px, 96vw);
+  max-width: 96vw;
+  height: min(720px, 94vh);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'head head'
+    'left right'
+    'builds right';
+  gap: 12px 22px;
+  overflow: hidden;
 }
 
-.loadout .note {
-  background: #fff4c2;
-  border: 3px solid var(--ink);
-  border-radius: 12px;
-  padding: 4px 12px;
-  margin-bottom: 8px;
-  font-size: 14px;
+/* What's picked: an ink outline and lip drawn outside the thin border, so nothing shifts. */
+.builder .weapon-btn.selected,
+.builder .part-btn.selected,
+.builder .gadget.selected,
+.builder .build.active {
+  background: var(--pick);
+  border-color: var(--ink);
+  box-shadow:
+    0 0 0 1px var(--ink),
+    0 3px 0 1px var(--ink);
 }
 
-.loadout .label {
-  font-size: 11px;
-  margin: 0 0 4px;
-}
-
+/* Header: title, tabs, DONE (and the in-match note on its own line). */
 .builder-head {
-  display: flex;
+  grid-area: head;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: 'title tabs done';
   align-items: center;
-  gap: 14px;
-  margin-bottom: 8px;
+  gap: 8px 18px;
+  min-width: 0;
 }
 
 .overlay .builder-head h2 {
+  grid-area: title;
   margin: 0;
   font-size: 30px;
 }
 
-.builds-wrap {
-  flex: 1;
+.builder-tabs {
+  grid-area: tabs;
+  justify-self: start;
+  display: flex;
+  gap: 4px;
+  max-width: 100%;
   min-width: 0;
+  padding: 4px;
+  border: 2px solid var(--line);
+  border-radius: 18px;
+  background: var(--wash);
 }
 
-.builds-row {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.builder-tab {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
   gap: 8px;
-}
-
-.build {
-  border: 3px solid var(--ink);
-  border-radius: 12px;
-  background: white;
-  padding: 4px 6px;
-  cursor: pointer;
-  box-shadow: 0 3px 0 var(--ink);
   min-width: 0;
-}
-
-.build.empty {
-  background: #f3f1fb;
-  border-style: dashed;
-  cursor: default;
-}
-
-.build.active {
-  background: #fff1a8;
-  box-shadow: 0 3px 0 var(--ink), 0 0 0 3px var(--pink);
-}
-
-.build-top,
-.build-bottom {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.build-num {
-  flex: none;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--ink);
-  color: white;
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.build-name {
-  flex: 1;
-  min-width: 0;
-  font-family: var(--font);
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--ink);
-  border: none;
-  border-bottom: 2px dashed rgba(29, 27, 58, 0.25);
+  padding: 4px 16px 4px 10px;
+  border: 3px solid transparent;
+  border-radius: 14px;
   background: transparent;
-  padding: 1px 2px;
-  outline: none;
-  user-select: text;
-  -webkit-user-select: text;
+  color: var(--ink-soft);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    color 0.12s,
+    transform 0.14s var(--ease-pop);
+  -webkit-tap-highlight-color: transparent;
 }
 
-.build-name:focus {
-  border-bottom-color: var(--pink);
+.builder-tab:hover {
+  background: #fff;
+  color: var(--ink);
 }
 
-.build-gun {
-  flex: 1;
+.builder-tab:active {
+  transform: translateY(2px);
+}
+
+.builder-tab.on {
+  background: linear-gradient(180deg, #ffeb7a, var(--yellow));
+  border-color: var(--ink);
+  color: var(--ink);
+  box-shadow: var(--lip-sm);
+}
+
+.bt-icon {
+  flex: none;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.bt-text {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  line-height: 1.15;
+}
+
+.bt-label {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.bt-sub {
   font-size: 11px;
-  opacity: 0.75;
+  font-weight: 800;
+  color: var(--ink-soft);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.build-save {
-  flex: none;
-  font-family: var(--font);
-  font-size: 10px;
-  font-weight: 900;
-  color: white;
-  background: var(--blue);
-  border: 2px solid var(--ink);
-  border-radius: 8px;
-  padding: 2px 7px;
-  cursor: pointer;
+.builder-tab.on .bt-sub {
+  color: var(--ink);
 }
 
+/* DONE at the top right of the loadout and the locker. */
 .btn.done-top {
-  font-size: 18px;
-  padding: 8px 18px;
   flex: none;
+  font-size: 18px;
+  padding: 8px 20px;
 }
 
-.done-bottom {
-  display: none;
-  text-align: center;
-  margin-top: 12px;
+.builder-head .btn.done-top {
+  grid-area: done;
 }
 
-.builder-main {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
-  gap: 16px;
-  margin-bottom: 8px;
+.builder-head .note {
+  grid-column: 1 / -1;
+  padding: 4px 12px;
+  border-radius: var(--r-sm);
+  background: #fff4c2;
+  font-size: 13px;
+  font-weight: 800;
 }
 
+/* Left: the open tab. Scrolls on its own; the padding leaves room for lips and focus rings. */
+.builder-left {
+  grid-area: left;
+  min-width: 0;
+  min-height: 0;
+  margin: -4px;
+  padding: 4px 4px 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #b9b4d6 transparent;
+}
+
+.pane-intro {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+/* Weapon tab: seven cards, then the picked weapon's blurb. */
 .weapon-row {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 6px;
-  margin-bottom: 10px;
-}
-
-.weapon-btn,
-.part-btn {
-  font-family: var(--font);
-  color: var(--ink);
-  background: white;
-  border: 3px solid var(--ink);
-  border-radius: 12px;
-  cursor: pointer;
-  box-shadow: 0 3px 0 var(--ink);
-  transition: transform 0.08s;
-  min-width: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .weapon-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1px;
-  padding: 5px 3px;
+  gap: 2px;
+  min-width: 0;
+  padding: 14px 6px 12px;
+  border: 2px solid var(--line);
+  border-radius: var(--r-md);
+  background: #fff;
+  color: var(--ink);
+  font-family: var(--font);
   text-align: center;
+  cursor: pointer;
+  transition:
+    border-color 0.12s,
+    transform 0.14s var(--ease-pop);
 }
 
-.weapon-btn:hover,
-.part-btn:hover:not(:disabled) {
+.weapon-btn:hover {
+  border-color: var(--ink-soft);
   transform: translateY(-2px);
 }
 
-.weapon-btn.selected,
-.part-btn.selected {
-  background: #fff1a8;
-  box-shadow: 0 3px 0 var(--ink), 0 0 0 3px var(--pink);
-}
-
 .w-icon {
-  font-size: 22px;
-  line-height: 1.1;
+  font-size: 32px;
+  line-height: 1.15;
 }
 
 .w-name {
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 900;
-  line-height: 1.1;
+  line-height: 1.15;
 }
 
 .w-role {
-  font-size: 9px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  opacity: 0.6;
+  color: var(--ink-soft);
 }
 
-.part-rows {
+.weapon-blurb {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  background: var(--wash);
 }
 
+.wb-icon {
+  flex: none;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.wb-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+
+.wb-title b {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.wb-role {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.wb-text {
+  margin-top: 2px;
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--ink-soft);
+}
+
+/* Parts tab: a row per slot, the options as pills, what's fitted in one quiet line under them. */
 .part-row {
   display: grid;
-  grid-template-columns: 104px minmax(0, 1fr);
-  align-items: stretch;
-  gap: 8px;
+  grid-template-columns: 136px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 2px solid var(--line);
+}
+
+.part-row:first-child {
+  padding-top: 2px;
+  border-top: 0;
 }
 
 .slot-label {
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  line-height: 1.1;
-}
-
-.slot-label b {
-  font-size: 15px;
-}
-
-.slot-label small {
-  font-size: 10px;
-  opacity: 0.6;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
 }
 
 .slot-icon {
-  font-size: 14px;
+  flex: none;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.slot-text b {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.slot-text small {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--ink-soft);
+}
+
+.part-main {
+  min-width: 0;
 }
 
 .part-opts {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
 .part-btn {
-  text-align: left;
-  padding: 4px 7px;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 13px;
+  border: 2px solid var(--line);
+  border-radius: var(--r-pill);
+  background: #fff;
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color 0.12s,
+    transform 0.14s var(--ease-pop);
+}
+
+.part-btn:hover:not(.locked) {
+  border-color: var(--ink-soft);
+  transform: translateY(-1px);
 }
 
 .part-btn.locked {
-  opacity: 0.5;
+  border-style: dashed;
+  background: var(--wash);
+  color: var(--ink-soft);
   cursor: default;
-  background: #f1eff7;
 }
 
-.p-name {
-  font-size: 13px;
-  font-weight: 900;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.p-lock-icon {
+  font-size: 11px;
 }
 
-.p-desc {
-  font-size: 10px;
-  line-height: 1.15;
-  display: flex;
-  flex-direction: column;
-}
-
-.p-desc.std,
 .p-lock {
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: var(--line);
   font-size: 10px;
-  opacity: 0.6;
-  line-height: 1.15;
+  font-weight: 900;
 }
 
-.loadout .plus {
-  color: #1f9d3a;
+.part-desc {
+  margin-top: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--ink-soft);
 }
 
-.loadout .minus {
-  color: #d12d5b;
+.part-desc b {
+  color: var(--ink);
 }
 
+.part-desc .plus {
+  color: var(--success);
+}
+
+.part-desc .minus {
+  color: var(--danger);
+}
+
+/* Gadgets tab: a tile per utility; the two you carry show 1 and 2. */
+.util-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.gadget {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: start;
+  gap: 2px 10px;
+  padding: 12px 14px;
+  border: 2px solid var(--line);
+  border-radius: var(--r-md);
+  background: #fff;
+  color: var(--ink);
+  font-family: var(--font);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.12s,
+    transform 0.14s var(--ease-pop);
+}
+
+.gadget:hover:not(.locked) {
+  border-color: var(--ink-soft);
+  transform: translateY(-2px);
+}
+
+.g-icon {
+  grid-row: 1 / span 3;
+  font-size: 28px;
+  line-height: 1.1;
+}
+
+.g-name {
+  padding-right: 26px;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.g-blurb {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--ink-soft);
+}
+
+.g-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.gadget.locked {
+  background: var(--wash);
+  cursor: default;
+}
+
+.gadget.locked .g-icon,
+.gadget.locked .g-name,
+.gadget.locked .g-blurb {
+  opacity: 0.5;
+}
+
+.g-lock {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 900;
+  color: var(--ink-soft);
+}
+
+/* Right: the gun, its name and role, finish, stat bars and the tip line. */
 .builder-right {
+  grid-area: right;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .gun-view {
-  position: relative;
-  border: 3px solid var(--ink);
-  border-radius: 16px;
-  background: radial-gradient(ellipse at 50% 35%, #ffffff 0%, #e6f4ff 55%, #cfe3ff 100%);
+  flex: none;
   overflow: hidden;
+  border: 2px solid var(--line);
+  border-radius: var(--r-lg);
+  background: radial-gradient(ellipse at 50% 35%, #ffffff 0%, #e6f4ff 55%, #cfe3ff 100%);
 }
 
 .gun-canvas {
   display: block;
   width: 100%;
-  height: 170px;
+  height: 190px;
   cursor: grab;
 }
 
@@ -2366,32 +2550,42 @@ select.field:disabled {
 }
 
 .gun-caption {
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: 6px;
-  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 12px;
+  border-top: 2px solid var(--line);
+  background: rgba(255, 255, 255, 0.75);
 }
 
 .gun-name {
-  font-size: 16px;
-  font-weight: 900;
-}
-
-.gun-blurb {
-  font-size: 11px;
-  opacity: 0.75;
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.gun-role {
+  flex: none;
+  padding: 2px 9px;
+  border-radius: var(--r-pill);
+  background: var(--wash);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
 .finish-row {
   display: flex;
-  align-items: center;
-  gap: 5px;
   flex-wrap: wrap;
-  min-height: 0;
+  align-items: center;
+  gap: 6px;
 }
 
 .finish-row:empty {
@@ -2399,93 +2593,94 @@ select.field:disabled {
 }
 
 .finish-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  opacity: 0.6;
   margin-right: 2px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--ink-soft);
 }
 
 .finish-swatch {
   width: 22px;
   height: 22px;
-  border-radius: 50%;
-  border: 3px solid var(--ink);
-  cursor: pointer;
   padding: 0;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  cursor: pointer;
 }
 
 .finish-swatch.selected {
-  box-shadow: 0 0 0 3px var(--pink);
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 4px var(--pink);
 }
 
 .finish-more {
-  font-size: 10px;
-  opacity: 0.55;
   margin-left: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-soft);
 }
 
 .stat-box {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 5px;
 }
 
 .stat-row {
   display: grid;
-  grid-template-columns: 78px minmax(0, 1fr) 76px 38px;
+  grid-template-columns: 84px minmax(0, 1fr) 74px 36px;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 11px;
 }
 
 .stat-label {
-  text-transform: uppercase;
+  font-weight: 900;
   letter-spacing: 0.5px;
-  opacity: 0.75;
+  text-transform: uppercase;
+  color: var(--ink-soft);
   white-space: nowrap;
 }
 
 .stat-row .bar {
   position: relative;
-  height: 10px;
-  border: 2px solid var(--ink);
-  border-radius: 6px;
+  height: 8px;
   overflow: hidden;
-  background: #eee;
+  border-radius: var(--r-pill);
+  background: var(--line);
 }
 
-.stat-row .bar .fill {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  background: var(--blue);
-}
-
+.stat-row .bar .fill,
 .stat-row .bar .delta {
   position: absolute;
   top: 0;
   bottom: 0;
 }
 
-.delta.up {
+.stat-row .bar .fill {
+  left: 0;
+  background: var(--blue);
+}
+
+.stat-row .delta.up {
   background: #3ccf4e;
 }
 
-.delta.down {
+.stat-row .delta.down {
   background: #ff3b5c;
 }
 
-.delta.neutral {
+.stat-row .delta.neutral {
   background: #ffc933;
 }
 
 .stat-val {
-  font-weight: 700;
+  font-weight: 800;
   text-align: right;
   white-space: nowrap;
-  font-size: 11px;
 }
 
 .stat-diff {
@@ -2495,190 +2690,493 @@ select.field:disabled {
 }
 
 .stat-diff.up {
-  color: #1f9d3a;
+  color: var(--success);
 }
 
 .stat-diff.down {
-  color: #d12d5b;
+  color: var(--danger);
 }
 
 .stat-diff.neutral {
-  color: #b88600;
+  color: #a87700;
 }
 
 .part-tip {
+  min-height: 38px;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  background: var(--wash);
   font-size: 12px;
-  line-height: 1.25;
-  background: #f3f1fb;
-  border-radius: 10px;
-  padding: 5px 8px;
-  min-height: 34px;
+  font-weight: 700;
+  line-height: 1.3;
 }
 
 .part-tip.muted {
-  opacity: 0.6;
+  color: var(--ink-soft);
 }
 
-.loadout .chip {
-  font-family: var(--font);
-  text-align: left;
-  color: var(--ink);
-  background: white;
-  border: 3px solid var(--ink);
-  border-radius: 14px;
-  padding: 6px 10px;
+/* Saved builds: three slim pills (number, name, gun, save). */
+.builds-bar {
+  grid-area: builds;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.builds-bar > .label {
+  flex: none;
+  margin: 0;
+}
+
+.builds-row {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.build {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 4px 4px 5px;
+  border: 2px solid var(--line);
+  border-radius: var(--r-pill);
+  background: #fff;
   cursor: pointer;
-  box-shadow: 0 4px 0 var(--ink);
-  transition: transform 0.08s;
+  transition: border-color 0.12s;
 }
 
-.loadout .chip:hover:not(:disabled) {
-  transform: translateY(-2px);
+.build:hover {
+  border-color: var(--ink-soft);
 }
 
-.loadout .chip.selected {
-  background: #fff1a8;
-  box-shadow: 0 4px 0 var(--ink), 0 0 0 3px var(--pink);
-}
-
-.loadout .chip:disabled {
-  opacity: 0.45;
+.build.empty {
+  border-style: dashed;
+  background: var(--wash);
   cursor: default;
 }
 
-.loadout .title {
-  font-size: 15px;
-  margin: 2px 0;
-}
-
-.loadout .blurb {
-  font-size: 11px;
-  opacity: 0.75;
-}
-
-.loadout .chip-row {
+.build-num {
+  flex: none;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 8px;
-}
-
-.loadout .slot {
-  margin-top: 4px;
-  font-size: 11px;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
   background: var(--ink);
-  color: white;
-  border-radius: 8px;
-  padding: 1px 8px;
-  display: inline-block;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
 }
 
-.loadout .lock-note {
-  font-size: 11px;
-  opacity: 0.8;
+.build.empty .build-num {
+  background: #b9b4d6;
 }
 
-/* Medium widths: the right column narrows, weapons wrap. */
-@media (max-width: 1100px) {
-  .weapon-row {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+.build-name {
+  flex: 1;
+  min-width: 0;
+  padding: 2px;
+  border: 0;
+  border-bottom: 2px dashed transparent;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 800;
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.build-name::placeholder {
+  color: #a3a0bf;
+  opacity: 1;
+}
+
+.build-name:hover {
+  border-bottom-color: rgba(29, 27, 58, 0.25);
+}
+
+.build-name:focus {
+  border-bottom-color: var(--pink);
+}
+
+.build-gun {
+  flex: none;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.build-gun:empty {
+  display: none;
+}
+
+.build-save {
+  flex: none;
+  padding: 3px 10px;
+  border: 2px solid #9bd6ff;
+  border-radius: var(--r-pill);
+  background: #e3f4ff;
+  color: #0b6a99;
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    transform 0.1s;
+}
+
+.build-save:hover {
+  border-color: var(--ink);
+  background: var(--blue);
+  color: #fff;
+}
+
+.build-save:active {
+  transform: translateY(1px);
+}
+
+/* Narrower desktops: a slimmer right column. */
+@media (max-width: 1000px) {
+  .overlay .panel.builder {
+    grid-template-columns: minmax(0, 1fr) minmax(250px, 290px);
+    gap: 12px 16px;
   }
-  .part-opts {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .part-row {
+    grid-template-columns: 112px minmax(0, 1fr);
+  }
+  .builds-bar > .label {
+    display: none;
+  }
+  .stat-row {
+    grid-template-columns: 78px minmax(0, 1fr) 64px 34px;
+    gap: 6px;
   }
 }
 
-/* Short screens (1366x768 with browser chrome, landscape phones): tighter. */
-@media (max-height: 820px) {
+/* Phones held upright (and very narrow windows): one scrolling column. The header with the tabs
+   and DONE stays at the top; then the gun, the open tab's choices, the finish and stats, and the
+   saved builds. */
+@media (max-width: 760px) and (min-height: 501px), (max-width: 599px) {
+  .overlay .panel.builder {
+    --pad-x: 12px;
+    flex: none;
+    width: 100vw;
+    max-width: 100vw;
+    height: 100%;
+    height: 100dvh;
+    max-height: none;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 0 var(--pad-x) 18px;
+    border-width: 0;
+    border-radius: 0;
+    overflow-y: auto;
+    /* Switching tabs changes the height above the stats: don't let the browser shift the scroll. */
+    overflow-anchor: none;
+  }
+  .overlay .panel.builder > * {
+    flex: none;
+  }
+  .builder-head {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'title done'
+      'tabs tabs';
+    gap: 8px;
+    margin: 0 calc(-1 * var(--pad-x));
+    padding: 10px var(--pad-x);
+    border-bottom: 2px solid var(--line);
+    background: #fbfaff;
+  }
+  .overlay .builder-head h2 {
+    font-size: 26px;
+  }
+  .builder-head .btn.done-top {
+    font-size: 16px;
+    padding: 6px 16px;
+  }
+  .builder-tabs {
+    justify-self: stretch;
+  }
+  .builder-tab {
+    flex: 1 1 0;
+    gap: 6px;
+    padding: 4px 6px;
+  }
+  .bt-icon {
+    font-size: 18px;
+  }
+  .bt-label {
+    font-size: 14px;
+  }
+  .bt-sub {
+    font-size: 10px;
+  }
+  /* The right column's parts join the one column, in their own order. */
+  .builder-right {
+    display: contents;
+  }
+  .gun-view {
+    order: 1;
+  }
+  .builder-left {
+    order: 2;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+  }
+  .finish-row {
+    order: 3;
+    padding-top: 12px;
+    border-top: 2px solid var(--line);
+  }
+  .stat-box {
+    order: 4;
+  }
+  .part-tip {
+    order: 5;
+  }
+  .builds-bar {
+    order: 6;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+  .builds-bar > .label {
+    display: block;
+  }
+  .builds-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .gun-canvas {
     height: 150px;
   }
-  .stat-box {
-    gap: 2px;
+  .weapon-row {
+    gap: 6px;
   }
   .weapon-btn {
-    padding: 3px 2px;
+    padding: 9px 2px 7px;
   }
-}
-
-/* Phones: one column, the gun on top; the panel scrolls. */
-@media (max-width: 760px) {
-  .overlay .panel.builder {
-    width: 100vw;
-    max-width: 100vw;
-    max-height: 100%;
-    height: 100%;
-    border-radius: 0;
-    border-width: 0;
-    padding: 10px 10px 18px;
+  .w-icon {
+    font-size: 24px;
   }
-  .builder-head {
-    flex-wrap: wrap;
+  .w-name {
+    font-size: 12px;
   }
-  .builds-wrap {
-    order: 3;
-    flex-basis: 100%;
-  }
-  .builder-head h2 {
-    flex: 1;
-  }
-  .builder-main {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .builder-right {
-    order: -1;
+  .w-role {
+    font-size: 8px;
+    letter-spacing: 0.3px;
   }
   .part-row {
     grid-template-columns: minmax(0, 1fr);
-    gap: 3px;
+    gap: 8px;
   }
-  .slot-label {
+  .slot-text {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 8px;
+  }
+  .stat-row {
+    grid-template-columns: 82px minmax(0, 1fr) 70px 36px;
+  }
+}
+
+/* Phones held sideways: the same two columns, compact, filling the screen. */
+@media (max-height: 500px) and (min-width: 600px) {
+  .overlay .panel.builder {
+    --pad-x: 10px;
+    --pad-y: 6px;
+    flex: none;
+    width: 100vw;
+    max-width: 100vw;
+    height: 100%;
+    height: 100dvh;
+    max-height: none;
+    grid-template-columns: minmax(0, 1fr) minmax(230px, 280px);
+    gap: 6px 12px;
+    padding-left: max(var(--pad-x), env(safe-area-inset-left));
+    padding-right: max(var(--pad-x), env(safe-area-inset-right));
+    border-width: 0;
+    border-radius: 0;
+  }
+  .builder-head {
+    gap: 4px 12px;
+  }
+  .overlay .builder-head h2 {
+    font-size: 20px;
+  }
+  .builder-tabs {
+    padding: 3px;
+  }
+  .builder-tab {
+    gap: 6px;
+    padding: 2px 10px 2px 6px;
+    border-width: 2px;
+  }
+  .bt-icon {
+    font-size: 16px;
+  }
+  .bt-text {
     flex-direction: row;
     align-items: baseline;
     gap: 6px;
   }
-  .done-bottom {
-    display: block;
+  .bt-label {
+    font-size: 14px;
   }
-}
-
-/* Phones held sideways: two columns again, compact. */
-@media (max-height: 500px) and (min-width: 600px) {
-  .overlay .panel.builder {
-    width: 100vw;
-    max-width: 100vw;
-    max-height: 100%;
-    height: 100%;
-    border-radius: 0;
-    border-width: 0;
-    padding: 6px 10px 14px;
+  .bt-sub {
+    font-size: 10px;
   }
-  .builder-main {
-    grid-template-columns: minmax(0, 1fr) minmax(230px, 280px);
-    gap: 10px;
+  .builder-head .btn.done-top {
+    font-size: 15px;
+    padding: 4px 14px;
   }
-  .builder-right {
-    order: 0;
+  .builder-head .note {
+    padding: 2px 10px;
+    font-size: 11px;
   }
-  .gun-canvas {
-    height: 120px;
+  .pane-intro {
+    margin-bottom: 6px;
+    font-size: 11px;
   }
   .weapon-row {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
   }
-  .part-row {
-    grid-template-columns: 70px minmax(0, 1fr);
+  .weapon-btn {
+    padding: 6px 4px 5px;
   }
-  .slot-label small {
-    display: none;
-  }
-  .overlay .builder-head h2 {
+  .w-icon {
     font-size: 22px;
   }
-  .stat-row {
-    grid-template-columns: 70px minmax(0, 1fr) 64px 32px;
+  .w-name {
+    font-size: 12px;
   }
-  .done-bottom {
-    display: block;
+  .w-role {
+    font-size: 9px;
+  }
+  .weapon-blurb {
+    margin-top: 8px;
+    padding: 8px 10px;
+  }
+  .wb-title b {
+    font-size: 15px;
+  }
+  .wb-text {
+    font-size: 12px;
+  }
+  .part-row {
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 8px;
+    padding: 7px 0;
+  }
+  .slot-icon {
+    font-size: 16px;
+  }
+  .slot-text b {
+    font-size: 14px;
+  }
+  .slot-text small {
+    display: none;
+  }
+  .part-btn {
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+  .part-desc {
+    margin-top: 4px;
+    font-size: 11px;
+  }
+  .util-grid {
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 6px;
+  }
+  .gadget {
+    padding: 7px 10px;
+  }
+  .g-icon {
+    font-size: 22px;
+  }
+  .g-name {
+    font-size: 13px;
+  }
+  .g-blurb {
+    font-size: 11px;
+  }
+  .builder-right {
+    gap: 4px;
+  }
+  .gun-canvas {
+    height: 100px;
+  }
+  .gun-caption {
+    padding: 2px 8px;
+  }
+  .gun-name {
+    font-size: 13px;
+  }
+  .gun-role {
+    padding: 1px 7px;
+    font-size: 9px;
+  }
+  .finish-label {
+    display: none;
+  }
+  .finish-swatch {
+    width: 16px;
+    height: 16px;
+  }
+  .finish-more {
+    font-size: 10px;
+  }
+  .stat-box {
+    gap: 1px;
+  }
+  .stat-row {
+    grid-template-columns: 70px minmax(0, 1fr) 58px 30px;
+    gap: 6px;
+    font-size: 10px;
+    line-height: 1.15;
+  }
+  .stat-row .bar {
+    height: 6px;
+  }
+  .part-tip {
+    min-height: 0;
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+  .builds-bar > .label {
+    display: none;
+  }
+  .builds-row {
+    gap: 6px;
+  }
+  .build {
+    padding: 2px 3px 2px 4px;
+  }
+  .build-num {
+    width: 18px;
+    height: 18px;
+    font-size: 11px;
+  }
+  .build-name {
+    font-size: 12px;
+  }
+  .build-save {
+    padding: 2px 8px;
   }
 }
 
@@ -3493,35 +3991,74 @@ select.field:disabled {
   user-select: all;
   -webkit-user-select: all;
 }
-.locker {
-  width: min(1000px, 96vw);
-  max-height: 96vh;
-  overflow: auto;
-  padding-top: 16px;
-  padding-bottom: 16px;
+.account-panel .tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
 }
-.locker h2 {
-  margin: 0 0 8px;
+/* Locker: a header (title, coins, randomize, DONE), then the 3D preview | a slim category list |
+   the items. Fixed height, so only the item grid (and the list, if it must) scrolls. */
+.overlay .panel.locker {
+  --pad-x: 22px;
+  --pad-y: 16px;
+  width: min(1080px, 96vw);
+  max-width: 96vw;
+  height: min(700px, 94vh);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+}
+.locker-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px 14px;
+  min-width: 0;
+}
+.overlay .locker-head h2 {
+  margin: 0;
+  font-size: 30px;
+}
+.locker-coins {
+  flex: none;
+  margin-right: auto;
+  padding: 3px 12px;
+  border: 2px solid #f0d36a;
+  border-radius: var(--r-pill);
+  background: #fff7d6;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.locker-head .randomize {
+  flex: none;
 }
 .locker-body {
-  display: flex;
-  gap: 18px;
-  align-items: flex-start;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 230px 184px minmax(0, 1fr);
+  gap: 16px;
 }
 .locker-left {
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 8px;
-  width: 250px;
-  flex: none;
+  min-width: 0;
+  min-height: 0;
 }
 .preview-canvas {
-  width: 220px;
-  height: min(300px, 40vh);
-  border-radius: 18px;
+  display: block;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 2px solid var(--line);
+  border-radius: var(--r-lg);
   background: radial-gradient(circle at 50% 40%, #ffffff, #dff2ff);
-  border: 3px solid var(--ink);
   cursor: grab;
 }
 .preview-canvas.no-3d {
@@ -3529,49 +4066,153 @@ select.field:disabled {
   place-items: center;
   font-size: 80px;
 }
-.locker-left .coins {
-  font-size: 24px;
-  font-weight: 900;
+.looks-note {
+  flex: none;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
+  text-align: center;
+  color: var(--ink-soft);
 }
-.locker-right {
+.locker-cats {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  min-height: 0;
+  margin: -3px;
+  padding: 3px 3px 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #b9b4d6 transparent;
+}
+.cat {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 2px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-soft);
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    color 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.cat:hover {
+  background: var(--wash);
+  color: var(--ink);
+}
+.cat.on {
+  border-color: var(--ink);
+  background: linear-gradient(180deg, #ffeb7a, var(--yellow));
+  color: var(--ink);
+  box-shadow: var(--lip-sm);
+}
+.cat-icon {
+  flex: none;
+  width: 22px;
+  font-size: 17px;
+  line-height: 1;
+  text-align: center;
+}
+.cat-name {
   flex: 1;
   min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.locker .tabs,
-.account-panel .tabs {
+.cat .new-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--pink);
+  box-shadow: 0 0 0 2px #fff;
+}
+.cat-sep {
+  flex: none;
+  height: 2px;
+  margin: 5px 10px;
+  border-radius: 1px;
+  background: var(--line);
+}
+.locker-right {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 10px;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+}
+.slot-note {
+  flex: none;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--ink-soft);
+}
+.slot-note:empty,
+.locker-note:empty {
+  display: none;
 }
 .item-grid {
+  flex: 1;
+  min-height: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
-  gap: 8px;
-  max-height: min(46vh, 380px);
-  overflow: auto;
-  padding: 4px;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  align-content: start;
+  gap: 10px;
+  margin: -4px;
+  padding: 4px 4px 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #b9b4d6 transparent;
 }
 .item-grid .item {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  padding: 10px 6px 8px;
-  border-radius: 14px;
-  border: 3px solid #d8d4ea;
+  min-width: 0;
+  padding: 14px 6px 10px;
+  border: 2px solid var(--line);
+  border-radius: var(--r-md);
   background: #fff;
   color: var(--ink);
   font: inherit;
   cursor: pointer;
+  transition:
+    border-color 0.12s,
+    transform 0.14s var(--ease-pop);
 }
 .item-grid .item:hover {
-  border-color: var(--ink);
+  border-color: var(--ink-soft);
+  transform: translateY(-2px);
 }
 .item-grid .item.equipped {
   border-color: var(--ink);
-  background: #fff7c2;
-  box-shadow: 0 3px 0 var(--ink);
+  background: #fff3b8;
+  box-shadow:
+    0 0 0 1px var(--ink),
+    0 3px 0 1px var(--ink);
+}
+.item-grid .item.trying {
+  border-style: dashed;
+  border-color: var(--sky);
+  background: #eef7ff;
 }
 .item-grid .item .icon {
   font-size: 34px;
@@ -3580,37 +4221,255 @@ select.field:disabled {
 .item-grid .swatch-big {
   width: 44px;
   height: 44px;
+  border: 2px solid var(--ink);
   border-radius: 50%;
-  border: 3px solid var(--ink);
+}
+.item-grid .swatch-big.split {
+  display: flex;
+  overflow: hidden;
+  transform: rotate(-45deg);
+}
+.item-grid .swatch-big.split span {
+  flex: 1;
+}
+.item-grid .item.level-locked > .icon,
+.item-grid .item.level-locked > .swatch-big {
+  opacity: 0.45;
+  filter: grayscale(0.6);
 }
 .item-grid .name {
-  font-weight: 900;
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.2;
   text-align: center;
 }
 .item-grid .status {
-  font-size: 12px;
-  font-weight: 800;
-  opacity: 0.7;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.2;
+  text-align: center;
+  color: var(--ink-soft);
 }
 .item-grid .status.on {
-  color: #1a9f4a;
-  opacity: 1;
+  color: var(--success);
 }
 .item-grid .status.price {
-  opacity: 1;
+  color: var(--ink);
 }
 .item-grid .status.short {
-  color: #c0304a;
+  color: var(--danger);
+}
+.item-grid .status.level {
+  color: var(--purple);
 }
 .item-grid .status.buy {
   color: #1060c0;
-  opacity: 1;
+}
+.item-grid .new-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--pink);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 15px;
+  letter-spacing: 0.5px;
 }
 .locker-note {
-  min-height: 1.4em;
-  margin-top: 8px;
+  flex: none;
+  font-size: 14px;
   font-weight: 700;
+  line-height: 1.35;
+}
+.locker-note .btn.small {
+  margin-left: 10px;
+  padding: 3px 12px;
+  font-size: 14px;
+  vertical-align: middle;
+}
+@media (max-width: 860px) {
+  .locker-body {
+    grid-template-columns: 180px 160px minmax(0, 1fr);
+    gap: 12px;
+  }
+}
+/* Phones held sideways: the same three columns, compact, filling the screen. Only the list and
+   the grid scroll (each in its own box); nothing goes past the sides. */
+@media (max-height: 500px) {
+  .overlay .panel.locker {
+    --pad-x: 10px;
+    --pad-y: 6px;
+    flex: none;
+    width: 100vw;
+    max-width: 100vw;
+    height: 100%;
+    height: 100dvh;
+    max-height: none;
+    gap: 6px;
+    padding-left: max(var(--pad-x), env(safe-area-inset-left));
+    padding-right: max(var(--pad-x), env(safe-area-inset-right));
+    border-width: 0;
+    border-radius: 0;
+  }
+  .overlay .locker-head h2 {
+    font-size: 20px;
+  }
+  .locker-coins {
+    padding: 1px 9px;
+    font-size: 14px;
+  }
+  .locker-head .btn.small {
+    padding: 3px 10px;
+    font-size: 13px;
+  }
+  .locker-head .btn.done-top {
+    padding: 4px 14px;
+    font-size: 15px;
+  }
+  .locker-body {
+    grid-template-columns: 124px 148px minmax(0, 1fr);
+    gap: 10px;
+  }
+  .locker-left {
+    gap: 4px;
+  }
+  .looks-note {
+    font-size: 10px;
+  }
+  .cat {
+    gap: 6px;
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+  .cat-icon {
+    width: 18px;
+    font-size: 15px;
+  }
+  .cat-sep {
+    margin: 3px 8px;
+  }
+  .slot-note {
+    font-size: 11px;
+  }
+  .item-grid {
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    gap: 6px;
+  }
+  .item-grid .item {
+    gap: 2px;
+    padding: 8px 4px 6px;
+  }
+  .item-grid .item .icon {
+    font-size: 26px;
+    line-height: 32px;
+  }
+  .item-grid .swatch-big {
+    width: 32px;
+    height: 32px;
+  }
+  .item-grid .name {
+    font-size: 11px;
+  }
+  .item-grid .status {
+    font-size: 10px;
+  }
+  .locker-note {
+    font-size: 12px;
+  }
+}
+/* Phones held upright: a short preview on top, the categories as one row that scrolls sideways
+   inside its own box, then the grid in three columns. */
+@media (max-width: 600px) and (min-height: 501px) {
+  .overlay .panel.locker {
+    --pad-x: 12px;
+    --pad-y: 10px;
+    flex: none;
+    width: 100vw;
+    max-width: 100vw;
+    height: 100%;
+    height: 100dvh;
+    max-height: none;
+    gap: 8px;
+    border-width: 0;
+    border-radius: 0;
+  }
+  .locker-head {
+    gap: 8px;
+  }
+  .overlay .locker-head h2 {
+    font-size: 24px;
+  }
+  .locker-head .btn.small {
+    padding: 5px 10px;
+    font-size: 14px;
+  }
+  .locker-head .btn.done-top {
+    padding: 6px 16px;
+    font-size: 16px;
+  }
+  .locker-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .locker-left {
+    flex: none;
+    gap: 4px;
+  }
+  .preview-canvas {
+    flex: none;
+    height: min(170px, 24vh);
+  }
+  .looks-note {
+    font-size: 11px;
+  }
+  .locker-cats {
+    flex: none;
+    flex-direction: row;
+    gap: 4px;
+    margin: 0;
+    padding: 4px;
+    border: 2px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--wash);
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+  .locker-cats::-webkit-scrollbar {
+    display: none;
+  }
+  .cat {
+    gap: 6px;
+    padding: 4px 10px;
+    font-size: 13px;
+  }
+  .cat:hover {
+    background: #fff;
+  }
+  .cat-name {
+    overflow: visible;
+  }
+  .cat-sep {
+    width: 2px;
+    height: auto;
+    margin: 4px 2px;
+  }
+  .locker-right {
+    flex: 1;
+  }
+  .item-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+}
+@media (max-width: 420px) {
+  .randomize-word {
+    display: none;
+  }
 }
 .level-row {
   display: flex;
@@ -3939,16 +4798,7 @@ select.field:disabled {
   font-weight: 900;
   text-align: center;
 }
-.lock-note {
-  font-size: 11px;
-  font-weight: 900;
-  color: #1060c0;
-}
 @media (max-width: 760px) {
-  .locker-body {
-    flex-direction: column;
-    align-items: center;
-  }
   .stat-grid.four {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -3996,10 +4846,6 @@ select.field:disabled {
   color: var(--ink);
   box-shadow: var(--lip-sm);
 }
-.overlay .panel.locker {
-  max-width: min(1000px, 96vw);
-}
-
 /* --- Inflation danger ------------------------------------------------------------------- */
 .hud.danger .inflation .pct {
   animation: danger-pulse calc(0.9s - var(--danger) * 0.5s) ease-in-out infinite;
@@ -4810,227 +5656,6 @@ body.touch .inflation .self-gain {
   display: none;
 }
 
-/* === Locker upgrades: slot icons, NEW badges, level locks, try-on, randomize, phone layout === */
-.locker-tabs .tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  position: relative;
-}
-.locker-tabs .tab-icon {
-  font-size: 16px;
-  line-height: 1;
-}
-.locker-tabs .new-dot {
-  position: absolute;
-  top: -7px;
-  right: -5px;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 4px;
-  border-radius: 9px;
-  background: #ff3b5c;
-  color: #fff;
-  font-size: 11px;
-  font-weight: 900;
-  line-height: 18px;
-  text-align: center;
-  box-shadow: 0 0 0 2px #fff;
-}
-.item-grid .item {
-  position: relative;
-}
-.item-grid .new-badge {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  padding: 1px 6px;
-  border-radius: 8px;
-  background: #ff3b5c;
-  color: #fff;
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.05em;
-}
-.item-grid .item .lock {
-  position: absolute;
-  top: 34px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 22px;
-  filter: drop-shadow(0 2px 0 #fff);
-}
-.item-grid .item.level-locked > .icon,
-.item-grid .item.level-locked > .swatch-big {
-  opacity: 0.45;
-  filter: grayscale(0.6);
-}
-.item-grid .status.level {
-  color: #7a4dd6;
-  opacity: 1;
-}
-.item-grid .item.trying {
-  border-color: #1060c0;
-  border-style: dashed;
-}
-.item-grid .swatch-big.split {
-  display: flex;
-  overflow: hidden;
-  transform: rotate(-45deg);
-}
-.item-grid .swatch-big.split span {
-  flex: 1;
-}
-.locker-coins-row {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.locker .slot-note {
-  margin-top: 6px;
-  min-height: 0;
-}
-.locker .slot-note:empty {
-  display: none;
-}
-.locker-done {
-  text-align: center;
-  margin-top: 14px;
-}
-
-/* Phones held sideways: preview on the left, one scrolling row of icon tabs, a denser grid,
-   everything inside the screen height. */
-@media (max-height: 500px) {
-  .overlay .panel.locker {
-    width: 98vw;
-    max-width: 98vw;
-    max-height: 98vh;
-    padding: 8px 12px;
-    border-radius: 18px;
-  }
-  .locker h2 {
-    display: none;
-  }
-  .locker-body {
-    gap: 10px;
-  }
-  .locker-left {
-    width: 170px;
-    gap: 4px;
-  }
-  .locker-left .small-note {
-    display: none;
-  }
-  .preview-canvas {
-    width: 160px;
-    height: calc(98vh - 120px);
-  }
-  .locker-left .coins {
-    font-size: 18px;
-  }
-  .locker-coins-row {
-    gap: 6px;
-  }
-  .locker-coins-row .btn.small {
-    font-size: 13px;
-    padding: 4px 8px;
-  }
-  .locker .locker-tabs {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    padding: 8px 2px 4px;
-    margin-bottom: 4px;
-    scrollbar-width: none;
-  }
-  .locker-tabs .tab {
-    flex: none;
-    padding: 5px 9px;
-  }
-  .locker-tabs .tab-label {
-    display: none;
-  }
-  .locker-tabs .tab.on .tab-label {
-    display: inline;
-  }
-  .item-grid {
-    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
-    gap: 6px;
-    max-height: calc(98vh - 150px);
-  }
-  .item-grid .item {
-    padding: 6px 4px;
-    gap: 2px;
-  }
-  .item-grid .item .icon {
-    font-size: 26px;
-    line-height: 32px;
-  }
-  .item-grid .swatch-big {
-    width: 32px;
-    height: 32px;
-  }
-  .item-grid .item .lock {
-    top: 22px;
-    font-size: 18px;
-  }
-  .item-grid .name {
-    font-size: 12px;
-  }
-  .item-grid .status {
-    font-size: 10px;
-  }
-  .locker-note {
-    margin-top: 4px;
-    font-size: 13px;
-  }
-  .locker .slot-note {
-    font-size: 11px;
-  }
-  .overlay .panel.locker {
-    position: relative;
-  }
-  .locker-done {
-    position: absolute;
-    top: 10px;
-    right: 12px;
-    margin: 0;
-  }
-  .locker-done .btn {
-    font-size: 15px;
-    padding: 5px 14px;
-  }
-  .locker .locker-tabs {
-    margin-right: 84px;
-  }
-}
-
-/* Phones held upright: preview on top, then scrolling icon tabs and the grid. */
-@media (max-width: 560px) {
-  .locker-left {
-    width: 100%;
-  }
-  .preview-canvas {
-    height: min(240px, 32vh);
-  }
-  .locker .locker-tabs {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    padding-top: 8px;
-    scrollbar-width: none;
-  }
-  .locker-tabs .tab {
-    flex: none;
-  }
-  .locker-tabs .tab:not(.on) .tab-label {
-    display: none;
-  }
-  .item-grid {
-    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
-  }
-}
-
 /* A lone last mode tile (Ranked) spans its row instead of sitting in a corner. */
 .mode-picker button:last-child:nth-child(3n + 1) {
   grid-column: 1 / -1;
@@ -5589,67 +6214,6 @@ body.touch .inflation .self-gain {
 @keyframes ult-chased {
   to {
     box-shadow: inset 0 0 160px 44px rgba(255, 95, 210, 0.75);
-  }
-}
-
-/* Loadout: the Ultimate picker. */
-.ult-section {
-  margin-top: 14px;
-}
-.ult-picker {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 10px;
-}
-.loadout .ult-card {
-  --ult: #ffd60a;
-  font-family: var(--font);
-  text-align: left;
-  color: var(--ink);
-  background: white;
-  border: 4px solid var(--ink);
-  border-radius: 18px;
-  padding: 10px 12px;
-  cursor: pointer;
-  box-shadow: 0 5px 0 var(--ink);
-  transition: transform 0.08s;
-}
-.loadout .ult-card:hover:not(:disabled) {
-  transform: translateY(-2px);
-}
-.loadout .ult-card.selected {
-  background: color-mix(in srgb, var(--ult) 22%, white);
-  box-shadow: 0 5px 0 var(--ink), 0 0 0 4px var(--ult);
-}
-.loadout .ult-card:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.loadout .ult-card .ico {
-  font-size: 30px;
-}
-.loadout .ult-card .title {
-  font-size: 17px;
-  margin: 2px 0;
-}
-.loadout .ult-card .by {
-  display: inline-block;
-  font-size: 11px;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  background: var(--ult);
-  border: 2px solid var(--ink);
-  border-radius: 8px;
-  padding: 0 6px;
-  margin-bottom: 4px;
-}
-.loadout .ult-card .blurb {
-  font-size: 12px;
-  min-height: 0;
-}
-@media (max-width: 760px) {
-  .ult-picker {
-    grid-template-columns: repeat(2, 1fr);
   }
 }
 

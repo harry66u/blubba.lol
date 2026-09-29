@@ -1,6 +1,6 @@
 // Headless check of the gun builder (loadout screen) and the new weapons in a real match.
-// Screenshots the builder with its live 3D gun view at desktop and phone sizes, saves / switches
-// named builds, checks the 3D view frees its WebGL context, then fires every new weapon in first
+// Screenshots the builder (each of its Weapon / Parts / Gadgets tabs) with its live 3D gun view at
+// desktop and phone sizes, saves / switches named builds, checks the 3D view frees its WebGL context, then fires every new weapon in first
 // and third person.
 // Usage: node scripts/smoke-builder.mjs [url] [outDir] [--no-match]
 import { chromium } from 'playwright-core';
@@ -54,6 +54,12 @@ async function openBuilder(page) {
   await page.waitForTimeout(1200);
 }
 
+/** Switches the builder to a tab (Weapon, Parts or Gadgets); only that tab's choices are shown. */
+async function openTab(page, name) {
+  await page.click(`.builder-tab:has-text("${name}")`);
+  await page.waitForTimeout(500);
+}
+
 /** Does the builder fit (no sideways scrolling, nothing sticking out)? */
 async function layout(page) {
   return page.evaluate(() => {
@@ -94,6 +100,13 @@ for (const s of sizes) {
   check(l.weapons === 7 && l.partRows === 5 && l.stats >= 8, `${s.name}: 7 weapons, 5 part slots, stat bars`);
   check(!!l.canvas && l.canvas[0] >= 150 && l.canvas[1] >= 100, `${s.name}: 3D gun view is on screen (${l.canvas})`);
   await page.screenshot({ path: `${out}/builder-${s.name}.png` });
+  // Each tab shows its own choices (and only those).
+  for (const [tab, sel] of [['Parts', '.part-btn'], ['Gadgets', '.gadget'], ['Weapon', '.weapon-btn']]) {
+    await openTab(page, tab);
+    const shown = await page.evaluate((q) => [...document.querySelectorAll('.builder-pane')].filter((p) => p.offsetParent).map((p) => p.querySelectorAll(q).length), sel);
+    check(shown.length === 1 && shown[0] > 0, `${s.name}: the ${tab} tab shows its choices`);
+    if (tab !== 'Weapon') await page.screenshot({ path: `${out}/builder-${s.name}-${tab.toLowerCase()}.png` });
+  }
   if (s.touch) {
     // Scroll to the bottom and check the rest is reachable.
     await page.evaluate(() => document.querySelector('.panel.builder').scrollTo(0, 99999));
@@ -114,6 +127,7 @@ for (const s of sizes) {
   await openBuilder(page);
   await page.click('.weapon-btn:has-text("Bubble Shotgun")');
   await page.waitForTimeout(600);
+  await openTab(page, 'Parts');
   // Hovering a part previews what it changes.
   await page.hover('.part-btn:has-text("Stubby Barrel")');
   await page.waitForTimeout(700);
@@ -132,6 +146,7 @@ for (const s of sizes) {
   const name = page.locator('.build-name').first();
   await name.fill('Brawler');
   await page.locator('.build-save').first().click();
+  await openTab(page, 'Weapon');
   await page.click('.weapon-btn:has-text("Pop Gun")');
   await page.waitForTimeout(500);
   await page.locator('.build-save').nth(1).click();
