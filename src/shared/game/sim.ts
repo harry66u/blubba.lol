@@ -30,6 +30,7 @@ import type { ModeState } from '../protocol';
 import { COSMETIC_SLOTS, type Cosmetics, DEFAULT_COSMETICS, ITEMS } from '../economy';
 import { type BallEvent, BallGame, type ModeId, PumpGame, isTeamMode } from './modes';
 import { CHAOS_KINDS, type ChaosEvent, type ChaosKind, type Environment, NORMAL_ENV, chaosDuration, envAt } from './chaos';
+import { collapsePlan } from './shrink';
 import type { GameEvent } from './events';
 
 export type { ModeId } from './modes';
@@ -104,6 +105,11 @@ export interface SimPlayer {
   streaming: boolean;
   /** Looks only; never read by the simulation. */
   cos: Cosmetics;
+  /**
+   * Sudden Death: when this player was popped out of the match (Infinity while still in;
+   * -Infinity when they joined after it started and wait for the next one).
+   */
+  outAt: number;
 }
 
 /** Thrown or fired objects. Kind 0 is a weapon shot; the rest are utilities. */
@@ -203,6 +209,8 @@ export interface MatchResult {
   longestLaunch: { id: number; distance: number } | null;
   awards: MatchAward[];
   replay: ReplayData | null;
+  /** Sudden Death: who was still standing when the match ended (one id = last one standing). */
+  survivors?: number[];
 }
 
 function newStats(): MatchStats {
@@ -262,6 +270,11 @@ export class GameSim {
   private finalAnnounced = false;
   private firstKo = false;
   private pendingEnd = false;
+  /** Next stage of the world's collapse plan to announce. */
+  private shrinkNext = 0;
+  /** Sudden Death: players still in (for "N left" events) and when the match wraps up. */
+  private sdAlive = 0;
+  private sdEndAt = Infinity;
   private readonly env: Environment = { ...NORMAL_ENV };
   /** Rolling recording of the last few seconds (for the longest-launch replay). */
   private replayBuf: number[][] = [];
@@ -282,6 +295,8 @@ export class GameSim {
     this.ballGame = this.mode === 'ball' && this.map.ball ? new BallGame(this.map, this.world) : null;
     this.pumpGame = this.mode === 'pump' && this.map.pumps ? new PumpGame(this.map) : null;
     if (this.mode === 'duel') this.durationSec = opts.durationSec ?? BALANCE.modes.duel.durationSec;
+    // Sudden Death always has the same short cap (its shrinking schedule is built around it).
+    if (this.mode === 'suddenDeath') this.durationSec = BALANCE.modes.suddenDeath.durationSec;
     this.scheduleNextPin();
     const n = this.map.spawns.length;
     this.homePoint = {
@@ -336,12 +351,18 @@ export class GameSim {
       koTimes: [],
       savedInflation: -1,
       cos: { ...(opts.cos ?? DEFAULT_COSMETICS) },
+      outAt: Infinity,
     };
     p.weapon = computeWeaponStats(p.loadout.weapon, p.loadout.mods);
     if (this.teams) p.team = opts.team ?? this.smallerTeam();
     this.players.set(id, p);
-    this.respawn(p);
+    if (this.suddenDeath && this.phase === 'playing' && this.time > this.matchStartedAt + BALANCE.modes.suddenDeath.joinGrace) {
+      // Sudden Death is one life per match: late arrivals watch until the next one.
+      p.outAt = -Infinity;
+      p.respawnAt = Infinity;
+    } else this.respawn(p);
     this.updatePhase();
+    this.checkSurvivors();
     return p;
   }
 
@@ -375,6 +396,7 @@ export class GameSim {
     }
     this.balanceTeams();
     this.updatePhase();
+    this.checkSurvivors();
   }
 
   private freeId(): number {
@@ -413,6 +435,15 @@ export class GameSim {
 
   get teams(): boolean {
     return isTeamMode(this.mode);
+  }
+
+  get suddenDeath(): boolean {
+    return this.mode === 'suddenDeath';
+  }
+
+  /** Sudden Death: popped out of this match, or waiting for the next one. */
+  isOut(p: SimPlayer): boolean {
+    return this.suddenDeath && p.outAt !== Infinity;
   }
 
   private smallerTeam(): number {
@@ -485,6 +516,7 @@ export class GameSim {
     this.world.setTime(this.time);
 
     this.stepMatch();
+    this.updateShrink();
     this.updateChaos();
     this.ctx.env = envAt([this.chaosCurrent, this.chaosNext], this.tick, this.env);
 
@@ -515,6 +547,8 @@ export class GameSim {
     this.recordHistory();
     this.recordReplayFrame();
     this.checkBlastZones();
+    // After every knockout this tick, so players popped together count as going out together.
+    this.checkSurvivors();
   }
 
   private drainInputs(p: SimPlayer): void {
@@ -2008,7 +2042,37 @@ export class GameSim {
     p.launchBy = -1;
     p.chainBy = -1;
     p.savedInflation = -1;
+    if (this.suddenDeath && this.phase === 'playing' && p.outAt === Infinity) {
+      // One life: out until the next match.
+      p.outAt = this.time;
+      p.respawnAt = Infinity;
+    }
     this.updateCrown();
+  }
+
+  /**
+   * Sudden Death: tells everyone how many are left after someone goes out, and wraps the match up
+   * (after a short victory beat) once one player or nobody is left.
+   */
+  private checkSurvivors(): void {
+    if (!this.suddenDeath || this.phase !== 'playing') return;
+    const alive = [...this.players.values()].filter((p) => p.outAt === Infinity);
+    const dropped = alive.length < this.sdAlive;
+    this.sdAlive = alive.length;
+    if (!dropped) return;
+    // Decided once one (or nobody, if the last ones went out together) is left.
+    const decided = alive.length <= 1 && this.sdEndAt === Infinity;
+    const winner = decided ? ([...this.players.values()].sort((a, b) => this.sdOrder(a, b))[0]?.id ?? -1) : -1;
+    this.events.push({ t: 'survivors', tick: this.tick, left: alive.map((p) => p.id), winner });
+    if (decided) this.sdEndAt = this.time + BALANCE.modes.suddenDeath.winnerDelay;
+  }
+
+  /**
+   * Sudden Death placing: whoever lasted longest; if time runs out with several still in (or the
+   * last ones go out together), most knockouts, then most hits landed.
+   */
+  private sdOrder(a: { id: number; outAt: number; stats: MatchStats }, b: { id: number; outAt: number; stats: MatchStats }): number {
+    return order(a.outAt, b.outAt) || b.stats.kos - a.stats.kos || b.stats.hits - a.stats.hits || a.id - b.id;
   }
 
   private updateCrown(): void {
@@ -2033,7 +2097,9 @@ export class GameSim {
 
   private scheduleChaos(first: boolean): void {
     const C = BALANCE.chaos;
-    if (this.eventMult <= 0) {
+    // Sudden Death has no random events: the shrinking map is its event, and with one life a
+    // random gust shouldn't decide who's out (Max Pressure does nothing when everyone is at 100%).
+    if (this.eventMult <= 0 || this.suddenDeath) {
       this.nextChaosAt = Infinity;
       return;
     }
@@ -2057,7 +2123,7 @@ export class GameSim {
       this.chaosNext = null;
       return;
     }
-    if (!this.chaosNext && !this.chaosCurrent && this.time >= this.nextChaosAt - C.warning && this.time < this.phaseEndsAt - C.quietEnd) {
+    if (!this.chaosNext && !this.chaosCurrent && this.time >= this.nextChaosAt - C.warning && this.time < this.phaseEndsAt - C.quietEnd && !this.shrinkBusy(C.warning + 2)) {
       const kinds = CHAOS_KINDS.filter((k) => k !== this.lastChaosKind);
       const kind = kinds[Math.floor(Math.random() * kinds.length)];
       const dirs: [number, number][] = [
@@ -2168,6 +2234,12 @@ export class GameSim {
     s.onGround = 1;
     s.spawnProt = BALANCE.match.spawnProtection;
     s.ammo = p.weapon.ammo;
+    if (this.suddenDeath) {
+      // Everyone starts fully inflated: one solid hit sends you flying.
+      s.inflation = BALANCE.inflation.max;
+      s.spawnProt = BALANCE.modes.suddenDeath.spawnProtection;
+      depenetrate(s, this.world);
+    }
     p.lastAttacker = -1;
     p.launchBy = -1;
     this.events.push({ t: 'spawn', tick: this.tick, id: p.id, x: s.px, y: s.py, z: s.pz });
@@ -2179,7 +2251,9 @@ export class GameSim {
     const spawns: [number, number, number, number][] = teamSpawns ? teamSpawns.map(([x, y, z]) => [x, y, z, 0]) : this.map.spawns;
     let best = spawns[0];
     let bestScore = -Infinity;
-    for (const sp of spawns) {
+    // Never spawn on a piece that has fallen away (or crumbled off the deck).
+    const onMap = spawns.filter(([x, y, z]) => this.world.groundBelow(x, y + 0.1, z, 0.6) !== null);
+    for (const sp of onMap.length ? onMap : spawns) {
       let minD = 1e9;
       for (const o of this.players.values()) {
         if (o.id === forId || o.state.mode === MODE_DEAD) continue;
@@ -2204,8 +2278,18 @@ export class GameSim {
       this.endMatch();
     } else if (this.phase === 'playing' && this.players.size < 2) {
       this.phase = 'waiting';
-      this.world.collapseStart = Infinity;
+      this.world.setCollapse(null);
+      this.freeTheOut();
       this.onPhaseChange?.();
+    }
+  }
+
+  /** Sudden Death players who were out (or waiting) come back while nobody is playing a match. */
+  private freeTheOut(): void {
+    for (const p of this.players.values()) {
+      if (p.outAt === Infinity) continue;
+      p.outAt = Infinity;
+      if (p.state.mode === MODE_DEAD) p.respawnAt = this.time;
     }
   }
 
@@ -2214,7 +2298,8 @@ export class GameSim {
     this.matchNumber++;
     this.matchStartedAt = this.time;
     this.phaseEndsAt = this.time + this.durationSec;
-    this.world.collapseStart = this.phaseEndsAt - BALANCE.final.seconds;
+    this.world.setCollapse(collapsePlan(this.mode, this.map, this.phaseEndsAt, this.durationSec));
+    this.shrinkNext = 0;
     this.world.setTime(this.time);
     this.chaosCurrent = null;
     this.chaosNext = null;
@@ -2229,6 +2314,8 @@ export class GameSim {
     this.ballGame?.reset();
     this.pumpGame?.reset();
     this.pendingEnd = false;
+    this.sdEndAt = Infinity;
+    this.sdAlive = this.players.size;
     this.balanceTeams();
     for (const p of this.players.values()) {
       p.score = 0;
@@ -2237,6 +2324,7 @@ export class GameSim {
       p.nemesis = -1;
       p.koTimes = [];
       p.savedInflation = -1;
+      p.outAt = Infinity;
       this.respawn(p);
     }
     this.projectiles.length = 0;
@@ -2245,23 +2333,56 @@ export class GameSim {
   }
 
   private stepMatch(): void {
-    if (this.phase === 'playing' && (this.time >= this.phaseEndsAt || this.pendingEnd)) {
+    if (this.phase === 'playing' && (this.time >= this.phaseEndsAt || this.pendingEnd || this.time >= this.sdEndAt)) {
       this.pendingEnd = false;
       this.endMatch();
     } else if (this.phase === 'results' && this.time >= this.phaseEndsAt && !this.fixedLineup) {
-      this.world.collapseStart = Infinity;
+      this.world.setCollapse(null);
       if (this.players.size >= 2) this.startMatch();
       else {
         this.phase = 'waiting';
+        this.freeTheOut();
         this.onPhaseChange?.();
       }
     }
   }
 
+  /** Announces each stage of the map shrinking a few seconds before it starts. */
+  private updateShrink(): void {
+    if (this.phase !== 'playing') return;
+    const plan = this.world.plan;
+    while (this.shrinkNext < plan.length) {
+      const st = plan[this.shrinkNext];
+      if (this.time < st.at - st.warn) break;
+      this.shrinkNext++;
+      if (st.announce) this.events.push({ t: 'shrink', tick: this.tick, startTick: Math.round(st.at / this.dt), sink: [...st.sink], deck: st.deck });
+    }
+  }
+
+  /** True while a shrink is being announced or has just started (random events wait for it). */
+  private shrinkBusy(lead: number): boolean {
+    for (const st of this.world.plan) {
+      if (st.announce && this.time >= st.at - st.warn - lead && this.time < st.at + 3) return true;
+    }
+    return false;
+  }
+
+  /** Moves the end of the running match (debug), keeping the collapse schedule in step with it. */
+  endIn(seconds: number): void {
+    if (this.phase !== 'playing') return;
+    this.phaseEndsAt = this.time + seconds;
+    this.world.setCollapse(collapsePlan(this.mode, this.map, this.phaseEndsAt, this.durationSec));
+    const plan = this.world.plan;
+    this.shrinkNext = 0;
+    while (this.shrinkNext < plan.length && plan[this.shrinkNext].at <= this.time) this.shrinkNext++;
+  }
+
   endMatch(): void {
+    const outAt = (id: number) => this.players.get(id)?.outAt ?? -Infinity;
     const standings = [...this.players.values()]
-      .map((p) => ({ id: p.id, name: p.name, score: p.score, stats: { ...p.stats }, isBot: p.isBot }))
-      .sort((a, b) => b.score - a.score || b.stats.kos - a.stats.kos || a.stats.deaths - b.stats.deaths);
+      .map((p) => ({ id: p.id, name: p.name, score: p.score, stats: { ...p.stats }, isBot: p.isBot, outAt: p.outAt }))
+      .sort((a, b) => (this.suddenDeath ? this.sdOrder(a, b) : b.score - a.score || b.stats.kos - a.stats.kos || a.stats.deaths - b.stats.deaths))
+      .map(({ outAt: _, ...s }) => s);
     let longest: MatchResult['longestLaunch'] = null;
     for (const s of standings) {
       if (s.stats.longestLaunch > 0 && (!longest || s.stats.longestLaunch > longest.distance)) longest = { id: s.id, distance: s.stats.longestLaunch };
@@ -2287,8 +2408,9 @@ export class GameSim {
     }
     const winnerId = teams ? (standings.find((s) => this.players.get(s.id)?.team === teams!.winner)?.id ?? -1) : (standings[0]?.id ?? -1);
     this.lastResult = { winnerId, mode: this.mode, teams, standings, longestLaunch: longest, awards, replay: this.bestReplay };
+    if (this.suddenDeath) this.lastResult.survivors = standings.filter((s) => outAt(s.id) === Infinity).map((s) => s.id);
     this.phase = 'results';
-    this.phaseEndsAt = this.time + BALANCE.match.resultsSec;
+    this.phaseEndsAt = this.time + (this.suddenDeath ? BALANCE.modes.suddenDeath.resultsSec : BALANCE.match.resultsSec);
     this.onPhaseChange?.();
   }
 
@@ -2305,6 +2427,11 @@ export class GameSim {
 }
 
 // --- Geometry helpers ------------------------------------------------------------------------
+
+/** Descending comparison that copes with infinities (Infinity - Infinity is NaN). */
+function order(a: number, b: number): number {
+  return a === b ? 0 : a > b ? -1 : 1;
+}
 
 export interface CapsuleHit {
   x: number;

@@ -220,12 +220,14 @@ describe('mode plumbing', () => {
     expect(fitMap({ ...base, mapId: 'ballArena' }).mapId).toBe('dealership');
     expect(fitMap({ ...base, mode: 'duel', mapId: 'bounceHouse' }).mapId).toBe('bounceHouse');
     expect(fitMap({ ...base, mode: 'teamKnockout', mapId: 'pier' }).mapId).toBe('pier');
+    expect(fitMap({ ...base, mode: 'suddenDeath', mapId: 'garage' }).mapId).toBe('garage');
+    expect(fitMap({ ...base, mode: 'suddenDeath', mapId: 'pumpArena' }).mapId).toBe('dealership');
     expect(sanitizeSettings({ mapId: 'pier' })).toEqual({ mapId: 'pier' });
     expect(sanitizeSettings({ mode: 'nope' as ModeId, mapId: '__proto__' })).toEqual({});
   });
 
   it('bots play every mode without errors', () => {
-    for (const mode of ['teamKnockout', 'ball', 'pump', 'duel'] as ModeId[]) {
+    for (const mode of ['teamKnockout', 'ball', 'pump', 'duel', 'suddenDeath'] as ModeId[]) {
       const map = getMap(mapForMode(mode) ?? 'garage');
       const sim = new GameSim({ map, mode, durationSec: 999 });
       for (let i = 0; i < (mode === 'duel' ? 2 : 8); i++) sim.addBot(0.6);

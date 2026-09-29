@@ -61,21 +61,3 @@ export function envAt(events: readonly (ChaosEvent | null)[], tick: number, out:
   }
   return out;
 }
-
-/** How far (m) a collapsing island with the given order has sunk after `elapsed` seconds. */
-export function islandSink(order: number, elapsed: number): number {
-  const F = BALANCE.final;
-  const delay = F.islandDelay[order];
-  if (delay === undefined) return 0;
-  const t = elapsed - delay;
-  if (t <= 0) return 0;
-  return 0.5 * F.sinkAccel * t * t;
-}
-
-/** Fraction (0..1) of the main deck's half-size lost to crumbling after `elapsed` seconds. */
-export function deckShrink(elapsed: number): number {
-  const F = BALANCE.final;
-  const t = elapsed - (F.seconds - F.deckShrinkStart);
-  if (t <= 0) return 0;
-  return Math.min(1, t / F.deckShrinkStart) * F.deckShrink;
-}

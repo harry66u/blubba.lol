@@ -21,6 +21,8 @@ export interface DailyMatch {
   mode: ModeId;
   won: boolean;
   stats: MatchStats;
+  /** Where you finished (1 = winner; 0 or missing = didn't place, e.g. joined a Sudden Death late). */
+  place?: number;
 }
 
 export interface ChallengeDef {
@@ -57,6 +59,15 @@ export const CHALLENGES: ChallengeDef[] = [
   { id: 'pump', label: `Pump for {n} seconds in ${MODE_INFO.pump.name}`, target: 45, coins: 40, xp: 50, mode: 'pump', unit: 's', measure: (m) => m.stats.pumpTime },
   { id: 'teamWin', label: `Win a ${MODE_INFO.teamKnockout.name} match`, target: 1, coins: 50, xp: 60, mode: 'teamKnockout', measure: (m) => (m.won ? 1 : 0) },
   { id: 'duelPop', label: `Pop {n} players in ${MODE_INFO.duel.name}`, target: 5, coins: 45, xp: 60, mode: 'duel', measure: (m) => m.stats.kos },
+  {
+    id: 'sdFinal3',
+    label: `Survive to the final 3 in ${MODE_INFO.suddenDeath.name}`,
+    target: 1,
+    coins: 50,
+    xp: 60,
+    mode: 'suddenDeath',
+    measure: (m) => (m.place && m.place <= 3 ? 1 : 0),
+  },
 ];
 
 export const CHALLENGE_BY_ID = new Map(CHALLENGES.map((c) => [c.id, c]));

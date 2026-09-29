@@ -184,6 +184,28 @@ interface MoverMesh {
   def: SolidDef;
 }
 
+/** Where a shrink warning goes: the red area is `outer` minus `inner`, at height `y`. */
+export interface WarnArea {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+  /** What stays standing (a zero-size box in the middle when the whole piece goes). */
+  inMinX: number;
+  inMaxX: number;
+  inMinZ: number;
+  inMaxZ: number;
+  y: number;
+  /** Draw the border along the inner edge (where a crumbling deck will end) instead of the outer one. */
+  innerLine: boolean;
+}
+
+interface WarnView {
+  group: THREE.Group;
+  fills: THREE.Mesh[];
+  lines: THREE.Mesh[];
+}
+
 /** Builds and animates the visible map from a MapDef. */
 export class MapView {
   readonly root = new THREE.Group();
@@ -201,6 +223,12 @@ export class MapView {
   private teamColors: number[] = [0xff3b5c, 0x2ec5ff];
   private fanBlades: THREE.Object3D | null = null;
   private time = 0;
+  /** Red flashing warnings over pieces of the map about to fall away. */
+  private readonly warnViews = new Map<number, WarnView>();
+  private readonly warnFillMat = new THREE.MeshBasicMaterial({ color: 0xff2440, transparent: true, opacity: 0.3, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+  private readonly warnLineMat = new THREE.MeshBasicMaterial({ color: 0xff2440, transparent: true, opacity: 0.9, depthWrite: false });
+  private readonly warnPlane = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+  private readonly warnBar = new THREE.BoxGeometry(1, 1, 1);
 
   constructor(
     readonly map: MapDef,
@@ -866,6 +894,60 @@ export class MapView {
       for (const c of w.cars) c.rotation.z = -w.wheel.rotation.z;
     }
     this.clouds.rotation.y += dt * 0.004;
+  }
+
+  /**
+   * Shows (or with null hides) a red warning over part of the map that's about to fall away.
+   * `key` is the solid id. `flash` (0..1) is the current blink brightness, shared by all warnings.
+   */
+  setWarning(key: number, w: WarnArea | null, flash = 1): void {
+    let v = this.warnViews.get(key);
+    if (!w) {
+      if (v) v.group.visible = false;
+      return;
+    }
+    if (!v) {
+      const group = new THREE.Group();
+      const fills = [0, 1, 2, 3].map(() => new THREE.Mesh(this.warnPlane, this.warnFillMat));
+      const lines = [0, 1, 2, 3].map(() => new THREE.Mesh(this.warnBar, this.warnLineMat));
+      for (const m of [...fills, ...lines]) {
+        m.renderOrder = 2;
+        group.add(m);
+      }
+      this.root.add(group);
+      v = { group, fills, lines };
+      this.warnViews.set(key, v);
+    }
+    v.group.visible = true;
+    this.warnFillMat.opacity = 0.12 + 0.3 * flash;
+    this.warnLineMat.opacity = 0.35 + 0.65 * flash;
+    const y = w.y + 0.04;
+    // The red area is a ring: two full-width strips (north and south) and two between them.
+    const strips: [number, number, number, number][] = [
+      [w.minX, w.maxX, w.minZ, w.inMinZ],
+      [w.minX, w.maxX, w.inMaxZ, w.maxZ],
+      [w.minX, w.inMinX, w.inMinZ, w.inMaxZ],
+      [w.inMaxX, w.maxX, w.inMinZ, w.inMaxZ],
+    ];
+    strips.forEach(([x0, x1, z0, z1], i) => {
+      const m = v.fills[i];
+      m.visible = x1 - x0 > 0.01 && z1 - z0 > 0.01;
+      m.position.set((x0 + x1) / 2, y, (z0 + z1) / 2);
+      m.scale.set(Math.max(0.01, x1 - x0), 1, Math.max(0.01, z1 - z0));
+    });
+    const [x0, x1, z0, z1] = w.innerLine ? [w.inMinX, w.inMaxX, w.inMinZ, w.inMaxZ] : [w.minX, w.maxX, w.minZ, w.maxZ];
+    const t = 0.35;
+    const bars: [number, number, number, number][] = [
+      [(x0 + x1) / 2, z0, x1 - x0 + t, t],
+      [(x0 + x1) / 2, z1, x1 - x0 + t, t],
+      [x0, (z0 + z1) / 2, t, z1 - z0],
+      [x1, (z0 + z1) / 2, t, z1 - z0],
+    ];
+    bars.forEach(([cx, cz, sx, sz], i) => {
+      const m = v.lines[i];
+      m.position.set(cx, y + 0.06, cz);
+      m.scale.set(Math.max(0.01, sx), 0.14, Math.max(0.01, sz));
+    });
   }
 
   /** Tints the decks icy (0..1) during the ice rink event. */

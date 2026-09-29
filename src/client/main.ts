@@ -98,7 +98,7 @@ const MODE_KEY = 'bubba.mode.v1';
 function loadMode(): PlayMode {
   try {
     const m = window.localStorage.getItem(MODE_KEY);
-    if (m === 'knockout' || m === 'teamKnockout' || m === 'ball' || m === 'pump' || m === 'duel' || m === 'ranked') return m;
+    if (m === 'knockout' || m === 'suddenDeath' || m === 'teamKnockout' || m === 'ball' || m === 'pump' || m === 'duel' || m === 'ranked') return m;
   } catch {
     // Storage blocked: default mode.
   }
@@ -557,6 +557,8 @@ net.handlers = {
       } else if (msg.room.ranked) {
         hud.callout('RANKED 1v1', `First to ${BALANCE.modes.duel.target} knockouts. Click to play!`, 4);
         audio.goalHorn();
+      } else if (msg.room.settings.mode === 'suddenDeath') {
+        hud.callout('SUDDEN DEATH', 'One life. Everyone at 100%. Last one standing wins!', 4, '#ff3b5c');
       }
       return;
     }
@@ -602,7 +604,8 @@ game.onMatchChange = (m) => {
   } else if (overlay === 'results' || overlay === 'replay') {
     game.stopReplay();
     setOverlay(input.locked || touchMode ? 'none' : 'click');
-    if (m.phase === 'playing') hud.callout('GO!', 'Blast them off the map!', 1.6);
+    if (m.phase === 'playing' && game.mode === 'suddenDeath') hud.callout('SUDDEN DEATH!', 'One life. Everyone at 100%. Last one standing wins!', 2.4, '#ff3b5c');
+    else if (m.phase === 'playing') hud.callout('GO!', 'Blast them off the map!', 1.6);
   }
 };
 

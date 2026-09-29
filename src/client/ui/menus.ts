@@ -11,7 +11,7 @@ import { ACTION_LABELS, type Action, DEFAULT_BINDINGS, codeLabel } from '../inpu
 import type { Settings } from '../settings';
 import { add, clear, el, hexColor } from './dom';
 
-/** Everything the mode picker offers: the five modes plus ranked 1v1. */
+/** Everything the mode picker offers: every mode plus ranked 1v1. */
 export type PlayMode = ModeId | 'ranked';
 
 export interface MenuCallbacks {
@@ -275,11 +275,14 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
       map.disabled = !!forced;
       map.addEventListener('change', () => cb.onHost({ mapId: map.value }));
       const time = el('select', { class: 'field', style: 'font-size:16px;padding:6px' });
-      for (const s of [180, 210, 240, 270, 300]) {
+      // Sudden Death always runs its own short length.
+      const sd = room.settings.mode === 'suddenDeath';
+      for (const s of sd ? [BALANCE.modes.suddenDeath.durationSec] : [180, 210, 240, 270, 300]) {
         const o = el('option', { text: `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`, attrs: { value: String(s) } });
-        if (s === room.settings.durationSec) o.selected = true;
+        if (sd || s === room.settings.durationSec) o.selected = true;
         time.append(o);
       }
+      time.disabled = sd;
       time.addEventListener('change', () => cb.onHost({ durationSec: Number(time.value) }));
       const bots = el('input', { attrs: { type: 'checkbox' } });
       bots.checked = room.settings.bots;
@@ -339,7 +342,8 @@ export function buildScoreboard(
   actions: ScoreActions | null,
   teams: TeamView | null = null,
 ): HTMLElement {
-  const sorted = [...roster].sort((a, b) => b.score - a.score || b.kos - a.kos || a.deaths - b.deaths);
+  // Sudden Death: whoever is still in comes first.
+  const sorted = [...roster].sort((a, b) => Number(!!a.out) - Number(!!b.out) || b.score - a.score || b.kos - a.kos || a.deaths - b.deaths);
   const panel = el('div', { class: 'panel' });
   if (!teams) {
     panel.append(scoreTable(sorted, youId, hostId, isPrivate, actions, null));
@@ -383,7 +387,7 @@ function scoreTable(rows: RosterEntry[], youId: number, hostId: number, isPrivat
   rows.forEach((r, i) => {
     const tr = el(
       'tr',
-      { class: r.id === youId ? 'me' : '' },
+      { class: `${r.id === youId ? 'me' : ''}${r.out ? ' out' : ''}` },
       el('td', { text: String(i + 1) }),
       el(
         'td',
@@ -394,6 +398,7 @@ function scoreTable(rows: RosterEntry[], youId: number, hostId: number, isPrivat
         r.rating !== undefined ? el('span', { class: 'small-note', style: 'margin-left:6px', text: String(r.rating) }) : null,
         r.bot ? el('span', { class: 'key', style: 'margin-left:6px;font-size:10px;min-width:0', text: 'BOT' }) : null,
         r.id === hostId && isPrivate ? el('span', { style: 'margin-left:6px', text: '👑', attrs: { title: 'Host' } }) : null,
+        r.out ? el('span', { class: 'small-note', style: 'margin-left:6px', text: '💀 OUT', attrs: { title: 'Out of this Sudden Death match' } }) : null,
       ),
       el('td', { text: String(r.score) }),
       el('td', { text: String(r.kos) }),
@@ -467,13 +472,15 @@ export function buildResults(
     }
     const team = roster.get(s.id)?.team ?? -1;
     const color = hexColor(teams && team >= 0 ? teams.colors[team] : (PLAYER_COLORS[roster.get(s.id)?.color ?? 0]?.hex ?? 0xffffff));
+    // Sudden Death ranks by who lasted longest, so the podium shows knockouts instead of points.
+    const line = result.survivors ? (result.survivors.includes(s.id) ? `🏆 ${s.stats.kos} KO${s.stats.kos === 1 ? '' : 's'}` : `${s.stats.kos} KO${s.stats.kos === 1 ? '' : 's'}`) : `${s.score} pts`;
     podium.append(
       el(
         'div',
         { class: 'step' },
         el('span', { class: 'swatch', style: { background: color, width: '34px', height: '34px' } }),
         el('div', { style: 'font-size:18px', text: s.name }),
-        el('div', { style: 'font-size:14px;opacity:.7', text: `${s.score} pts` }),
+        el('div', { style: 'font-size:14px;opacity:.7', text: line }),
         el('div', { class: 'block', style: { height: `${heights[i]}px`, background: colors[i] }, text: String(i === 1 ? 1 : i === 0 ? 2 : 3) }),
       ),
     );
@@ -482,6 +489,19 @@ export function buildResults(
   const winner = result.standings[0];
   let title = winner?.id === youId ? 'YOU WIN!' : `${winner?.name ?? 'Nobody'} wins!`;
   let teamLine: HTMLElement | null = null;
+  if (result.survivors) {
+    // Sudden Death: say how it was won.
+    const n = result.survivors.length;
+    const how =
+      n === 1
+        ? winner?.id === youId
+          ? "You're the last tube man standing!"
+          : 'Last tube man standing!'
+        : n === 0
+          ? 'The last ones went out together: most knockouts wins.'
+          : `Time's up! Most knockouts of the ${n} still standing wins.`;
+    teamLine = el('div', { class: 'team-result', style: 'text-align:center', text: how });
+  }
   const tr = result.teams;
   if (tr && teams) {
     const w = tr.winner;
@@ -497,6 +517,10 @@ export function buildResults(
   }
   const stats = el('div', { class: 'stat-grid' });
   const addStat = (k: string, v: string) => stats.append(el('div', { class: 'stat' }, el('div', { class: 'v', text: v }), el('div', { class: 'k', text: k })));
+  if (me && result.survivors) {
+    const place = result.standings.indexOf(me) + 1;
+    addStat('You finished', result.survivors.includes(me.id) ? (place === 1 ? '1st 🏆' : 'Still standing') : `#${place} of ${result.standings.length}`);
+  }
   if (me) {
     addStat('Your knockouts', String(me.stats.kos));
     addStat('Times popped', String(me.stats.deaths));

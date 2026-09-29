@@ -238,16 +238,21 @@ export class Room {
       bots++;
     }
     while (bots > want) {
-      this.removeOneBot();
+      // Mid-match in Sudden Death only bots that are already out can go; the rest leave after it.
+      if (!this.removeOneBot(this.sim.suddenDeath && this.sim.phase === 'playing')) break;
       bots--;
     }
     this.sim.balanceTeams();
     this.rosterDirty = true;
   }
 
-  private removeOneBot(): void {
-    const id = [...this.sim.bots.keys()].pop();
-    if (id !== undefined) this.sim.removePlayer(id);
+  /** Removes a bot, preferring one that's knocked out right now so no fight loses a player. */
+  private removeOneBot(onlyDead = false): boolean {
+    const ids = [...this.sim.bots.keys()].reverse();
+    const id = ids.find((b) => this.sim.players.get(b)?.state.mode === MODE_DEAD) ?? (onlyDead ? undefined : ids[0]);
+    if (id === undefined) return false;
+    this.sim.removePlayer(id);
+    return true;
   }
 
   onBinary(conn: Conn, data: ArrayBuffer | Buffer): void {
@@ -281,9 +286,8 @@ export class Room {
             this.sim.streakReward(p);
           }
         } else if (msg.action === 'endIn' && typeof msg.seconds === 'number') {
-          // Jump the match clock forward (to see the final 30 seconds).
-          this.sim.phaseEndsAt = this.sim.time + msg.seconds;
-          this.sim.world.collapseStart = this.sim.phaseEndsAt - BALANCE.final.seconds;
+          // Jump the match clock forward (to see the map shrink or the final 30 seconds).
+          this.sim.endIn(msg.seconds);
           this.broadcastJson(this.matchMessage());
         }
         break;
@@ -323,7 +327,8 @@ export class Room {
     this.settings = next;
     if (needNewSim) this.rebuild();
     else {
-      this.sim.durationSec = next.durationSec;
+      // Sudden Death always runs its own fixed length.
+      if (!this.sim.suddenDeath) this.sim.durationSec = next.durationSec;
       this.sim.eventMult = EVENT_MULT[next.events];
     }
     this.balanceBots();
@@ -425,9 +430,28 @@ export class Room {
       const p = sim.players.get(conn.playerId);
       if (!standing || !p) continue;
       const secondsPlayed = Math.min(matchSeconds, sim.time - Math.max(sim.matchStartedAt, p.joinedAt));
-      const won = r.teams ? p.team === r.teams.winner : r.winnerId === conn.playerId && !!top && top.score > 0 && (r.standings[1]?.score ?? -1) < top.score;
+      // Sudden Death: the last one standing wins even without a single pop (everyone else fell).
+      const won = r.teams
+        ? p.team === r.teams.winner
+        : r.mode === 'suddenDeath'
+          ? r.winnerId === conn.playerId
+          : r.winnerId === conn.playerId && !!top && top.score > 0 && (r.standings[1]?.score ?? -1) < top.score;
+      // Where they finished (1 = winner); people who joined after the start watched and don't place.
+      const place = p.outAt === -Infinity ? 0 : r.standings.indexOf(standing) + 1;
       const acc = conn.accountId !== null ? store.accountById(conn.accountId) : null;
-      const report = awardMatch(store, conn.key, acc?.name ?? null, !!acc, { mode: r.mode, stats: standing.stats, secondsPlayed, matchSeconds, won });
+      // Sudden Death rounds are short: the base reward goes by time against a full-length round
+      // (so short rounds don't pay more per minute), and a round played start to finish counts
+      // even when it was over before the usual minimum time.
+      const sd = r.mode === 'suddenDeath';
+      const report = awardMatch(store, conn.key, acc?.name ?? null, !!acc, {
+        mode: r.mode,
+        stats: standing.stats,
+        secondsPlayed,
+        matchSeconds: sd ? Math.max(matchSeconds, sim.durationSec) : matchSeconds,
+        won,
+        place,
+        wholeMatch: sd && place > 0,
+      });
       const rating = ratings.get(conn.playerId);
       if (rating) report.rating = rating;
       this.send(conn, { type: 'progress', report });
@@ -455,6 +479,9 @@ export class Room {
     }
     if (!this.isPrivate && mapForMode(this.mode) === null && s.phase === 'results' && s.time + s.dt >= s.phaseEndsAt && this.humanCount > 0) {
       this.rotateMap();
+    } else if (s.suddenDeath && s.phase === 'results' && s.time + s.dt >= s.phaseEndsAt) {
+      // Sudden Death keeps extra bots through a match (see balanceBots); settle up before the next.
+      this.balanceBots();
     }
     this.sim.step();
     const events = this.sim.drainEvents();
@@ -501,6 +528,7 @@ export class Room {
       cos: p.cos,
       level: profile ? levelForXp(profile.xp).level : p.isBot ? 0 : 1,
       rating: this.ranked && profile ? profile.rating : undefined,
+      out: this.sim.isOut(p) || undefined,
       score: p.score,
       kos: p.stats.kos,
       deaths: p.stats.deaths,
@@ -517,6 +545,7 @@ export class Room {
       endsAtTick: s.phase === 'waiting' ? 0 : Math.round(s.phaseEndsAt / s.dt),
       number: s.matchNumber,
       result: s.phase === 'results' ? s.lastResult : null,
+      collapse: [...s.world.plan],
     };
   }
 

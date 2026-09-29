@@ -236,7 +236,7 @@ function buildDailyMini(d: DailyView): HTMLElement | null {
   );
 }
 
-const MODE_ORDER: ModeId[] = ['knockout', 'teamKnockout', 'ball', 'pump', 'duel'];
+const MODE_ORDER: ModeId[] = ['knockout', 'suddenDeath', 'teamKnockout', 'ball', 'pump', 'duel'];
 
 /** Profile: level, coins, rank, lifetime stats, and the ranked leaderboard. */
 export function buildProfile(account: AccountClient, onClose: () => void, onAccount: () => void, onLogout: () => void): HTMLElement {

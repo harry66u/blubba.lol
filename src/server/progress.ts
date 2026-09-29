@@ -10,6 +10,10 @@ export interface MatchOutcome {
   secondsPlayed: number;
   matchSeconds: number;
   won: boolean;
+  /** Finishing place (1 = winner), for placing challenges; 0 = didn't place. */
+  place?: number;
+  /** Played a Sudden Death round from start to finish (it may have been shorter than the usual minimum). */
+  wholeMatch?: boolean;
 }
 
 function today(now: number): string {
@@ -36,6 +40,7 @@ export function awardMatch(store: Store, key: string, name: string | null, isAcc
     shots: o.stats.shots,
     won: o.won,
     firstWinToday,
+    wholeMatch: o.wholeMatch,
   });
   // Only matches you actually played (the same rule as XP) count toward the daily challenges
   // and streak. Done before the level check so challenge XP can level you up too.

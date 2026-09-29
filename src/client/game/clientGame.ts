@@ -48,6 +48,7 @@ import { World } from '../../shared/world';
 import { DEFAULT_LOADOUT, type Loadout, UTILITY_INFO, WEAPON_IDS, WEAPON_INFO, type WeaponStats, computeWeaponStats, sanitizeLoadout } from '../../shared/loadout';
 import { EntityView } from '../render/entities';
 import { CHAOS_INFO, type ChaosEvent, type Environment, NORMAL_ENV, envAt } from '../../shared/game/chaos';
+import { shrinkStageNear } from '../../shared/game/shrink';
 import { Announcer } from '../audio/announcer';
 import { ReplayView } from './replayView';
 import type { ReplayData } from '../../shared/game/sim';
@@ -55,7 +56,7 @@ import type { Audio } from '../audio/audio';
 import { type Action, type InputManager, codeLabel } from '../input/input';
 import type { Connection } from '../net/connection';
 import { Effects, LandingCircles, type Projectile3D } from '../render/effects';
-import { MapView } from '../render/mapView';
+import { MapView, type WarnArea } from '../render/mapView';
 import { BeachBall } from '../render/beachBall';
 import type { Renderer } from '../render/renderer';
 import { type Look, TubeMan, defaultPose, type TubeManPose } from '../render/tubeMan';
@@ -175,6 +176,11 @@ export class ClientGame {
   /** Whoever last knocked you out. */
   nemesisId = -1;
   private debrisTimer = 0;
+  private readonly warnTarget = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
+  /** Sudden Death: who the camera follows while you're out (-1 = pick someone). */
+  private spectateId = -1;
+  /** Sudden Death: the winner was already called out this match. */
+  private sdWinnerShown = false;
   private lastChaosShown: ChaosEvent | null = null;
   readonly clock = new ServerClock();
   pred: PlayerState = createPlayerState();
@@ -262,7 +268,11 @@ export class ClientGame {
     this.replay = new ReplayView(r.scene, this.effects);
     this.viewModel.root.visible = false;
     r.setTheme(this.map.theme);
-    input.onAnyPress = (a) => this.tips.used(a);
+    input.onAnyPress = (a) => {
+      this.tips.used(a);
+      // Out of a Sudden Death match: jump watches someone else.
+      if (a === 'jump' && this.sdSpectating) this.spectateNext();
+    };
     this.effects.camPos = r.camera.position;
   }
 
@@ -423,16 +433,23 @@ export class ClientGame {
           this.chaos = [];
           this.crownId = -1;
           this.nemesisId = -1;
+          this.spectateId = -1;
+          this.sdWinnerShown = false;
         }
         this.match = { phase: msg.phase, endsAtTick: msg.endsAtTick, number: msg.number, result: msg.result };
-        this.world.collapseStart = msg.phase === 'playing' ? msg.endsAtTick * DT - BALANCE.final.seconds : Infinity;
-        if (msg.phase === 'playing') this.announcer.say('Go!', 2);
+        // The server's collapse plan: our world sinks and crumbles exactly like its world.
+        this.world.setCollapse(msg.collapse ?? []);
+        if (msg.phase === 'playing') this.announcer.say(this.mode === 'suddenDeath' ? 'Sudden death! Go!' : 'Go!', 2);
         if (msg.phase === 'results' && msg.result) {
           const teams = msg.result.teams;
           if (teams) {
             const mine = this.teamOf(this.youId);
             const names = this.teamNames();
             this.announcer.say(teams.winner < 0 ? "It's a draw!" : teams.winner === mine ? 'Your team wins!' : `${names[teams.winner]} team wins!`, 3);
+          } else if (msg.result.survivors) {
+            // Sudden Death: the winner was already called out if they were the last one standing.
+            const w = msg.result.standings[0];
+            if (w && msg.result.survivors.length > 1) this.announcer.say(`Time's up! ${w.id === this.youId ? 'You win!' : `${w.name} wins!`}`, 3);
           } else {
             const w = msg.result.standings[0];
             this.announcer.say(w ? `Time's up! ${w.id === this.youId ? 'You win!' : `${w.name} wins!`}` : "Time's up!", 3);
@@ -574,6 +591,7 @@ export class ClientGame {
       case 'chaos':
       case 'crown':
       case 'final':
+      case 'shrink':
       case 'solid':
       case 'solidGone':
       case 'pad':
@@ -902,10 +920,29 @@ export class ClientGame {
         break;
       }
       case 'final':
-        this.hud.callout('FINAL 30 SECONDS!', 'The map is collapsing! Knockouts count DOUBLE!', 3, '#ff3b5c');
+        if (this.mode === 'suddenDeath') {
+          this.hud.callout('FINAL 30 SECONDS!', 'Still standing at the buzzer? Most knockouts wins.', 3, '#ff3b5c');
+          this.announcer.say('Final thirty seconds!', 4);
+        } else {
+          this.hud.callout('FINAL 30 SECONDS!', 'The map is collapsing! Knockouts count DOUBLE!', 3, '#ff3b5c');
+          this.announcer.say('Final thirty seconds! Knockouts count double!', 4);
+        }
         a.siren();
-        this.announcer.say('Final thirty seconds! Knockouts count double!', 4);
         this.trauma = Math.min(1, this.trauma + 0.3);
+        break;
+      case 'shrink': {
+        const secs = Math.max(1, Math.round((e.startTick - e.tick) * DT));
+        const sub = e.sink.length
+          ? `Pieces flashing red fall in ${secs}s${e.deck > 0 ? ' and the edges crumble' : ''}. Get off them!`
+          : `The edges crumble in ${secs}s. Get to the middle!`;
+        this.hud.callout('THE MAP IS SHRINKING!', sub, 3.2, '#ff3b5c');
+        a.siren();
+        this.announcer.say('The map is shrinking!', 4);
+        this.trauma = Math.min(1, this.trauma + 0.2);
+        break;
+      }
+      case 'survivors':
+        this.survivorsCallout(e.left, e.winner);
         break;
       case 'fizzle': {
         const localKey = this.localByServer.get(e.id);
@@ -1020,6 +1057,8 @@ export class ClientGame {
           this.audio.setCharge(0);
         }
         if (e.victim === you && e.killer >= 0) this.nemesisId = e.killer;
+        // Spectating in Sudden Death: follow the action to whoever popped the one we watched.
+        if (e.victim === this.spectateId) this.spectateId = e.killer;
         if (e.killer === you && e.victim === this.nemesisId) this.nemesisId = -1;
         this.koCallout(e, killerName, victimName);
         const rv = this.remotes.get(e.victim);
@@ -1211,25 +1250,125 @@ export class ClientGame {
     let banner = '';
     if (active) banner = `${CHAOS_INFO[active.kind].title.replace('!', '')} · ${Math.ceil((active.endTick - tick) * DT)}s`;
     else if (upcoming) banner = `${CHAOS_INFO[upcoming.kind].title.replace('!', '')} in ${Math.ceil((upcoming.startTick - tick) * DT)}...`;
-    this.hud.setEvent(banner);
+    const t = tick * DT;
+    const st = this.match.phase === 'playing' ? shrinkStageNear(this.world.plan, t) : null;
+    const shrinkText = st ? (t < st.at ? `MAP SHRINKING in ${Math.ceil(st.at - t)}...` : 'MAP SHRINKING!') : '';
+    this.hud.setEvent([shrinkText, banner].filter(Boolean).join('  ·  '));
+    this.updateCollapseFx(t, dt);
+  }
 
-    // Crumbling edges during the final collapse.
-    const elapsed = tick * DT - this.world.collapseStart;
-    if (elapsed > 0 && this.match.phase === 'playing') {
-      this.debrisTimer -= dt;
-      if (this.debrisTimer <= 0) {
-        this.debrisTimer = 0.08;
-        for (const s of this.world.solids) {
-          if (s.collapse < 0 || !s.enabled) continue;
-          if (s.collapse === 0 && s.maxX - s.minX >= this.map.solids[s.id].max[0] - this.map.solids[s.id].min[0] - 0.01) continue;
-          const edge = Math.floor(Math.random() * 4);
-          const u = Math.random();
-          const x = edge < 2 ? s.minX + u * (s.maxX - s.minX) : edge === 2 ? s.minX : s.maxX;
-          const z = edge >= 2 ? s.minZ + u * (s.maxZ - s.minZ) : edge === 0 ? s.minZ : s.maxZ;
-          this.effects.debris(x, s.maxY, z);
+  /**
+   * The map falling apart: red flashing areas over pieces about to go (and the deck's edge band
+   * about to crumble), plus debris off their edges while they warn, sink and crumble.
+   */
+  private updateCollapseFx(t: number, dt: number): void {
+    const w = this.world;
+    const playing = this.match.phase === 'playing' && w.plan.length > 0;
+    const flash = 0.5 + 0.5 * Math.sin(this.time * 13);
+    this.debrisTimer -= dt;
+    const burst = this.debrisTimer <= 0;
+    if (burst) this.debrisTimer = 0.08;
+    for (let id = 0; id < w.staticCount; id++) {
+      const s = w.solids[id];
+      if (s.collapse < 0) continue;
+      let area: WarnArea | null = null;
+      let debris = 0;
+      if (playing && s.collapse > 0) {
+        const start = w.sinkStart(s.collapse);
+        const warn = w.plan.find((x) => x.at === start)?.warn ?? 0;
+        if (s.enabled && t >= start - warn && t < start + 3) {
+          const cx = (s.minX + s.maxX) / 2;
+          const cz = (s.minZ + s.maxZ) / 2;
+          area = { minX: s.minX, maxX: s.maxX, minZ: s.minZ, maxZ: s.maxZ, inMinX: cx, inMaxX: cx, inMinZ: cz, inMaxZ: cz, y: s.maxY, innerLine: false };
+        }
+        if (s.enabled && t >= start - warn) debris = t < start ? 0.35 : 1;
+      } else if (playing) {
+        const stage = w.plan.find((x) => x.deck > 0 && t >= x.at - x.warn && t < x.at + x.deckTime);
+        if (stage) {
+          const to = w.deckBoundsAt(s, stage.at + stage.deckTime, this.warnTarget);
+          area = { minX: s.minX, maxX: s.maxX, minZ: s.minZ, maxZ: s.maxZ, inMinX: to.minX, inMaxX: to.maxX, inMinZ: to.minZ, inMaxZ: to.maxZ, y: s.maxY, innerLine: true };
+          debris = t < stage.at ? 0.35 : 1;
         }
       }
+      this.mapView.setWarning(id, area, flash);
+      if (!burst || debris <= 0) continue;
+      // Bigger pieces shed more bits so the whole edge visibly crumbles.
+      const n = Math.max(1, Math.round(((s.maxX - s.minX + s.maxZ - s.minZ) / 20) * debris));
+      for (let i = 0; i < n; i++) {
+        if (Math.random() > debris) continue;
+        const edge = Math.floor(Math.random() * 4);
+        const u = Math.random();
+        const x = edge < 2 ? s.minX + u * (s.maxX - s.minX) : edge === 2 ? s.minX : s.maxX;
+        const z = edge >= 2 ? s.minZ + u * (s.maxZ - s.minZ) : edge === 0 ? s.minZ : s.maxZ;
+        this.effects.debris(x, s.maxY, z);
+      }
     }
+  }
+
+  /** Sudden Death: players still in after someone went out (and the winner, once it's decided). */
+  private survivorsCallout(left: number[], w: number): void {
+    const you = this.youId;
+    const n = left.length;
+    if (w >= 0) {
+      if (this.sdWinnerShown) return;
+      this.sdWinnerShown = true;
+      const mine = w === you;
+      // Usually the last one standing; rarely the last ones go out together and the tie-break decides.
+      const how = n === 1 ? 'the last tube man standing' : 'the last one out';
+      this.hud.callout(mine ? 'WINNER!' : `${this.nameOf(w).toUpperCase()} WINS!`, mine ? `You're ${how}!` : `${this.nameOf(w)} is ${how}!`, 3.5, '#ffd60a');
+      this.announcer.say(mine ? 'Winner! You are the last one standing!' : `Winner! ${this.nameOf(w)}!`, 5);
+      this.audio.goalHorn();
+      const p = this.posOf(w);
+      if (p) this.effects.confettiBurst(p.x, p.y + 3, p.z, 160);
+      if (mine) this.hud.flash('rgba(255, 214, 10, 0.5)', 600);
+      this.spectateId = w;
+      this.hud.addKill(`🏆 <b style="color:${hexColor(this.colorOf(w))}">${esc(this.nameOf(w))}</b> wins!`, mine);
+      return;
+    }
+    if (n === 0) return;
+    const youIn = left.includes(you);
+    if (n === 2) {
+      this.hud.callout('FINAL SHOWDOWN!', left.map((id) => (id === you ? 'YOU' : this.nameOf(id))).join('  vs  '), 3, '#ff5fd2');
+      this.announcer.say('Final showdown!', 4);
+      this.audio.siren();
+    } else if (n === 3) {
+      this.hud.callout('LAST 3!', youIn ? "You're still in. Stay on!" : 'Three tube men left standing', 2.5, '#ff9f1c');
+      this.announcer.say('Last three!', 3);
+    }
+    this.hud.addKill(`<b>${n}</b> players left`, false);
+  }
+
+  /** Out of a Sudden Death match (popped, or waiting for the next one) and watching. */
+  get sdSpectating(): boolean {
+    return this.mode === 'suddenDeath' && this.match.phase === 'playing' && !!this.roster.get(this.youId)?.out;
+  }
+
+  private stillIn(id: number): boolean {
+    const r = this.roster.get(id);
+    return id !== this.youId && !!r && !r.out && this.remotes.get(id)?.cur?.mode !== MODE_DEAD;
+  }
+
+  /** Who a Sudden Death spectator watches: the same player, else whoever popped them, else the leader. */
+  private spectateTarget(): number {
+    if (this.spectateId >= 0 && this.stillIn(this.spectateId)) return this.spectateId;
+    if (this.killerId >= 0 && this.stillIn(this.killerId) && this.spectateId === -1) return (this.spectateId = this.killerId);
+    let best = -1;
+    let bestKos = -1;
+    for (const r of this.roster.values()) {
+      if (this.stillIn(r.id) && r.kos > bestKos) {
+        best = r.id;
+        bestKos = r.kos;
+      }
+    }
+    return (this.spectateId = best);
+  }
+
+  /** Watch the next player still in. */
+  private spectateNext(): void {
+    const ids = [...this.roster.keys()].filter((id) => this.stillIn(id)).sort((a, b) => a - b);
+    if (!ids.length) return;
+    const i = ids.indexOf(this.spectateTarget());
+    this.spectateId = ids[(i + 1) % ids.length];
   }
 
   /** Where a player's grapple line starts (your gun muzzle, or another player's chest). */
@@ -1904,14 +2043,21 @@ export class ClientGame {
       const since = this.time - this.deathAt;
       fov = 70;
       let target = this.deathPos;
-      if (since > 1.2 && this.killerId >= 0) {
-        const k = this.posOf(this.killerId);
-        if (k) target = tmpV.copy(k).add(new THREE.Vector3(0, 1.2, 0));
-      }
       const home = new THREE.Vector3(0, 16, 0);
       const orbit = this.time * 0.15;
       const desired = new THREE.Vector3(home.x + Math.cos(orbit) * 26, home.y, home.z + Math.sin(orbit) * 26);
-      cam.position.lerp(desired, Math.min(1, dt * 1.5));
+      const watch = this.sdSpectating && since > 1.2 ? this.spectateTarget() : -1;
+      const w = watch >= 0 ? this.posOf(watch) : null;
+      if (w) {
+        // Out of a Sudden Death match: follow the players still in, circling slowly behind them.
+        target = tmpV.copy(w).add(new THREE.Vector3(0, 1.4, 0));
+        const a = this.time * 0.22;
+        desired.set(w.x + Math.cos(a) * 11, w.y + 6.5, w.z + Math.sin(a) * 11);
+      } else if (since > 1.2 && this.killerId >= 0) {
+        const k = this.posOf(this.killerId);
+        if (k) target = tmpV.copy(k).add(new THREE.Vector3(0, 1.2, 0));
+      }
+      cam.position.lerp(desired, Math.min(1, dt * (w ? 2.2 : 1.5)));
       const m = new THREE.Matrix4().lookAt(cam.position, target, new THREE.Vector3(0, 1, 0));
       const q = new THREE.Quaternion().setFromRotationMatrix(m);
       cam.quaternion.slerp(q, Math.min(1, dt * 4));
@@ -1969,7 +2115,9 @@ export class ClientGame {
     let sub = '';
     if (this.match.phase === 'waiting') sub = 'Waiting for another player...';
     else if (this.match.phase === 'results') sub = 'Match over!';
-    else if (me && this.mode === 'duel') {
+    else if (me && this.mode === 'suddenDeath') {
+      sub = me.out ? 'Spectating' : `One life · ${me.kos} KO${me.kos === 1 ? '' : 's'}`;
+    } else if (me && this.mode === 'duel') {
       const rival = [...this.roster.values()].find((r) => r.id !== me.id);
       sub = rival ? `You ${me.kos} – ${rival.kos} ${rival.name}${rival.bot ? ' (warm-up bot)' : ''} · first to ${BALANCE.modes.duel.target}` : 'Waiting for a rival...';
     } else if (me && this.teamMode) {
@@ -2009,7 +2157,20 @@ export class ClientGame {
       },
       dt,
     );
-    if (!alive && this.havePred) {
+    if (this.mode === 'suddenDeath' && this.match.phase === 'playing') {
+      const rows = [...this.roster.values()];
+      this.hud.setSurvivors(rows.filter((r) => !r.out).length, rows.length, !me?.out);
+    } else this.hud.setSurvivors(null);
+    if (this.sdSpectating && this.havePred) {
+      // One life: no respawn. Say who you're watching and how to switch.
+      const late = !!me?.out && me.deaths === 0;
+      const watch = this.spectateId >= 0 ? this.nameOf(this.spectateId) : '';
+      const how = `${this.key('jump')} to watch someone else`;
+      const killer = this.killerId >= 0 ? this.nameOf(this.killerId) : null;
+      const big = late ? 'Match in progress' : killer ? `Popped by ${killer}!` : 'You fell off!';
+      const small = late ? `You'll play next round${watch ? ` · watching ${watch}` : ''}` : `You're out${watch ? ` · watching ${watch}` : ''} · ${how}`;
+      this.hud.setRespawn(big, small);
+    } else if (!alive && this.havePred) {
       const killer = this.killerId >= 0 ? this.nameOf(this.killerId) : null;
       const left = Math.max(0, BALANCE.match.respawnDelay - (this.time - this.deathAt));
       this.hud.setRespawn(killer ? `Popped by ${killer}!` : 'You fell off!', this.match.phase === 'results' ? '' : `Respawning in ${left.toFixed(1)}...`);
@@ -2172,7 +2333,7 @@ export class ClientGame {
 
   /** True during the final-30-seconds countdown. */
   get inFinal(): boolean {
-    return this.match.phase === 'playing' && this.clock.tickAt(performance.now()) * DT >= this.world.collapseStart;
+    return this.match.phase === 'playing' && this.clock.tickAt(performance.now()) >= this.match.endsAtTick - BALANCE.final.seconds * BALANCE.tickRate;
   }
 
   get alive(): boolean {
