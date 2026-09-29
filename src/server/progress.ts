@@ -1,4 +1,4 @@
-import { type ProgressReport, REWARDS, UNLOCKS, eloUpdate, levelForXp, matchReward, unlockedAt } from '../shared/economy';
+import { type ProgressReport, REWARDS, UNLOCKS, cosmeticsUnlockedBetween, eloUpdate, levelForXp, matchReward, unlockedAt } from '../shared/economy';
 import { applyDailyMatch } from '../shared/daily';
 import type { MatchStats } from '../shared/game/sim';
 import type { ModeId } from '../shared/game/modes';
@@ -79,7 +79,8 @@ export function awardMatch(store: Store, key: string, name: string | null, isAcc
     if (o.won) p.lastWinDay = today(now);
   }
   store.saveProfile(key);
-  const unlocked = UNLOCKS.filter((u) => u.level > before && u.level <= after).map((u) => u.id);
+  // Mods and utilities, then any cosmetic level rewards (item ids like 'base.gold').
+  const unlocked = [...UNLOCKS.filter((u) => u.level > before && u.level <= after).map((u) => u.id), ...cosmeticsUnlockedBetween(before, after).map((i) => i.id)];
   return { reward, levelBefore: before, levelAfter: after, unlocked, profile: store.view(key, name, isAccount, now) };
 }
 

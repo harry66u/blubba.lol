@@ -1,5 +1,5 @@
 import { MODE_INFO, type ModeId } from '../../shared/game/modes';
-import { type ProgressReport, UNLOCKS, tierFor } from '../../shared/economy';
+import { ITEM_BY_ID, type ProgressReport, SLOT_INFO, UNLOCKS, tierFor } from '../../shared/economy';
 import { DAILY, type DailyChallengeView, type DailyView } from '../../shared/daily';
 import { PART_INFO, type SpecialPartId, UTILITY_INFO, type UtilityId } from '../../shared/loadout';
 import { checkName } from '../../shared/names';
@@ -329,6 +329,9 @@ export function buildProfile(account: AccountClient, onClose: () => void, onAcco
 }
 
 function unlockName(id: string): string {
+  // Cosmetic level rewards come through as item ids ('base.gold').
+  const item = ITEM_BY_ID.get(id);
+  if (item) return `${item.name} (${SLOT_INFO[item.slot].name.toLowerCase()}, in your locker)`;
   return PART_INFO[id as SpecialPartId]?.name ?? UTILITY_INFO[id as UtilityId]?.name ?? id;
 }
 

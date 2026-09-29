@@ -10,14 +10,18 @@ import { PART_IDS, type PartId, type SpecialPartId, UTILITY_IDS, type UtilityId 
 
 // --- Cosmetics -------------------------------------------------------------------------------
 
-export const COSMETIC_SLOTS = ['color', 'pattern', 'face', 'hat', 'finish', 'taunt', 'koFx', 'sound'] as const;
+export const COSMETIC_SLOTS = ['color', 'accent', 'pattern', 'face', 'eyes', 'hat', 'base', 'trail', 'finish', 'taunt', 'koFx', 'sound'] as const;
 export type CosmeticSlot = (typeof COSMETIC_SLOTS)[number];
 
 export const SLOT_INFO: Record<CosmeticSlot, { name: string; plural: string }> = {
   color: { name: 'Color', plural: 'Colors' },
+  accent: { name: 'Accent color', plural: 'Accents' },
   pattern: { name: 'Pattern', plural: 'Patterns' },
   face: { name: 'Face', plural: 'Faces' },
+  eyes: { name: 'Eyes', plural: 'Eyes' },
   hat: { name: 'Hat', plural: 'Hats' },
+  base: { name: 'Base', plural: 'Bases' },
+  trail: { name: 'Trail', plural: 'Trails' },
   finish: { name: 'Weapon finish', plural: 'Weapon finishes' },
   taunt: { name: 'Taunt', plural: 'Taunts' },
   koFx: { name: 'Knockout effect', plural: 'Knockout effects' },
@@ -31,18 +35,25 @@ export interface CosmeticItem {
   /** Renderer key (pattern name, hat name, color index as a string, ...). */
   key: string;
   name: string;
-  /** Coins. 0 = everyone owns it. */
+  /** Coins. 0 = everyone owns it (or everyone who reached `levelReq`). */
   price: number;
   blurb?: string;
+  /** Earned by reaching this level instead of bought. Never for sale. */
+  levelReq?: number;
 }
 
 function items(slot: CosmeticSlot, list: [key: string, name: string, price: number, blurb?: string][]): CosmeticItem[] {
   return list.map(([key, name, price, blurb]) => ({ id: `${slot}.${key}`, slot, key, name, price, blurb }));
 }
 
+/** A level reward: yours once you reach `level`, and it can't be bought before that. */
+function reward(slot: CosmeticSlot, key: string, name: string, level: number, blurb?: string): CosmeticItem {
+  return { id: `${slot}.${key}`, slot, key, name, price: 0, blurb, levelReq: level };
+}
+
 /** Everything in the store. Prices are fixed and shown up front. */
 export const ITEMS: CosmeticItem[] = [
-  // Color keys are indexes into PLAYER_COLORS. The first ten are free.
+  // Color keys are indexes into PLAYER_COLORS. The first ten are free, and so are Lavender and Cocoa.
   ...items('color', [
     ['0', 'Cherry', 0],
     ['1', 'Tangerine', 0],
@@ -54,45 +65,142 @@ export const ITEMS: CosmeticItem[] = [
     ['7', 'Grape', 0],
     ['8', 'Bubblegum', 0],
     ['9', 'Coral', 0],
+    ['12', 'Lavender', 0],
+    ['13', 'Cocoa', 0],
     ['10', 'Snow', 150, 'Bright white vinyl.'],
     ['11', 'Licorice', 150, 'Dark and glossy.'],
+    ['17', 'Pearl', 300, 'Shimmers pink and blue as you move.'],
+    ['15', 'Silver', 350, 'Shiny metal foil.'],
+    ['18', 'Glowstick', 350, 'Glows in the dark.'],
+    ['14', 'Gold Foil', 400, 'Like a party balloon.'],
+    ['16', 'Rose Gold', 450, 'Fancy metal foil.'],
+  ]),
+  // A second color for the arms, the base and the dark parts of a pattern. Same keys as colors.
+  ...items('accent', [
+    ['match', 'Matching', 0, 'Same color as your body.'],
+    ['0', 'Cherry', 0],
+    ['1', 'Tangerine', 0],
+    ['2', 'Banana', 0],
+    ['3', 'Lime', 0],
+    ['4', 'Mint', 0],
+    ['5', 'Sky', 0],
+    ['6', 'Blueberry', 0],
+    ['7', 'Grape', 0],
+    ['8', 'Bubblegum', 0],
+    ['9', 'Coral', 0],
+    ['12', 'Lavender', 0],
+    ['13', 'Cocoa', 0],
+    ['10', 'Snow', 100],
+    ['11', 'Licorice', 100],
+    ['17', 'Pearl', 200],
+    ['15', 'Silver', 250],
+    ['18', 'Glowstick', 250],
+    ['14', 'Gold Foil', 300],
+    ['16', 'Rose Gold', 300],
   ]),
   ...items('pattern', [
     ['solid', 'Solid', 0],
     ['stripes', 'Stripes', 0],
+    ['ombre', 'Ombré', 0, 'Fades into your accent color.'],
+    ['swirl', 'Candy Swirl', 0, 'Like a barber pole.'],
     ['dots', 'Polka Dots', 100],
+    ['waves', 'Waves', 150],
+    ['hearts', 'Hearts', 150],
     ['zigzag', 'Zigzag', 150],
     ['stars', 'Stars', 200],
     ['checker', 'Checkers', 200],
+    ['hex', 'Honeycomb', 200],
+    ['pixel', 'Pixels', 200, 'Retro 8-bit blocks.'],
+    ['camo', 'Camo', 250, "Doesn't actually hide you."],
+    ['tiger', 'Tiger Stripes', 250],
+    ['lightning', 'Lightning', 300],
+    ['flames', 'Flames', 300, 'Hot-rod flames up from your base.'],
+    ['galaxy', 'Galaxy', 450, 'Swirls and twinkling stars.'],
   ]),
   ...items('face', [
     ['smile', 'Smile', 0],
+    ['blush', 'Blushing', 0, 'Rosy cheeks.'],
+    ['tongue', 'Tongue Out', 0, 'Blehh!'],
     ['grin', 'Big Grin', 100, 'All teeth, all the time.'],
     ['sleepy', 'Sleepy', 120, 'Too tired to dodge.'],
+    ['surprised', 'Surprised', 150, 'Always shocked.'],
+    ['winky', 'Winky', 150, 'One eye shut. Smooth.'],
     ['angry', 'Grumpy', 150, 'Serious eyebrows.'],
     ['derp', 'Derp', 150, 'One eye does its own thing.'],
     ['cyclops', 'Cyclops', 200, 'One big eye.'],
+    ['mustache', 'Mustache', 200, 'Very distinguished.'],
+    ['fangs', 'Vampire', 250, 'Two tiny fangs.'],
     ['shades', 'Shades', 250, 'Too cool to deflate.'],
+    ['visor', 'Visor', 300, 'A glowing robot visor.'],
+  ]),
+  // Eyes go with any face; Cyclops, Shades and Visor cover them with their own.
+  ...items('eyes', [
+    ['classic', 'Classic', 0, 'Big friendly eyes.'],
+    ['dot', 'Button Eyes', 0, 'Little black buttons.'],
+    ['lashes', 'Lashes', 0, 'Long eyelashes.'],
+    ['cat', 'Cat Eyes', 150],
+    ['star', 'Starry Eyes', 200, 'Starstruck.'],
+    ['heart', 'Heart Eyes', 200, 'In love with knockouts.'],
+    ['googly', 'Googly Eyes', 250, 'They wobble.'],
+    ['spiral', 'Dizzy', 250, 'Spinning spirals.'],
+    ['sparkle', 'Sparkly', 300, 'Shiny cartoon eyes.'],
   ]),
   ...items('hat', [
     ['spikes', 'Tufts', 0, 'The classic air-dancer hair.'],
+    ['flower', 'Daisy', 0, 'One big flower.'],
+    ['bucket', 'Bucket Hat', 0],
     ['party', 'Party Hat', 120],
     ['cap', 'Ball Cap', 150],
     ['beanie', 'Beanie', 150, 'With a pom-pom.'],
+    ['papercrown', 'Paper Crown', 150, 'From a party cracker. Not the real crown.'],
+    ['antenna', 'Antennae', 150, 'Boing boing.'],
     ['cone', 'Traffic Cone', 200],
     ['chef', 'Chef Hat', 200],
+    ['bunny', 'Bunny Ears', 200, 'They flop when you fly.'],
     ['propeller', 'Propeller Cap', 250, 'Spins faster when you fly.'],
     ['tophat', 'Top Hat', 250],
+    ['cowboy', 'Cowboy Hat', 250, 'Yeehaw.'],
+    ['headphones', 'Headphones', 250],
     ['viking', 'Horned Helmet', 300],
+    ['pirate', 'Pirate Hat', 300, 'Arr.'],
     ['halo', 'Halo', 350],
+    ['wizard', 'Wizard Hat', 350, 'Covered in stars.'],
+    ['unicorn', 'Unicorn Horn', 400, 'Swirly and sparkly.'],
+  ]),
+  // The fan base you stand on. Tinted with your accent color where it makes sense.
+  ...items('base', [
+    ['classic', 'Blower', 0, 'The classic fan housing.'],
+    ['tire', 'Old Tire', 0],
+    ['pot', 'Flower Pot', 150],
+    ['trash', 'Trash Can', 200],
+    ['duck', 'Duck Float', 250, 'Quack.'],
+    ['cloud', 'Cloud', 250, 'Fluffy.'],
+    ['cake', 'Birthday Cake', 300, 'Candles included.'],
+    ['rocket', 'Rocket', 350, 'Fires up when you fly.'],
+  ]),
+  // Drawn behind you while you're launched, dashing or flying fast. Everyone sees it.
+  ...items('trail', [
+    ['none', 'None', 0],
+    ['bubbles', 'Bubbles', 0],
+    ['smoke', 'Smoke Puffs', 150],
+    ['confetti', 'Confetti', 200],
+    ['sparkles', 'Sparkles', 200],
+    ['hearts', 'Hearts', 250],
+    ['notes', 'Music Notes', 300],
+    ['fire', 'Fire', 350],
+    ['rainbow', 'Rainbow Ribbon', 400],
   ]),
   ...items('finish', [
     ['team', 'Matching', 0, 'Same color as you.'],
     ['bubblegum', 'Bubblegum', 150],
+    ['wood', 'Wooden', 200, 'Hand carved.'],
     ['candy', 'Candy Stripe', 250],
+    ['frost', 'Frosty', 250, 'Icy blue.'],
     ['chrome', 'Chrome', 300],
     ['neon', 'Neon', 300, 'Glows in the dark.'],
+    ['rainbow', 'Rainbow', 350],
     ['gold', 'Gold', 400],
+    ['lava', 'Lava', 400, 'Glowing cracks.'],
     ['galaxy', 'Galaxy', 450],
   ]),
   ...items('taunt', [
@@ -100,14 +208,21 @@ export const ITEMS: CosmeticItem[] = [
     ['wave', 'Wave', 100, 'Hi!'],
     ['spin', 'Spin', 150, 'Twirl like nobody is watching.'],
     ['noodle', 'Noodle', 150, 'Go completely floppy.'],
+    ['bow', 'Take a Bow', 150, 'Thank you, thank you.'],
     ['flex', 'Flex', 200, 'Puff up, then deflate.'],
+    ['dance', 'Dance', 200, 'Bust a move.'],
+    ['deflate', 'Deflate', 250, 'Flop down like the fan switched off, then pop back up.'],
+    ['backflip', 'Backflip', 300, 'Show off.'],
   ]),
   ...items('koFx', [
     ['confetti', 'Confetti', 0],
     ['bubbles', 'Bubbles', 200],
     ['stars', 'Star Burst', 200],
+    ['popcorn', 'Popcorn', 200],
     ['balloons', 'Balloon Release', 250],
+    ['hearts', 'Heart Burst', 250],
     ['fireworks', 'Fireworks', 300],
+    ['splash', 'Paint Splash', 300],
     ['rainbow', 'Rainbow', 400],
   ]),
   ...items('sound', [
@@ -118,6 +233,12 @@ export const ITEMS: CosmeticItem[] = [
     ['slide', 'Slide Whistle', 200],
     ['trumpet', 'Trumpet', 250],
   ]),
+  // Earned by playing, never sold. The locker shows them with a lock until you get there.
+  reward('trail', 'comet', 'Comet Tail', 3, 'A blazing streak behind you.'),
+  reward('hat', 'laurel', 'Laurel Wreath', 6, 'For champions.'),
+  reward('base', 'gold', 'Gold Pedestal', 10, 'Stand on it like a trophy.'),
+  reward('finish', 'diamond', 'Diamond', 15, 'Sparkles from every angle.'),
+  reward('koFx', 'supernova', 'Supernova', 20, 'The biggest bang in the locker.'),
 ];
 
 export const ITEM_BY_ID = new Map(ITEMS.map((i) => [i.id, i]));
@@ -126,9 +247,13 @@ export type Cosmetics = Record<CosmeticSlot, string>;
 
 export const DEFAULT_COSMETICS: Cosmetics = {
   color: 'color.0',
+  accent: 'accent.match',
   pattern: 'pattern.solid',
   face: 'face.smile',
+  eyes: 'eyes.classic',
   hat: 'hat.spikes',
+  base: 'base.classic',
+  trail: 'trail.none',
   finish: 'finish.team',
   taunt: 'taunt.burp',
   koFx: 'koFx.confetti',
@@ -141,16 +266,24 @@ export function cosmeticKey(c: Partial<Cosmetics> | undefined, slot: CosmeticSlo
   return item && item.slot === slot ? item.key : ITEM_BY_ID.get(DEFAULT_COSMETICS[slot])!.key;
 }
 
-export function ownsItem(owned: Iterable<string>, id: string): boolean {
+/**
+ * Free items, bought items, and level rewards once you've reached their level. `level` defaults
+ * to 1, so a caller that doesn't know the level never hands out level rewards.
+ */
+export function ownsItem(owned: Iterable<string>, id: string, level = 1): boolean {
   const item = ITEM_BY_ID.get(id);
   if (!item) return false;
+  if (item.levelReq) return level >= item.levelReq;
   if (item.price === 0) return true;
   for (const o of owned) if (o === id) return true;
   return false;
 }
 
-/** Keeps only real items the player owns, in the right slots; anything else falls back to the default. */
-export function sanitizeCosmetics(raw: unknown, owned: Iterable<string>): Cosmetics {
+/**
+ * Keeps only real items the player owns, in the right slots; anything else falls back to the
+ * default. Profiles saved before a slot existed simply get that slot's default.
+ */
+export function sanitizeCosmetics(raw: unknown, owned: Iterable<string>, level = 1): Cosmetics {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const ownedList = [...owned];
   const out = { ...DEFAULT_COSMETICS };
@@ -158,9 +291,14 @@ export function sanitizeCosmetics(raw: unknown, owned: Iterable<string>): Cosmet
     const id = r[slot];
     if (typeof id !== 'string') continue;
     const item = ITEM_BY_ID.get(id);
-    if (item && item.slot === slot && ownsItem(ownedList, id)) out[slot] = id;
+    if (item && item.slot === slot && ownsItem(ownedList, id, level)) out[slot] = id;
   }
   return out;
+}
+
+/** Level rewards earned going from level `before` to `after` (for the results screen). */
+export function cosmeticsUnlockedBetween(before: number, after: number): CosmeticItem[] {
+  return ITEMS.filter((i) => i.levelReq !== undefined && i.levelReq > before && i.levelReq <= after);
 }
 
 // --- Levels and unlocks ------------------------------------------------------------------------

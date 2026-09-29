@@ -3410,3 +3410,224 @@ body.touch .inflation .self-gain {
 .face-scan .hidden {
   display: none;
 }
+
+/* === Locker upgrades: slot icons, NEW badges, level locks, try-on, randomize, phone layout === */
+.locker-tabs .tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  position: relative;
+}
+.locker-tabs .tab-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+.locker-tabs .new-dot {
+  position: absolute;
+  top: -7px;
+  right: -5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: #ff3b5c;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 18px;
+  text-align: center;
+  box-shadow: 0 0 0 2px #fff;
+}
+.item-grid .item {
+  position: relative;
+}
+.item-grid .new-badge {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #ff3b5c;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+}
+.item-grid .item .lock {
+  position: absolute;
+  top: 34px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 22px;
+  filter: drop-shadow(0 2px 0 #fff);
+}
+.item-grid .item.level-locked > .icon,
+.item-grid .item.level-locked > .swatch-big {
+  opacity: 0.45;
+  filter: grayscale(0.6);
+}
+.item-grid .status.level {
+  color: #7a4dd6;
+  opacity: 1;
+}
+.item-grid .item.trying {
+  border-color: #1060c0;
+  border-style: dashed;
+}
+.item-grid .swatch-big.split {
+  display: flex;
+  overflow: hidden;
+  transform: rotate(-45deg);
+}
+.item-grid .swatch-big.split span {
+  flex: 1;
+}
+.locker-coins-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.locker .slot-note {
+  margin-top: 6px;
+  min-height: 0;
+}
+.locker .slot-note:empty {
+  display: none;
+}
+.locker-done {
+  text-align: center;
+  margin-top: 14px;
+}
+
+/* Phones held sideways: preview on the left, one scrolling row of icon tabs, a denser grid,
+   everything inside the screen height. */
+@media (max-height: 500px) {
+  .overlay .panel.locker {
+    width: 98vw;
+    max-width: 98vw;
+    max-height: 98vh;
+    padding: 8px 12px;
+    border-radius: 18px;
+  }
+  .locker h2 {
+    display: none;
+  }
+  .locker-body {
+    gap: 10px;
+  }
+  .locker-left {
+    width: 170px;
+    gap: 4px;
+  }
+  .locker-left .small-note {
+    display: none;
+  }
+  .preview-canvas {
+    width: 160px;
+    height: calc(98vh - 120px);
+  }
+  .locker-left .coins {
+    font-size: 18px;
+  }
+  .locker-coins-row {
+    gap: 6px;
+  }
+  .locker-coins-row .btn.small {
+    font-size: 13px;
+    padding: 4px 8px;
+  }
+  .locker .locker-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: 8px 2px 4px;
+    margin-bottom: 4px;
+    scrollbar-width: none;
+  }
+  .locker-tabs .tab {
+    flex: none;
+    padding: 5px 9px;
+  }
+  .locker-tabs .tab-label {
+    display: none;
+  }
+  .locker-tabs .tab.on .tab-label {
+    display: inline;
+  }
+  .item-grid {
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+    gap: 6px;
+    max-height: calc(98vh - 150px);
+  }
+  .item-grid .item {
+    padding: 6px 4px;
+    gap: 2px;
+  }
+  .item-grid .item .icon {
+    font-size: 26px;
+    line-height: 32px;
+  }
+  .item-grid .swatch-big {
+    width: 32px;
+    height: 32px;
+  }
+  .item-grid .item .lock {
+    top: 22px;
+    font-size: 18px;
+  }
+  .item-grid .name {
+    font-size: 12px;
+  }
+  .item-grid .status {
+    font-size: 10px;
+  }
+  .locker-note {
+    margin-top: 4px;
+    font-size: 13px;
+  }
+  .locker .slot-note {
+    font-size: 11px;
+  }
+  .overlay .panel.locker {
+    position: relative;
+  }
+  .locker-done {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    margin: 0;
+  }
+  .locker-done .btn {
+    font-size: 15px;
+    padding: 5px 14px;
+  }
+  .locker .locker-tabs {
+    margin-right: 84px;
+  }
+}
+
+/* Phones held upright: preview on top, then scrolling icon tabs and the grid. */
+@media (max-width: 560px) {
+  .locker-left {
+    width: 100%;
+  }
+  .preview-canvas {
+    height: min(240px, 32vh);
+  }
+  .locker .locker-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-top: 8px;
+    scrollbar-width: none;
+  }
+  .locker-tabs .tab {
+    flex: none;
+  }
+  .locker-tabs .tab:not(.on) .tab-label {
+    display: none;
+  }
+  .item-grid {
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  }
+}

@@ -1,42 +1,112 @@
 import { PLAYER_COLORS } from '../../shared/colors';
-import { COSMETIC_SLOTS, type CosmeticItem, type CosmeticSlot, ITEMS, SLOT_INFO, cosmeticKey, ownsItem } from '../../shared/economy';
+import { COSMETIC_SLOTS, type CosmeticItem, type CosmeticSlot, type Cosmetics, ITEMS, ITEM_BY_ID, SLOT_INFO, cosmeticKey, ownsItem } from '../../shared/economy';
 import type { WeaponId } from '../../shared/loadout';
 import type { Audio } from '../audio/audio';
 import type { AccountClient } from '../net/account';
 import { faceTexture } from '../render/facePhoto';
+import { FACES_COVERING_EYES } from '../render/looks';
 import { TubePreview } from '../render/preview';
-import type { Look } from '../render/tubeMan';
+import { lookFromCosmetics, patternMask } from '../render/tubeMan';
 import { clear, el, hexColor } from './dom';
+
+const SLOT_ICONS: Record<CosmeticSlot, string> = {
+  color: '🎨',
+  accent: '🖌️',
+  pattern: '🦓',
+  face: '🙂',
+  eyes: '👀',
+  hat: '🎩',
+  base: '🛢️',
+  trail: '✨',
+  finish: '🎯',
+  taunt: '💃',
+  koFx: '💥',
+  sound: '🔊',
+};
 
 const ICONS: Record<string, string> = {
   'face.smile': '🙂',
+  'face.blush': '☺️',
+  'face.tongue': '😛',
   'face.grin': '😁',
   'face.sleepy': '😴',
+  'face.surprised': '😮',
+  'face.winky': '😉',
   'face.angry': '😠',
   'face.derp': '🤪',
   'face.cyclops': '👁️',
+  'face.mustache': '🥸',
+  'face.fangs': '🧛',
   'face.shades': '😎',
+  'face.visor': '🤖',
+  'eyes.classic': '⚪',
+  'eyes.dot': '⚫',
+  'eyes.lashes': '👁️',
+  'eyes.cat': '🐱',
+  'eyes.star': '🤩',
+  'eyes.heart': '😍',
+  'eyes.googly': '👀',
+  'eyes.spiral': '🌀',
+  'eyes.sparkle': '🥺',
   'hat.spikes': '🌱',
+  'hat.flower': '🌼',
+  'hat.bucket': '👒',
   'hat.party': '🥳',
   'hat.cap': '🧢',
   'hat.beanie': '🧶',
+  'hat.papercrown': '👑',
+  'hat.antenna': '📡',
   'hat.cone': '🚧',
   'hat.chef': '🍳',
+  'hat.bunny': '🐰',
   'hat.propeller': '🚁',
   'hat.tophat': '🎩',
+  'hat.cowboy': '🤠',
+  'hat.headphones': '🎧',
   'hat.viking': '🪖',
+  'hat.pirate': '🏴‍☠️',
   'hat.halo': '😇',
+  'hat.wizard': '🧙',
+  'hat.unicorn': '🦄',
+  'hat.laurel': '🌿',
+  'base.classic': '💨',
+  'base.tire': '🛞',
+  'base.pot': '🪴',
+  'base.trash': '🗑️',
+  'base.duck': '🦆',
+  'base.cloud': '☁️',
+  'base.cake': '🎂',
+  'base.rocket': '🚀',
+  'base.gold': '🏆',
+  'trail.none': '🚫',
+  'trail.bubbles': '🫧',
+  'trail.smoke': '💨',
+  'trail.confetti': '🎊',
+  'trail.sparkles': '✨',
+  'trail.hearts': '💕',
+  'trail.notes': '🎶',
+  'trail.fire': '🔥',
+  'trail.rainbow': '🌈',
+  'trail.comet': '☄️',
   'taunt.burp': '🫧',
   'taunt.wave': '👋',
   'taunt.spin': '🌀',
   'taunt.noodle': '🍜',
+  'taunt.bow': '🙇',
   'taunt.flex': '💪',
+  'taunt.dance': '🕺',
+  'taunt.deflate': '🎈',
+  'taunt.backflip': '🤸',
   'koFx.confetti': '🎊',
   'koFx.bubbles': '🫧',
   'koFx.stars': '⭐',
+  'koFx.popcorn': '🍿',
   'koFx.balloons': '🎈',
+  'koFx.hearts': '💖',
   'koFx.fireworks': '🎆',
+  'koFx.splash': '🎨',
   'koFx.rainbow': '🌈',
+  'koFx.supernova': '💥',
   'sound.classic': '🔊',
   'sound.boing': '🟣',
   'sound.kazoo': '🎶',
@@ -45,23 +115,83 @@ const ICONS: Record<string, string> = {
   'sound.trumpet': '🎺',
 };
 
-const PATTERN_CSS: Record<string, string> = {
-  solid: 'none',
-  stripes: 'repeating-linear-gradient(45deg, rgba(0,0,0,.18) 0 6px, transparent 6px 12px)',
-  dots: 'radial-gradient(circle, rgba(0,0,0,.2) 3px, transparent 4px) 0 0 / 12px 12px',
-  zigzag: 'linear-gradient(135deg, rgba(0,0,0,.18) 25%, transparent 25%) -6px 0 / 12px 12px, linear-gradient(225deg, rgba(0,0,0,.18) 25%, transparent 25%) -6px 0 / 12px 12px',
-  stars: 'radial-gradient(circle, rgba(255,255,255,.7) 2px, transparent 3px) 0 0 / 10px 10px',
-  checker: 'conic-gradient(rgba(0,0,0,.2) 25%, transparent 0 50%, rgba(0,0,0,.2) 0 75%, transparent 0) 0 0 / 14px 14px',
-};
-
 const FINISH_CSS: Record<string, string> = {
   bubblegum: '#ff8fd8',
+  wood: 'repeating-linear-gradient(170deg, #b87a45 0 5px, #9c6435 5px 7px, #c98d55 7px 11px)',
   candy: 'repeating-linear-gradient(45deg, #fff 0 6px, #ff3b5c 6px 12px)',
+  frost: 'linear-gradient(135deg, #ffffff, #c4ecff 50%, #7fd4ff)',
   chrome: 'linear-gradient(135deg, #fff, #9aa3b8 45%, #fff 55%, #c9d2e8)',
   neon: '#39ff88',
+  rainbow: 'linear-gradient(180deg, #ff3b5c, #ff8a1f, #ffd60a, #8ee000, #2ec5ff, #3d6bff, #9b4dff)',
   gold: 'linear-gradient(135deg, #fff3b0, #ffc933 45%, #d99a00)',
+  lava: 'radial-gradient(circle at 30% 60%, #ffd23a 0 2px, transparent 3px) 0 0 / 11px 11px, linear-gradient(45deg, transparent 45%, #ff6a00 48% 52%, transparent 55%) 0 0 / 14px 14px, #2a1712',
   galaxy: 'radial-gradient(circle at 30% 30%, #fff 1px, transparent 2px) 0 0 / 9px 9px, linear-gradient(135deg, #1b0b3a, #4a1a7a, #0b2a5a)',
+  diamond: 'conic-gradient(from 20deg, #ffffff, #cfefff, #ffffff, #e6f7ff, #ffffff, #bfe9ff, #ffffff)',
 };
+
+/** Items the player has already seen in the locker (for the NEW badges). Per browser. */
+const SEEN_KEY = 'bubba.lockerSeen.v1';
+
+function loadSeen(): Set<string> {
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(SEEN_KEY) ?? '[]') as unknown;
+    return new Set(Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveSeen(seen: Set<string>): void {
+  try {
+    window.localStorage.setItem(SEEN_KEY, JSON.stringify([...seen]));
+  } catch {
+    // Private mode or storage full: the badges just show again next time.
+  }
+}
+
+/** CSS for a color swatch, with a hint of its shine (metal foil, pearl, glow). */
+function colorCss(index: number): string {
+  const c = PLAYER_COLORS[index];
+  if (!c) return '#ffffff';
+  const hex = hexColor(c.hex);
+  if (c.shine === 'metal') return `linear-gradient(135deg, #ffffff 0%, ${hex} 35%, ${hex} 60%, rgba(0,0,0,.35) 100%), ${hex}`;
+  if (c.shine === 'pearl') return `linear-gradient(135deg, #ffd6f2, ${hex} 40%, #d6f0ff 75%, ${hex})`;
+  if (c.shine === 'glow') return `radial-gradient(circle, #ffffff 0 15%, ${hex} 60%)`;
+  return hex;
+}
+
+const patternSwatches = new Map<string, string>();
+
+/** A pattern swatch drawn from the real pattern mask, in your body and accent colors. */
+function patternSwatch(key: string, body: number, accent: number): string {
+  const id = `${key}|${body}|${accent}`;
+  const cached = patternSwatches.get(id);
+  if (cached) return cached;
+  const mask = patternMask(key);
+  if (!mask) return hexColor(body);
+  const c = document.createElement('canvas');
+  c.width = c.height = 48;
+  const g = c.getContext('2d')!;
+  // About the patch of body you'd see from the front (the mask is stretched along the tube).
+  const whole = key === 'ombre' || key === 'galaxy';
+  g.drawImage(mask, 0, 0, whole ? 128 : 64, whole || key === 'flames' || key === 'lightning' ? 256 : 160, 0, 0, 48, 48);
+  const img = g.getImageData(0, 0, 48, 48);
+  const d = img.data;
+  const rgb = (h: number) => [(h >> 16) & 255, (h >> 8) & 255, h & 255];
+  const b = rgb(body);
+  // Matching accent: the body color, darker (as the body shader does).
+  const a = accent >= 0 ? rgb(accent) : b.map((v) => v * 0.73);
+  for (let i = 0; i < d.length; i += 4) {
+    const m = d[i] / 255;
+    const hi = Math.max(0, d[i + 1] - d[i]);
+    for (let k = 0; k < 3; k++) d[i + k] = Math.min(255, a[k] * (1 - m) + b[k] * m + hi);
+    d[i + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  const url = `url(${c.toDataURL()}) center / cover`;
+  patternSwatches.set(id, url);
+  return url;
+}
 
 export interface LockerOptions {
   account: AccountClient;
@@ -73,21 +203,31 @@ export interface LockerOptions {
 
 /**
  * The locker: customize your tube man and buy cosmetics at fixed prices. Nothing here changes
- * how you play.
+ * how you play. Tap something you don't own to try it on in the preview, tap again to buy.
  */
 export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: () => void } {
   const { account, audio } = opts;
   let slot: CosmeticSlot = 'color';
   let pending: string | null = null;
+  /** An item you're trying on (not owned yet): shown in the preview only. */
+  let trying: CosmeticItem | null = null;
   const note = el('div', { class: 'locker-note' });
+  const slotNote = el('div', { class: 'small-note slot-note' });
   const coins = el('div', { class: 'coins' });
-  const tabs = el('div', { class: 'tabs' });
+  const tabs = el('div', { class: 'tabs locker-tabs' });
   const grid = el('div', { class: 'item-grid' });
-  const lookOf = (): Look => {
-    const c = account.profile.cosmetics;
-    return { pattern: cosmeticKey(c, 'pattern'), face: cosmeticKey(c, 'face'), hat: cosmeticKey(c, 'hat'), finish: cosmeticKey(c, 'finish') };
+  // NEW badges: anything not seen before this visit stays marked until you close the locker.
+  const seen = loadSeen();
+  const fresh = new Set(ITEMS.filter((i) => !seen.has(i.id)).map((i) => i.id));
+  const viewed = new Set<CosmeticSlot>();
+  const wearing = (): Partial<Cosmetics> => (trying ? { ...account.profile.cosmetics, [trying.slot]: trying.id } : account.profile.cosmetics);
+  const colorIndex = (c: Partial<Cosmetics>) => Number(cosmeticKey(c, 'color'));
+  const lookOf = () => lookFromCosmetics(wearing(), colorIndex(wearing()));
+  const colorOf = () => PLAYER_COLORS[colorIndex(wearing())]?.hex ?? 0xff3b5c;
+  const accentOf = () => {
+    const k = cosmeticKey(wearing(), 'accent');
+    return k === 'match' ? -1 : (PLAYER_COLORS[Number(k)]?.hex ?? -1);
   };
-  const colorOf = () => PLAYER_COLORS[Number(cosmeticKey(account.profile.cosmetics, 'color'))]?.hex ?? 0xff3b5c;
   let preview: TubePreview | null = null;
   try {
     preview = new TubePreview(colorOf(), lookOf(), opts.weapon);
@@ -100,12 +240,19 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
   }
 
   const swatch = (item: CosmeticItem): HTMLElement => {
-    if (item.slot === 'color') return el('div', { class: 'swatch-big', style: { background: hexColor(PLAYER_COLORS[Number(item.key)]?.hex ?? 0xffffff) } });
-    if (item.slot === 'pattern') return el('div', { class: 'swatch-big', style: { background: `${PATTERN_CSS[item.key]}, ${hexColor(colorOf())}` } });
+    if (item.slot === 'color') return el('div', { class: 'swatch-big', style: { background: colorCss(Number(item.key)) } });
+    if (item.slot === 'accent') {
+      // Split swatch: your body color with this accent.
+      const body = hexColor(colorOf());
+      const accent = item.key === 'match' ? body : colorCss(Number(item.key));
+      return el('div', { class: 'swatch-big split' }, el('span', { style: { background: body } }), el('span', { style: { background: accent } }));
+    }
+    if (item.slot === 'pattern') return el('div', { class: 'swatch-big', style: { background: patternSwatch(item.key, colorOf(), accentOf()) } });
     if (item.slot === 'finish') return el('div', { class: 'swatch-big', style: { background: item.key === 'team' ? hexColor(colorOf()) : FINISH_CSS[item.key] } });
     return el('div', { class: 'icon', text: ICONS[item.id] ?? '✨' });
   };
 
+  /** Shows an item off in the preview (taunts play, trails hop, sounds play). */
   const tryItem = (item: CosmeticItem) => {
     if (item.slot === 'taunt') {
       preview?.taunt(item.key);
@@ -113,42 +260,90 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
     } else if (item.slot === 'sound') {
       audio.koSound(item.key, null);
       if (item.key === 'classic') audio.squeal(null);
+    } else if (item.slot === 'trail' || item.slot === 'base') {
+      preview?.hop();
     }
+  };
+
+  /** Wear a random owned item in every slot. */
+  const randomize = async () => {
+    const p = account.profile;
+    const pick: Partial<Cosmetics> = {};
+    for (const s of COSMETIC_SLOTS) {
+      const mine = ITEMS.filter((i) => i.slot === s && ownsItem(p.owned, i.id, p.level));
+      pick[s] = mine[Math.floor(Math.random() * mine.length)]?.id ?? p.cosmetics[s];
+    }
+    trying = null;
+    pending = null;
+    note.textContent = '';
+    try {
+      await account.equip(pick);
+      preview?.taunt(cosmeticKey(pick, 'taunt'));
+    } catch (err) {
+      note.textContent = (err as Error).message;
+    }
+  };
+
+  const slotHint = (s: CosmeticSlot): string => {
+    const face = cosmeticKey(wearing(), 'face');
+    if (s === 'eyes' && FACES_COVERING_EYES.has(face)) return `Your ${ITEM_BY_ID.get(`face.${face}`)?.name ?? face} face covers your eyes. Pick another face to see these.`;
+    if (s === 'accent') return 'Colors your arms, your base and the dark parts of your pattern. Team games switch it off so teams are easy to tell apart.';
+    if (s === 'trail') return "Shows behind you when you're launched, dashing or flying fast. Everyone sees it.";
+    if (s === 'taunt') return 'Tap one to see it. Taunt in a match with the taunt key.';
+    return '';
   };
 
   const draw = () => {
     const p = account.profile;
     coins.textContent = `🪙 ${p.coins}`;
+    // Everything in this tab has now been seen (the badges stay up until the locker closes).
+    if (!viewed.has(slot)) {
+      viewed.add(slot);
+      for (const i of ITEMS) if (i.slot === slot) seen.add(i.id);
+      saveSeen(seen);
+    }
+    preview?.showTrails(slot === 'trail');
     clear(tabs);
     for (const s of COSMETIC_SLOTS) {
+      const newCount = viewed.has(s) ? 0 : ITEMS.filter((i) => i.slot === s && fresh.has(i.id)).length;
       tabs.append(
-        el('button', {
-          class: `tab${s === slot ? ' on' : ''}`,
-          text: SLOT_INFO[s].plural,
-          on: {
-            click: () => {
-              slot = s;
-              pending = null;
-              note.textContent = '';
-              draw();
+        el(
+          'button',
+          {
+            class: `tab${s === slot ? ' on' : ''}`,
+            attrs: { title: SLOT_INFO[s].plural },
+            on: {
+              click: () => {
+                slot = s;
+                pending = null;
+                trying = null;
+                note.textContent = '';
+                draw();
+              },
             },
           },
-        }),
+          el('span', { class: 'tab-icon', text: SLOT_ICONS[s] }),
+          el('span', { class: 'tab-label', text: SLOT_INFO[s].plural }),
+          newCount > 0 ? el('span', { class: 'new-dot', text: String(newCount) }) : null,
+        ),
       );
     }
+    slotNote.textContent = slotHint(slot);
     clear(grid);
     for (const item of ITEMS.filter((i) => i.slot === slot)) {
-      const owned = ownsItem(p.owned, item.id);
+      const owned = ownsItem(p.owned, item.id, p.level);
+      const levelLocked = !!item.levelReq && !owned;
       const equipped = p.cosmetics[item.slot] === item.id;
       let status: HTMLElement;
       if (equipped) status = el('div', { class: 'status on', text: 'WEARING' });
-      else if (owned) status = el('div', { class: 'status', text: item.price === 0 ? 'Free' : 'Owned' });
+      else if (levelLocked) status = el('div', { class: 'status level', text: `Reach level ${item.levelReq}` });
+      else if (owned) status = el('div', { class: 'status', text: item.levelReq ? `Level ${item.levelReq} reward` : item.price === 0 ? 'Free' : 'Owned' });
       else if (pending === item.id) status = el('div', { class: 'status buy', text: `Tap again to buy · 🪙 ${item.price}` });
       else status = el('div', { class: `status price${p.coins < item.price ? ' short' : ''}`, text: `🪙 ${item.price}` });
       const card = el(
         'button',
         {
-          class: `item${equipped ? ' equipped' : ''}${owned ? '' : ' locked'}`,
+          class: `item${equipped ? ' equipped' : ''}${owned ? '' : ' locked'}${levelLocked ? ' level-locked' : ''}${trying?.id === item.id ? ' trying' : ''}`,
           attrs: { title: item.blurb ?? item.name },
           on: {
             click: async () => {
@@ -156,16 +351,26 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
               note.textContent = '';
               try {
                 if (owned) {
+                  trying = null;
+                  pending = null;
                   if (!equipped) await account.equip({ [item.slot]: item.id });
+                } else if (levelLocked) {
+                  trying = item;
+                  pending = null;
+                  note.textContent = `${item.name} is a level ${item.levelReq} reward (you're level ${p.level}). It can't be bought: keep playing to earn it.`;
                 } else if (!p.isAccount) {
+                  trying = item;
                   note.textContent = 'Make a free account to buy things. Your coins and progress come with you.';
                   note.append(el('button', { class: 'btn small blue', style: 'margin-left:10px', text: 'Sign up', on: { click: opts.onSignup } }));
                 } else if (p.coins < item.price) {
+                  trying = item;
                   note.textContent = `You need ${item.price - p.coins} more coins. Coins come from playing matches.`;
                 } else if (pending !== item.id) {
+                  trying = item;
                   pending = item.id;
                 } else {
                   pending = null;
+                  trying = null;
                   await account.buy(item.id);
                   audio.koSound('trumpet', null);
                   note.textContent = `${item.name} is yours!`;
@@ -178,6 +383,8 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
           },
         },
         swatch(item),
+        levelLocked ? el('div', { class: 'lock', text: '🔒' }) : null,
+        fresh.has(item.id) ? el('div', { class: 'new-badge', text: 'NEW' }) : null,
         el('div', { class: 'name', text: item.name }),
         status,
       );
@@ -194,7 +401,7 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
     'div',
     { class: 'locker-left' },
     preview ? preview.canvas : el('div', { class: 'preview-canvas no-3d', text: '🎈' }),
-    coins,
+    el('div', { class: 'locker-coins-row' }, coins, el('button', { class: 'btn small ghost randomize', text: '🎲 Randomize', attrs: { title: 'Wear a random mix of things you own' }, on: { click: randomize } })),
     el('div', { class: 'small-note', text: 'Everything here is just for looks. Nothing changes how you play.' }),
   );
   const root = el(
@@ -204,8 +411,8 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
       'div',
       { class: 'panel locker' },
       el('h2', { text: 'Locker' }),
-      el('div', { class: 'locker-body' }, left, el('div', { class: 'locker-right' }, tabs, grid, note)),
-      el('div', { style: 'text-align:center;margin-top:14px' }, el('button', { class: 'btn', text: 'DONE', on: { click: opts.onClose } })),
+      el('div', { class: 'locker-body' }, left, el('div', { class: 'locker-right' }, tabs, grid, slotNote, note)),
+      el('div', { class: 'locker-done' }, el('button', { class: 'btn', text: 'DONE', on: { click: opts.onClose } })),
     ),
   );
   return {

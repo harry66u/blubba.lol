@@ -450,7 +450,8 @@ export class GameSim {
     const cos = { ...DEFAULT_COSMETICS };
     for (const slot of COSMETIC_SLOTS) {
       if (slot === 'color' || Math.random() < 0.4) continue;
-      const options = ITEMS.filter((i) => i.slot === slot);
+      // Level rewards stay special: bots don't wear them.
+      const options = ITEMS.filter((i) => i.slot === slot && !i.levelReq);
       cos[slot] = pick(options).id;
     }
     const p = this.addPlayer(name, { isBot: true, loadout, cos });

@@ -8,7 +8,7 @@ import type { ShrinkStage } from './game/shrink';
 import type { Tornado } from './game/loot';
 import type { Cosmetics, ProgressReport, ReportReason } from './economy';
 
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 // --- Binary message ids -------------------------------------------------------------------
 export const MSG_INPUTS = 1;
