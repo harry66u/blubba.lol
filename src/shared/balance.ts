@@ -405,8 +405,8 @@ export const BALANCE = {
       spawnProtection: 3,
       /** Pause after the last pop before the results, so everyone sees the winner. */
       winnerDelay: 2.5,
-      /** Rounds are short, so the results screen is too. */
-      resultsSec: 15,
+      /** Rounds are short, so the results screen (replay included) is too. */
+      resultsSec: 18,
       /**
        * The map keeps shrinking to force a finish. `at` is seconds into the match; `sink` lists the
        * collapse orders that start sinking; `deck` is how much of the main deck's half-size has

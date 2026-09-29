@@ -229,6 +229,8 @@ export class MapView {
   private readonly warnLineMat = new THREE.MeshBasicMaterial({ color: 0xff2440, transparent: true, opacity: 0.9, depthWrite: false });
   private readonly warnPlane = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
   private readonly warnBar = new THREE.BoxGeometry(1, 1, 1);
+  /** Materials of pieces that sink, with their own emissive to restore after a warning glow. */
+  private readonly tints = new Map<number, { m: THREE.MeshStandardMaterial; color: THREE.Color; k: number }[]>();
 
   constructor(
     readonly map: MapDef,
@@ -384,7 +386,7 @@ export class MapView {
         this.movers.push({ solidId: id, mesh: holder, def });
         this.solidMeshes.set(id, holder);
       } else if (def.collapse !== undefined) {
-        // Pivot at the piece's center so it can sink and crumble (scale) in the final 30 seconds.
+        // Pivot at the piece's center so it can sink and crumble (scale) when the map shrinks.
         const pivot = new THREE.Group();
         pivot.position.set(cx, 0, cz);
         for (const child of [...group.children]) {
@@ -394,6 +396,19 @@ export class MapView {
         }
         this.root.add(pivot);
         this.solidMeshes.set(id, pivot);
+        // Pieces that sink glow red while they warn, so they get their own copy of shared materials.
+        if ((def.collapse ?? 0) > 0) {
+          const tints: { m: THREE.MeshStandardMaterial; color: THREE.Color; k: number }[] = [];
+          pivot.traverse((o) => {
+            const mesh = o as THREE.Mesh;
+            const mat = mesh.material as THREE.MeshStandardMaterial | undefined;
+            if (!mesh.isMesh || !mat || !(mat as { emissive?: unknown }).emissive) return;
+            const own = this.deckTops.includes(mat) ? mat : mat.clone();
+            mesh.material = own;
+            tints.push({ m: own, color: own.emissive.clone(), k: own.emissiveIntensity });
+          });
+          this.tints.set(id, tints);
+        }
       } else {
         // Merge static meshes by material to save draw calls.
         group.updateMatrixWorld(true);
@@ -902,6 +917,16 @@ export class MapView {
    */
   setWarning(key: number, w: WarnArea | null, flash = 1): void {
     let v = this.warnViews.get(key);
+    for (const t of this.tints.get(key) ?? []) {
+      // The whole piece pulses red (restored once the warning is over).
+      if (w) {
+        t.m.emissive.setHex(0xff2440);
+        t.m.emissiveIntensity = 0.12 + 0.55 * flash;
+      } else if (t.m.emissiveIntensity !== t.k || !t.m.emissive.equals(t.color)) {
+        t.m.emissive.copy(t.color);
+        t.m.emissiveIntensity = t.k;
+      }
+    }
     if (!w) {
       if (v) v.group.visible = false;
       return;
@@ -919,8 +944,8 @@ export class MapView {
       this.warnViews.set(key, v);
     }
     v.group.visible = true;
-    this.warnFillMat.opacity = 0.12 + 0.3 * flash;
-    this.warnLineMat.opacity = 0.35 + 0.65 * flash;
+    this.warnFillMat.opacity = 0.2 + 0.4 * flash;
+    this.warnLineMat.opacity = 0.45 + 0.55 * flash;
     const y = w.y + 0.04;
     // The red area is a ring: two full-width strips (north and south) and two between them.
     const strips: [number, number, number, number][] = [
@@ -936,7 +961,7 @@ export class MapView {
       m.scale.set(Math.max(0.01, x1 - x0), 1, Math.max(0.01, z1 - z0));
     });
     const [x0, x1, z0, z1] = w.innerLine ? [w.inMinX, w.inMaxX, w.inMinZ, w.inMaxZ] : [w.minX, w.maxX, w.minZ, w.maxZ];
-    const t = 0.35;
+    const t = 0.5;
     const bars: [number, number, number, number][] = [
       [(x0 + x1) / 2, z0, x1 - x0 + t, t],
       [(x0 + x1) / 2, z1, x1 - x0 + t, t],
@@ -945,8 +970,8 @@ export class MapView {
     ];
     bars.forEach(([cx, cz, sx, sz], i) => {
       const m = v.lines[i];
-      m.position.set(cx, y + 0.06, cz);
-      m.scale.set(Math.max(0.01, sx), 0.14, Math.max(0.01, sz));
+      m.position.set(cx, y + 0.1, cz);
+      m.scale.set(Math.max(0.01, sx), 0.22, Math.max(0.01, sz));
     });
   }
 

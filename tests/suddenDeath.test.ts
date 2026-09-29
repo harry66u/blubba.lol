@@ -45,7 +45,7 @@ describe('sudden death', () => {
     expect(sim.durationSec).toBe(SD.durationSec);
     expect(sim.eventMult > 0 && sim.chaosNext === null).toBe(true);
     const ev = pop(sim, ds, ps[0], ps[1]);
-    expect(survivorEvents(ev).map((e) => e.left)).toEqual([[ps[1].id, ps[2].id]]);
+    expect(survivorEvents(ev).map((e) => [e.left, e.winner])).toEqual([[[ps[1].id, ps[2].id], -1]]);
     // Well past the normal respawn delay: still out.
     run(sim, ds, Math.ceil((BALANCE.match.respawnDelay + 3) * 60));
     expect(ps[0].state.mode).toBe(MODE_DEAD);
@@ -68,6 +68,7 @@ describe('sudden death', () => {
     const ev = pop(sim, ds, d, a);
     const last = survivorEvents(ev).pop()!;
     expect(last.left).toEqual([a.id]);
+    expect(last.winner).toBe(a.id);
     // A short victory beat, then the results.
     expect(sim.phase).toBe('playing');
     run(sim, ds, Math.ceil(SD.winnerDelay * 60) + 2);

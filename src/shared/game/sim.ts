@@ -2362,7 +2362,7 @@ export class GameSim {
   /** True while a shrink is being announced or has just started (random events wait for it). */
   private shrinkBusy(lead: number): boolean {
     for (const st of this.world.plan) {
-      if (st.announce && this.time >= st.at - st.warn - lead && this.time < st.at + 3) return true;
+      if (st.announce && this.time >= st.at - st.warn - lead && this.time < st.at + 8) return true;
     }
     return false;
   }

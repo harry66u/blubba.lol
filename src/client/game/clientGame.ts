@@ -433,6 +433,9 @@ export class ClientGame {
           this.chaos = [];
           this.crownId = -1;
           this.nemesisId = -1;
+        }
+        // A new match (public rooms swap in a fresh one per map, so the number can repeat).
+        if (msg.phase === 'playing' && this.match.phase !== 'playing') {
           this.spectateId = -1;
           this.sdWinnerShown = false;
         }
