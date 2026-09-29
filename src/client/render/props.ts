@@ -47,8 +47,7 @@ export class PropKit {
       const opacity = o.opacity ?? 1;
       m = new THREE.MeshStandardMaterial({
         color,
-        // A floor on roughness: mirror-shiny props caught the sun as glare.
-        roughness: Math.max(0.38, rough),
+        roughness: rough,
         metalness: o.metal ?? 0,
         emissive: o.emissive ?? 0x000000,
         emissiveIntensity: o.glow ?? 1,

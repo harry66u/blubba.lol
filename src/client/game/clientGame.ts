@@ -850,8 +850,10 @@ export class ClientGame {
     const c = ULT_CHARACTER[kind];
     if (!c) return;
     this.transforms.set(id, { body: c.body, until: this.time + c.seconds, at: this.time });
-    this.effects.airPuff(x, y + 1.2, z, 12, 7, 0.3);
-    this.effects.confettiBurst(x, y + 1.5, z, 24);
+    // Smaller around yourself, so the poof doesn't fill your own screen.
+    if (id === this.youId) this.effects.airPuff(x, y + 1.2, z, 8, 3.5, 0.22);
+    else this.effects.airPuff(x, y + 1.2, z, 12, 7, 0.3);
+    this.effects.confettiBurst(x, y + 1.5, z, id === this.youId ? 14 : 24);
     if (id !== this.youId) this.hud.popup(tmpV.set(x, y + 3.4, z), `${c.name}!`, c.color, 1.4, 1.3, false);
   }
 

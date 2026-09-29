@@ -6055,78 +6055,98 @@ body.touch .inflation .self-gain {
   animation: pulse 0.35s ease-in-out infinite alternate;
 }
 
-/* Your ult: its name fills the screen for a moment. */
+/* Your ult: a banner near the top for a moment (face, name, what it does), leaving the view
+   around you clear. */
 .ult-splash {
   --ult: #ffd60a;
   position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
+  top: 15%;
+  left: 0;
+  right: 0;
+  width: max-content;
+  max-width: 92vw;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: auto auto;
+  column-gap: 14px;
   align-items: center;
-  justify-content: center;
-  overflow: hidden;
   opacity: 0;
+  pointer-events: none;
 }
 .ult-splash.go {
-  animation: ult-splash 1.6s ease-out forwards;
+  animation: ult-splash 1.3s ease-out forwards;
 }
+/* A small burst behind the face. */
 .ult-splash .rays {
   position: absolute;
-  inset: -60%;
-  background: repeating-conic-gradient(from 0deg, color-mix(in srgb, var(--ult) 45%, transparent) 0deg 7deg, transparent 7deg 18deg);
-  -webkit-mask-image: radial-gradient(circle, #000 0 18%, transparent 55%);
-  mask-image: radial-gradient(circle, #000 0 18%, transparent 55%);
-  animation: ult-rays 1.6s linear forwards;
+  left: -52px;
+  top: 50%;
+  width: 190px;
+  height: 190px;
+  margin-top: -95px;
+  background: repeating-conic-gradient(from 0deg, color-mix(in srgb, var(--ult) 55%, transparent) 0deg 8deg, transparent 8deg 20deg);
+  -webkit-mask-image: radial-gradient(circle, #000 0 25%, transparent 68%);
+  mask-image: radial-gradient(circle, #000 0 25%, transparent 68%);
+  animation: ult-rays 1.3s linear forwards;
+}
+.ult-splash .ico,
+.ult-splash .who {
+  grid-row: 1 / span 3;
+}
+.ult-splash .nm,
+.ult-splash .tag,
+.ult-splash .by {
+  grid-column: 2;
+  text-align: left;
 }
 .ult-splash .ico {
   position: relative;
-  font-size: 84px;
+  font-size: 48px;
   line-height: 1;
-  filter: drop-shadow(0 6px 0 var(--ink));
+  filter: drop-shadow(0 4px 0 var(--ink));
 }
 .ult-splash .who {
   position: relative;
-  width: 150px;
-  height: 150px;
-  margin-bottom: 6px;
+  width: 78px;
+  height: 78px;
 }
 .ult-splash .who img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   border-radius: 50%;
-  border: 6px solid var(--ult);
-  box-shadow: 0 0 0 5px var(--ink), 0 8px 0 5px var(--ink), 0 0 50px var(--ult);
+  border: 4px solid var(--ult);
+  box-shadow: 0 0 0 3px var(--ink), 0 5px 0 3px var(--ink), 0 0 26px var(--ult);
 }
 .ult-splash .who .ico-badge {
   position: absolute;
-  right: -10px;
-  bottom: -6px;
-  font-size: 48px;
+  right: -8px;
+  bottom: -4px;
+  font-size: 26px;
   line-height: 1;
-  filter: drop-shadow(0 4px 0 var(--ink));
+  filter: drop-shadow(0 3px 0 var(--ink));
 }
 .ult-splash .nm {
   position: relative;
-  font-size: 92px;
+  font-size: 46px;
   line-height: 1;
   color: var(--ult);
-  -webkit-text-stroke: 9px var(--ink);
+  -webkit-text-stroke: 6px var(--ink);
   paint-order: stroke fill;
-  text-shadow: 0 8px 0 var(--ink), 0 0 40px var(--ult);
+  text-shadow: 0 4px 0 var(--ink), 0 0 20px var(--ult);
   white-space: nowrap;
 }
 .ult-splash .tag {
   position: relative;
-  margin-top: 8px;
-  font-size: 26px;
+  margin-top: 4px;
+  font-size: 16px;
   color: white;
-  text-shadow: 0 3px 0 var(--ink);
+  text-shadow: 0 2px 0 var(--ink);
 }
 .ult-splash .by {
   position: relative;
-  margin-top: 4px;
-  font-size: 15px;
+  margin-top: 2px;
+  font-size: 11px;
   letter-spacing: 2px;
   text-transform: uppercase;
   color: var(--ult);
@@ -6150,7 +6170,7 @@ body.touch .inflation .self-gain {
   }
   100% {
     opacity: 0;
-    transform: scale(1.5);
+    transform: scale(1.1);
   }
 }
 @keyframes ult-rays {
@@ -6244,15 +6264,22 @@ body.touch .ult-status {
   top: 124px;
   font-size: 12px;
 }
+body.touch .ult-splash {
+  top: 12%;
+}
 body.touch .ult-splash .nm {
-  font-size: 54px;
-  -webkit-text-stroke: 6px var(--ink);
+  font-size: 32px;
+  -webkit-text-stroke: 5px var(--ink);
 }
 body.touch .ult-splash .ico {
-  font-size: 50px;
+  font-size: 34px;
+}
+body.touch .ult-splash .who {
+  width: 56px;
+  height: 56px;
 }
 body.touch .ult-splash .tag {
-  font-size: 17px;
+  font-size: 13px;
 }
 
 /* Face scan: "Are you the real BOR?" */

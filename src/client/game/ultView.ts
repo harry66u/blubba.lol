@@ -297,12 +297,12 @@ export class UltView {
     }
   }
 
-  /** Your own ult: the full-screen splash, sound and kick. */
+  /** Your own ult: the banner, a light tint, sound and kick. */
   private selfPop(kind: UltId): void {
     const g = this.g;
     const info = ULT_INFO[kind];
     g.hud.ult.splash(info.name, info.icon, info.color, info.tagline, info.by, g.charFace(kind));
-    g.hud.flash(`${info.color}88`, 500);
+    g.hud.flash(`${info.color}30`, 300);
     g.audio.ultGo(kind, null);
     g.shake(0.3, 6);
     if (kind === 'robot') this.robotScanUntil = this.time + BALANCE.ults.robot.scanTime;

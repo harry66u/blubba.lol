@@ -2,12 +2,41 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { MapTheme } from '../../shared/maps/types';
 
 export type Quality = 'low' | 'medium' | 'high';
+
+/** A light color grade: a little extra saturation and a soft vignette, for a punchier picture. */
+const GRADE_SHADER = {
+  uniforms: {
+    tDiffuse: { value: null as THREE.Texture | null },
+    saturation: { value: 1.12 },
+    vignette: { value: 0.32 },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }`,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float saturation;
+    uniform float vignette;
+    varying vec2 vUv;
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      float l = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+      c.rgb = max(mix(vec3(l), c.rgb, saturation), 0.0);
+      vec2 d = vUv - 0.5;
+      c.rgb *= 1.0 - vignette * smoothstep(0.12, 0.5, dot(d, d));
+      gl_FragColor = c;
+    }`,
+};
 
 interface QualityProfile {
   maxPixelRatio: number;
@@ -65,7 +94,7 @@ export class Renderer {
       stencil: false,
     });
     this.renderer.toneMapping = THREE.NeutralToneMapping;
-    this.renderer.toneMappingExposure = 0.86;
+    this.renderer.toneMappingExposure = 0.95;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
     this.camera = new THREE.PerspectiveCamera(this.baseFov, 1, 0.1, 900);
@@ -73,12 +102,12 @@ export class Renderer {
 
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    this.scene.environmentIntensity = 0.28;
+    this.scene.environmentIntensity = 0.4;
     pmrem.dispose();
 
     this.hemi = new THREE.HemisphereLight(0xcfe8ff, 0x8a7fa5, 1.0);
     this.scene.add(this.hemi);
-    this.sun = new THREE.DirectionalLight(0xfff1d6, 1.75);
+    this.sun = new THREE.DirectionalLight(0xfff1d6, 2.1);
     this.sun.position.set(30, 60, 25);
     this.sun.target.position.set(0, 0, 0);
     const sc = this.sun.shadow.camera;
@@ -149,11 +178,11 @@ export class Renderer {
         this.composer.addPass(this.ao);
       }
       if (p.bloom) {
-        // Just a hint, and only on the very brightest things (signs, ult glows): no glare off
-        // clouds, white walls and shiny props.
-        this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.14, 0.35, 0.95);
+        // Low enough that bright, saturated colors (players, balloons) glow a little.
+        this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.4, 0.55, 0.8);
         this.composer.addPass(this.bloom);
       }
+      this.composer.addPass(new ShaderPass(GRADE_SHADER));
       this.composer.addPass(new OutputPass());
     }
   }

@@ -237,11 +237,81 @@ function tube(g: CanvasRenderingContext2D, x: number, top: number, bottom: numbe
   roundRect(g, x - w / 2, top, w, bottom - top + 30, w / 2);
 }
 
+/** The regulars' real photos (the same ones their ults use), loaded once for every map's billboards. */
+const PHOTO_ADS = ['bor', 'abag', 'sol', 'kesty'] as const;
+const posterPhotos = new Map<Ad, HTMLImageElement>();
+const photoWaiters = new Set<() => void>();
+let photosRequested = false;
+
+function loadPosterPhotos(onLoad: () => void): void {
+  photoWaiters.add(onLoad);
+  if (photosRequested || typeof Image === 'undefined') return;
+  photosRequested = true;
+  for (const ad of PHOTO_ADS) {
+    const img = new Image();
+    img.decoding = 'async';
+    img.onload = () => {
+      posterPhotos.set(ad, img);
+      for (const fn of photoWaiters) fn();
+    };
+    img.src = `/characters/${ad}.webp`;
+  }
+}
+
+/** The regular's face in a framed oval on the left of their billboard, with a colored ring. */
+function portrait(g: CanvasRenderingContext2D, img: HTMLImageElement, ring: string, cx = 122, cy = 96): void {
+  const rx = 78;
+  const ry = 84;
+  g.save();
+  g.beginPath();
+  g.ellipse(cx, cy, rx + 10, ry + 10, 0, 0, TAU);
+  g.fillStyle = INK_CSS;
+  g.fill();
+  g.beginPath();
+  g.ellipse(cx, cy, rx + 6, ry + 6, 0, 0, TAU);
+  g.fillStyle = ring;
+  g.fill();
+  g.beginPath();
+  g.ellipse(cx, cy, rx, ry, 0, 0, TAU);
+  g.fillStyle = '#f4ece6';
+  g.fill();
+  g.clip();
+  // The photos are a feathered oval of the face; crop in a little so it fills the frame.
+  const w = rx * 2 * 1.22;
+  const h = ry * 2 * 1.22;
+  g.drawImage(img, cx - w / 2, cy - h / 2, w, h);
+  g.restore();
+}
+
 function paintAd(g: CanvasRenderingContext2D, ad: Ad): void {
   const W = CELL_W;
   const H = CELL_H;
   const textX = 350;
   const textW = 300;
+  const photo = posterPhotos.get(ad);
+  if (photo) {
+    // A real photo of the regular instead of the cartoon, on the same background and slogan.
+    const look: Record<string, { bg: string | [string, string]; ring: string; lines: [string, number, number, string, { stroke?: string; font?: string }][] }> = {
+      bor: { bg: ['#2d2960', '#16142e'], ring: '#ff8a1f', lines: [["BOR'S GYM", 76, 68, '#ffd60a', { stroke: INK_CSS }], ['GET PUMPED.', 140, 40, '#ff3b8a', { stroke: INK_CSS }]] },
+      abag: { bg: '#ffd60a', ring: '#ff5fd2', lines: [["ABAG'S", 58, 58, INK_CSS, {}], ['CHASE CLUB', 112, 50, '#ff3b8a', { stroke: INK_CSS }], ['RUN.', 160, 30, INK_CSS, {}]] },
+      sol: { bg: '#121216', ring: '#8ee000', lines: [['SOL x AMIRI', 80, 58, '#f4f1ea', { font: 'Georgia, "Times New Roman", serif' }], ['SMELL THE WIN', 140, 36, '#9dff6f', {}]] },
+      kesty: { bg: ['#5b6a8a', '#2f3650'], ring: '#ff3b5c', lines: [['KESTY', 66, 72, '#2ec5ff', { stroke: INK_CSS }], ['ROBOTICS', 122, 46, '#ffffff', { stroke: INK_CSS }], ['BEEP BOOP. YOU POPPED.', 164, 20, '#e8fbff', {}]] },
+    };
+    const L = look[ad];
+    if (L) {
+      let fill: string | CanvasGradient;
+      if (typeof L.bg === 'string') fill = L.bg;
+      else {
+        fill = g.createLinearGradient(0, 0, 0, H);
+        fill.addColorStop(0, L.bg[0]);
+        fill.addColorStop(1, L.bg[1]);
+      }
+      cellFrame(g, fill);
+      portrait(g, photo, L.ring);
+      for (const [text, y, size, color, o] of L.lines) label(g, text, textX, y, size, text.length > 14 ? textW : textW - 20, color, o);
+      return;
+    }
+  }
   if (ad === 'bor') {
     // BOR'S GYM: jacked BOR in his checkered shirt, flexing, with his syringe full of AIR.
     const bg = g.createLinearGradient(0, 0, 0, H);
@@ -578,6 +648,15 @@ export class Branding {
       this.atlas.needsUpdate = true;
       this.signTex.needsUpdate = true;
     });
+    // Repaint the billboards as each regular's photo arrives.
+    const repaint = () => {
+      if (this.disposed) return;
+      paintAtlas(ac);
+      this.atlas.needsUpdate = true;
+    };
+    loadPosterPhotos(repaint);
+    this.trash.push({ dispose: () => photoWaiters.delete(repaint) });
+    if (posterPhotos.size) repaint();
     // Lit like the rest of the scene, plus a glow of their own so they read on the shady side.
     const faceMat = new THREE.MeshStandardMaterial({ map: this.atlas, emissiveMap: this.atlas, emissive: WHITE, emissiveIntensity: 0.4, roughness: 0.6 });
     const propMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 });

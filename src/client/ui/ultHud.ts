@@ -25,7 +25,7 @@ const CIRC = 2 * Math.PI * R;
 
 /**
  * Ult HUD: the circular meter with your ult's icon (bottom center), its READY pulse, the status
- * line while it runs, and the full-screen splash when you pop it.
+ * line while it runs, and a banner when you pop it.
  */
 export class UltHud {
   readonly root: HTMLElement;
@@ -109,7 +109,7 @@ export class UltHud {
     this.meter.classList.add('pop');
   }
 
-  /** You popped your ult: its name fills the screen for a moment. */
+  /** You popped your ult: a banner near the top of the screen for a moment. */
   splash(name: string, icon: string, color: string, tagline: string, by: string, face: string | null = null): void {
     this.splashEl.textContent = '';
     this.splashEl.style.setProperty('--ult', color);
@@ -125,6 +125,6 @@ export class UltHud {
     this.splashEl.classList.remove('hidden', 'go');
     void this.splashEl.offsetWidth;
     this.splashEl.classList.add('go');
-    window.setTimeout(() => this.splashEl.classList.add('hidden'), 1700);
+    window.setTimeout(() => this.splashEl.classList.add('hidden'), 1400);
   }
 }

@@ -519,8 +519,8 @@ export class TubeMan {
     // Glossy vinyl: low roughness, strong environment reflections, a clear coat when the GPU can
     // afford it, and a rim light so the silhouette pops.
     const makeMat = (map: THREE.Texture | null): BodyMat => {
-      const matOpts = { color: colorHex, roughness: 0.3, metalness: 0.0, emissive: new THREE.Color(colorHex), emissiveIntensity: BASE_GLOW, envMapIntensity: 1.5, map };
-      const mat = opts.physical ? new THREE.MeshPhysicalMaterial({ ...matOpts, clearcoat: 0.45, clearcoatRoughness: 0.3 }) : new THREE.MeshStandardMaterial(matOpts);
+      const matOpts = { color: colorHex, roughness: 0.2, metalness: 0.0, emissive: new THREE.Color(colorHex), emissiveIntensity: BASE_GLOW, envMapIntensity: 2.2, map };
+      const mat = opts.physical ? new THREE.MeshPhysicalMaterial({ ...matOpts, clearcoat: 0.9, clearcoatRoughness: 0.08 }) : new THREE.MeshStandardMaterial(matOpts);
       addRim(mat);
       return mat;
     };
@@ -1125,6 +1125,14 @@ export class TubeMan {
         ang = 0.15;
         yaw = 1.2;
       }
+      // The right arm (side 1, on the -binormal side) hangs down to the gun at that hip, still
+      // flapping a little; any special pose above takes the arm back.
+      const posed = wave > 0 || dance > 0 || bow > 0 || deflate > 0 || p.hanging || p.holding || p.held || this.bend > 0.3 || flex > 0;
+      const grip = side === 1 && this.gun && !posed && !this.props?.hand ? 0.8 : 0;
+      if (grip > 0) {
+        ang = ang * (1 - grip) - 0.75 * grip;
+        yaw = yaw * (1 - grip) + 0.5 * grip;
+      }
       const seg = ARM_LEN / (ARM_RINGS - 1);
       for (let i = 0; i < ARM_RINGS; i++) {
         as[i * 3] = px;
@@ -1135,7 +1143,7 @@ export class TubeMan {
         // Juice: huge biceps (and forearms), cartoon style.
         const pump = 1 + this.bulk * (0.45 + 1.5 * Math.max(0, 1 - Math.abs(fi - 0.33) / 0.2) + 0.6 * Math.max(0, 1 - Math.abs(fi - 0.72) / 0.15));
         arm.radii[i] = (i === ARM_RINGS - 1 ? 0.02 : i === ARM_RINGS - 2 ? armR * 0.8 : armR * (1.15 - fi * 0.25)) * pump * (1 - 0.3 * deflate);
-        const wig = 1 - flex;
+        const wig = (1 - flex) * (1 - grip * 0.65);
         ang += noise1(ta * 3.4 + i * 0.45, this.seed + side * 23) * 0.42 * this.flail * wig + (i >= 4 && i <= 7 ? 0.42 * flex : 0);
         yaw += noise1(ta * 2.9 + i * 0.4, this.seed + side * 29) * 0.3 * this.flail * wig;
         if (p.doubled) ang -= 0.2;
@@ -1215,11 +1223,14 @@ export class TubeMan {
     this.bodyMat.metalness = p.bracing ? Math.max(0.6, this.shineP.metal) : this.shineP.metal;
     this.armMat.metalness = p.bracing ? Math.max(0.6, this.accentShineP.metal) : this.accentShineP.metal;
 
-    // Weapon held out in front of the chest, pointing where the player aims.
+    // Weapon held at the right side of the body (-binormal; the model faces +Z), a little forward,
+    // pointing where the player aims, so it shows from behind in third person.
     if (this.gun) {
-      const gi = Math.round(n * 0.4);
-      const gr = radii[gi] + 0.12;
-      this.gunMount.position.set(spine[gi * 3] + N[gi * 3] * gr, spine[gi * 3 + 1] + N[gi * 3 + 1] * gr, spine[gi * 3 + 2] + N[gi * 3 + 2] * gr);
+      const gi = Math.round(n * 0.42);
+      const side = radii[gi] + 0.2;
+      const fwd = radii[gi] * 0.35;
+      const o = gi * 3;
+      this.gunMount.position.set(spine[o] - B[o] * side + N[o] * fwd, spine[o + 1] - B[o + 1] * side + N[o + 1] * fwd, spine[o + 2] - B[o + 2] * side + N[o + 2] * fwd);
       this.gunMount.rotation.set(p.pitch - this.rig.rotation.x, Math.PI, 0);
       this.gun.root.visible = !p.held && !p.holding;
       this.gun.setCharge(p.charge, t, p.streaming);

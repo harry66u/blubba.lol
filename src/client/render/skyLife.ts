@@ -183,8 +183,16 @@ const MAX_BIRDS = 9;
 const PLANE_SCALE = 1.6;
 const PARTY_BOTTOM = -120;
 const PARTY_TOP = 75;
-/** Hot air balloons stay under this height, clear of the BLUBBA blimp's gondola. */
-const BALLOON_TOP = 36;
+/**
+ * Hot air balloons fly in three bands so they spread out in depth and height: close and low,
+ * middle distance and height, far and high (and bigger, so they still read). Each band's
+ * distance past the blast zone and height range, in meters.
+ */
+const BALLOON_BANDS = [
+  { r0: 28, r1: 55, y0: -34, y1: -4, s0: 11, s1: 15 },
+  { r0: 80, r1: 120, y0: 8, y1: 40, s0: 16, s1: 21 },
+  { r0: 165, r1: 225, y0: 48, y1: 96, s0: 22, s1: 30 },
+];
 
 /** How a blimp is painted: a title along each side, and a smaller line under it. */
 interface BlimpLook {
@@ -354,8 +362,8 @@ export class SkyLife {
     // three and a half minutes a lap); a character's ad blimp goes the other way, lower and
     // farther out.
     const paintOpts = { tint, horizon, warmth };
-    this.addBlimp(BLUBBA_BLIMP, 1.45, this.reach + 50, 54, 0.03, paintOpts);
-    const ad = this.addBlimp(AD_BLIMPS[seedOf(`${map.id}:ad`) % AD_BLIMPS.length], 1.3, this.reach + 100, 32, -0.02, paintOpts);
+    this.addBlimp(BLUBBA_BLIMP, 1.45, this.reach + 62, 76, 0.03, paintOpts);
+    const ad = this.addBlimp(AD_BLIMPS[seedOf(`${map.id}:ad`) % AD_BLIMPS.length], 1.3, this.reach + 145, 18, -0.02, paintOpts);
     this.rich.push(ad.group);
 
     // Birds: all flocks share one instanced mesh of two-triangle "V" birds; flapping is the
@@ -408,10 +416,10 @@ export class SkyLife {
     this.balls.frustumCulled = false;
     for (let i = 0; i < nBalls; i++) {
       this.ballState.push({
-        r: this.reach + 24 + this.rnd() * 10,
+        r: this.reach + 20 + this.rnd() * 45,
         a: ((i + this.rnd() * 0.6) / nBalls) * TAU,
         w: (this.rnd() < 0.5 ? -1 : 1) * (0.008 + this.rnd() * 0.008),
-        y: -30 - this.rnd() * 24,
+        y: -18 - this.rnd() * 50,
         size: 3.5 + this.rnd() * 2,
         phase: this.rnd() * TAU,
         rise: 0,
@@ -438,7 +446,7 @@ export class SkyLife {
     for (let i = 0; i < nParty; i++) {
       const a = this.rnd() * TAU;
       this.partyState.push({
-        r: edgeDistance(b, a, 4 + this.rnd() * 6),
+        r: edgeDistance(b, a, 6 + this.rnd() * 40),
         a,
         w: (this.rnd() - 0.5) * 0.4, // spin while rising
         y: PARTY_BOTTOM + ((i + this.rnd() * 0.5) / nParty) * (PARTY_TOP - PARTY_BOTTOM),
@@ -459,10 +467,9 @@ export class SkyLife {
       const pal = BALLOON_PALETTES[(i + Math.floor(this.rnd() * 3)) % BALLOON_PALETTES.length];
       const geo = balloonGeometry(i === 2 ? 3 : Math.floor(this.rnd() * 3), pal);
       const mesh = new THREE.Mesh(geo, this.mat);
-      // Bigger ones farther out so none of them crowd the view; all near enough to read from the
-      // arena, and low enough to pass under the BLUBBA blimp.
-      const far = this.rnd();
-      const size = 14 + far * 8 + this.rnd() * 3;
+      // Bands in turn around the ring: near and low, middle, far and high (bigger farther out).
+      const band = BALLOON_BANDS[i % BALLOON_BANDS.length];
+      const size = band.s0 + this.rnd() * (band.s1 - band.s0);
       mesh.scale.setScalar(size);
       this.root.add(mesh);
       this.trash.push(geo);
@@ -470,10 +477,10 @@ export class SkyLife {
       if (i % 2 === 1 || i === n - 1) this.rich.push(mesh);
       this.drifters.push({
         obj: mesh,
-        r: this.reach + 20 + far * 40,
+        r: this.reach + band.r0 + this.rnd() * (band.r1 - band.r0),
         a: ((i + (this.rnd() - 0.5) * 0.6) / n) * TAU,
         w: (this.rnd() < 0.5 ? -1 : 1) * (0.005 + this.rnd() * 0.007),
-        y: -6 + this.rnd() * Math.max(0, BALLOON_TOP - 2.5 - size + 6),
+        y: band.y0 + this.rnd() * (band.y1 - band.y0),
         bob: 1 + this.rnd() * 1.5,
         phase: this.rnd() * TAU,
         spin: (this.rnd() - 0.5) * 0.06,
