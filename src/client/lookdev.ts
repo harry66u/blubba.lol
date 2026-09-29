@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { PLAYER_COLORS } from '../shared/colors';
 import type { Renderer } from './render/renderer';
-import { Human, type HumanKey } from './render/human';
+import { Human, type HumanKey, characterPhoto } from './render/human';
 import { type Look, TubeMan, defaultPose } from './render/tubeMan';
 
 /**
@@ -11,7 +11,7 @@ import { type Look, TubeMan, defaultPose } from './render/tubeMan';
  */
 export function startLookdev(r: Renderer): (dt: number) => void {
   const mode = new URLSearchParams(location.search).get('lookdev');
-  if (mode === 'people' || mode === 'people-side') return people(r, mode === 'people-side');
+  if (mode === 'people' || mode === 'people-side' || mode === 'people-close') return people(r, mode === 'people-side', mode === 'people-close');
   const men: { man: TubeMan; pose: ReturnType<typeof defaultPose>; infl: number }[] = [];
   const looks: Partial<Look>[] = [{}, { hat: 'cap', face: 'grin' }, { pattern: 'stripes', hat: 'party' }, { face: 'shades', hat: 'tophat' }, { pattern: 'dots', hat: 'beanie' }];
   const colors = [0, 5, 3, 8, 1];
@@ -58,12 +58,13 @@ export function startLookdev(r: Renderer): (dt: number) => void {
 
 /**
  * ?lookdev=people: the four characters the ults turn you into, next to a tube man for scale
- * (people-side: turned sideways, SOL bent over and BOR flexing).
+ * (people-side: turned sideways, SOL bent over and BOR flexing; people-close: their faces).
  */
-function people(r: Renderer, side: boolean): (dt: number) => void {
+function people(r: Renderer, side: boolean, close = false): (dt: number) => void {
   const keys: HumanKey[] = ['bor', 'abag', 'sol', 'kesty'];
   const hs = keys.map((k, i) => {
     const h = new Human(k);
+    h.setFace(characterPhoto(k), true);
     h.setWeapon('airCannon');
     h.group.position.set(-5.4 + i * 3.6, 0, 3);
     r.scene.add(h.group);
@@ -74,8 +75,12 @@ function people(r: Renderer, side: boolean): (dt: number) => void {
   man.group.position.set(8.4, 0, 3);
   r.scene.add(man.group);
   const mp = defaultPose();
-  r.camera.position.set(1.3, 2.6, 12);
-  r.camera.lookAt(1.3, 2.2, 3);
+  // people-close: the heads up close.
+  // &focus=0..3 puts the close-up camera in front of one of them.
+  const focus = Number(new URLSearchParams(location.search).get('focus') ?? -1);
+  const fx = close && focus >= 0 ? -5.4 + focus * 3.6 : 1.3;
+  r.camera.position.set(fx, close ? 3.9 : 2.6, close ? (focus >= 0 ? 5.4 : 6.2) : 12);
+  r.camera.lookAt(fx, close ? 3.6 : 2.2, 3);
   let t = 0;
   return (dt: number) => {
     t += dt;

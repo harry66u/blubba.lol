@@ -77,7 +77,7 @@ import { MapView, type WarnArea } from '../render/mapView';
 import { BeachBall } from '../render/beachBall';
 import type { Renderer } from '../render/renderer';
 import { type Look, TubeMan, defaultPose, lookFromCosmetics, type TubeManPose } from '../render/tubeMan';
-import { Human, isHumanKey } from '../render/human';
+import { Human, characterPhoto, characterPhotoUrl, isHumanKey } from '../render/human';
 import { ViewModel } from '../render/viewModel';
 import { type Settings, saveSettings } from '../settings';
 import { esc, hexColor } from '../ui/dom';
@@ -387,7 +387,7 @@ export class ClientGame {
       charFace: (kind) => {
         const c = ULT_CHARACTER[kind];
         const f = c ? this.characterFaces[c.body] : undefined;
-        return f ? `/api/face/${f.account}?v=${f.v}` : null;
+        return f ? `/api/face/${f.account}?v=${f.v}` : c ? characterPhotoUrl(c.body) : null;
       },
       shake: (amount, fov) => {
         this.trauma = Math.min(1, this.trauma + amount);
@@ -2321,8 +2321,10 @@ export class ClientGame {
     }
     if (key && !current) {
       current = new Human(key);
+      // A face scan the real person lent (approved on /admin) wins; otherwise the photo they sent.
       const cf = this.charFaceOf(id);
       if (cf) current.setFace(faceTexture(cf.account, cf.v));
+      else current.setFace(characterPhoto(key), true);
       this.r.scene.add(current.group);
     }
     return current;

@@ -39,12 +39,12 @@ interface Spec {
 
 const SPECS: Record<HumanKey, Spec> = {
   // Short and very jacked.
-  bor: { scale: 1.85, legLen: 0.74, legR: 0.1, torsoH: 0.64, waistR: 0.17, chestR: 0.29, armR: 0.085, upper: 0.29, fore: 0.26, headR: 0.125, skin: 0xe8b894, hair: 0x3b2618 },
+  bor: { scale: 1.85, legLen: 0.74, legR: 0.1, torsoH: 0.64, waistR: 0.17, chestR: 0.29, armR: 0.085, upper: 0.29, fore: 0.26, headR: 0.15, skin: 0xd49b82, hair: 0x3b2618 },
   // Tall, lean runner.
-  abag: { scale: 2.05, legLen: 0.96, legR: 0.075, torsoH: 0.62, waistR: 0.14, chestR: 0.19, armR: 0.052, upper: 0.32, fore: 0.29, headR: 0.125, skin: 0xd9a37e, hair: 0x2a1c14 },
-  sol: { scale: 1.95, legLen: 0.9, legR: 0.08, torsoH: 0.62, waistR: 0.16, chestR: 0.21, armR: 0.058, upper: 0.31, fore: 0.28, headR: 0.13, skin: 0xefc3a0, hair: 0x5a3a22 },
+  abag: { scale: 2.05, legLen: 0.96, legR: 0.075, torsoH: 0.62, waistR: 0.14, chestR: 0.19, armR: 0.052, upper: 0.32, fore: 0.29, headR: 0.15, skin: 0xbc876c, hair: 0x2a1c14 },
+  sol: { scale: 1.95, legLen: 0.9, legR: 0.08, torsoH: 0.62, waistR: 0.16, chestR: 0.21, armR: 0.058, upper: 0.31, fore: 0.28, headR: 0.155, skin: 0xecba9d, hair: 0x5a3a22 },
   // A robot with a face.
-  kesty: { scale: 2.0, legLen: 0.92, legR: 0.085, torsoH: 0.64, waistR: 0.16, chestR: 0.23, armR: 0.065, upper: 0.31, fore: 0.28, headR: 0.13, skin: 0xe2b08c, hair: 0x4a2e1c },
+  kesty: { scale: 2.0, legLen: 0.92, legR: 0.085, torsoH: 0.64, waistR: 0.16, chestR: 0.23, armR: 0.065, upper: 0.31, fore: 0.28, headR: 0.155, skin: 0xc2886f, hair: 0x4a2e1c },
 };
 
 // --- Painted textures ------------------------------------------------------------------------
@@ -256,6 +256,47 @@ function metal(panel: boolean): THREE.CanvasTexture {
 
 type Mat = THREE.MeshStandardMaterial;
 
+const photoLoader = new THREE.TextureLoader();
+const photos = new Map<HumanKey, THREE.Texture>();
+
+/**
+ * Each regular's own photo (they sent it for their character), cropped to the face with a soft
+ * oval edge so it blends into the head. Shared by every copy of that character.
+ */
+export function characterPhoto(key: HumanKey): THREE.Texture {
+  let t = photos.get(key);
+  if (!t) {
+    t = photoLoader.load(`/characters/${key}.webp`);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 8;
+    photos.set(key, t);
+  }
+  return t;
+}
+
+/** URL of a character's photo (for the ult splash). */
+export function characterPhotoUrl(key: string): string | null {
+  return isHumanKey(key) ? `/characters/${key}.webp` : null;
+}
+
+/**
+ * The front of the head, just outside the skull, with the photo projected straight on: eyes a
+ * little above the middle, chin at the bottom of the head, the soft edge fading into the skin.
+ */
+function faceCap(r: number): THREE.BufferGeometry {
+  const R = r * 1.015;
+  const g = new THREE.SphereGeometry(R, 40, 30, Math.PI * 0.06, Math.PI * 0.88, Math.PI * 0.06, Math.PI * 0.88);
+  const pos = g.attributes.position;
+  const uv = g.attributes.uv;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i) / R;
+    const y = pos.getY(i) / R;
+    uv.setXY(i, 0.5 + x * 0.45, 0.62 + (y - 0.1) * 0.55);
+  }
+  uv.needsUpdate = true;
+  return g;
+}
+
 interface Limb {
   /** Shoulder or hip joint. */
   root: THREE.Group;
@@ -275,7 +316,9 @@ export class Human {
   private readonly torso = new THREE.Group();
   private readonly head = new THREE.Group();
   private readonly face = new THREE.Group();
+  /** A lent face scan (a disc with a rim), or the character's own photo (`photoCap`). */
   private photo: THREE.Group | null = null;
+  private photoCap: THREE.Mesh | null = null;
   private readonly arms: [Limb, Limb];
   private readonly legs: [Limb, Limb];
   private readonly gunMount = new THREE.Group();
@@ -480,9 +523,9 @@ export class Human {
       if (k === 'kesty') {
         const glow = this.mesh(new THREE.BoxGeometry(r * 0.36, r * 0.1, r * 0.06), new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 1.5 }));
         this.mats.push(glow.material as Mat);
-        glow.position.set(side * r * 0.36, r * 0.12, r * 1.0);
+        glow.position.set(side * r * 0.34, r * 0.14, r * 1.06);
         glow.visible = false;
-        this.face.add(glow);
+        this.head.add(glow);
         this.robotEyes.push(glow);
       }
     }
@@ -680,15 +723,30 @@ export class Human {
 
   // --- Runtime -------------------------------------------------------------------------------
 
-  /** Shows the real person's face (a face scan they lent), or null for the cartoon face. */
-  setFace(tex: THREE.Texture | null): void {
+  /**
+   * Shows the real person's face: their own photo wrapped onto the head (`photo`), or a face
+   * scan they lent (a disc). Null goes back to the cartoon face.
+   */
+  setFace(tex: THREE.Texture | null, photo = false): void {
     if (this.photo) {
       this.head.remove(this.photo);
       disposeFacePhoto(this.photo);
       this.photo = null;
     }
-    if (tex) {
-      const r = this.spec.headR;
+    if (this.photoCap) {
+      this.head.remove(this.photoCap);
+      (this.photoCap.material as THREE.Material).dispose();
+      this.photoCap = null;
+    }
+    const r = this.spec.headR;
+    if (tex && photo) {
+      const geo = faceCap(r);
+      this.geos.push(geo);
+      this.photoCap = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: 0.4, transparent: true, depthWrite: false, roughness: 0.8 }));
+      this.photoCap.scale.set(0.92, 1.12, 1);
+      this.photoCap.renderOrder = 1;
+      this.head.add(this.photoCap);
+    } else if (tex) {
       this.photo = buildFacePhoto(tex);
       this.photo.scale.setScalar(r * 0.92);
       this.photo.position.set(0, r * 0.02, r * (this.key === 'kesty' ? 1.08 : 0.98));
@@ -817,7 +875,7 @@ export class Human {
     // ABAG sniffs.
     if (this.nose) this.nose.scale.setScalar(1 + (chase ? Math.max(0, Math.sin(p.time * 9)) * 0.12 : 0));
     // KESTY: red eyes in Robot Mode, blinking antenna.
-    for (const e of this.robotEyes) e.visible = p.robot && !this.photo;
+    for (const e of this.robotEyes) e.visible = p.robot;
     for (const e of this.eyes) e.visible = !(robot && p.robot);
     if (this.antennaTip) this.antennaTip.visible = Math.floor(p.time * 3) % 2 === 0;
     // Idle breathing and a head bob.
@@ -827,6 +885,7 @@ export class Human {
   dispose(): void {
     if (this.gun) this.gun.dispose();
     if (this.photo) disposeFacePhoto(this.photo);
+    if (this.photoCap) (this.photoCap.material as THREE.Material).dispose();
     for (const g of this.geos) g.dispose();
     for (const m of this.mats) m.dispose();
     for (const x of this.texs) x.dispose();
