@@ -71,6 +71,7 @@ import type { Audio } from '../audio/audio';
 import { type Action, type InputManager, codeLabel } from '../input/input';
 import type { Connection } from '../net/connection';
 import { Effects, LandingCircles, type Projectile3D, type ShotStyle, TRAIL_FLY_SPEED, type TrailState, newTrailState, shotStyleFor } from '../render/effects';
+import { FART_INTERVAL } from '../render/characters';
 import { faceTexture } from '../render/facePhoto';
 import { MapView, type WarnArea } from '../render/mapView';
 import { BeachBall } from '../render/beachBall';
@@ -131,6 +132,14 @@ const TAUNT_TEXT: Record<string, string> = {
   backflip: 'HUP!',
 };
 /** Visual versions of every sound pack (the game is fully playable muted). */
+/** Characters taunt their own way (a taunt animation and a line), whatever taunt is equipped. */
+const CHARACTER_TAUNTS: Record<string, { style: string; text: string; color: string }> = {
+  bor: { style: 'flex', text: 'GAINS! 💉', color: '#ffd60a' },
+  abag: { style: 'wave', text: 'SNIFF SNIFF... FOUND YOU', color: '#ffb38a' },
+  sol: { style: 'bow', text: 'PFFFFRRRRT!', color: '#8ee000' },
+  kesty: { style: 'dance', text: 'BEEP BOOP', color: '#7fe0ff' },
+};
+
 const PACK_TEXT: Record<string, string> = { boing: 'BOING!', kazoo: 'BZZ-BZZ!', duck: 'QUACK!', slide: 'WHOOEEE!', trumpet: 'TA-DAA!' };
 
 interface RemoteShot {
@@ -1320,11 +1329,28 @@ export class ClientGame {
       case 'taunt': {
         const p = this.posOf(e.id);
         const cos = this.roster.get(e.id)?.cos;
-        const style = cosmeticKey(cos, 'taunt');
+        const body = cosmeticKey(cos, 'body');
+        const sig = CHARACTER_TAUNTS[body];
+        const style = sig?.style ?? cosmeticKey(cos, 'taunt');
         const pack = cosmeticKey(cos, 'sound');
         this.remotes.get(e.id)?.man.taunt(style);
         if (e.id === this.youId) this.selfMan?.taunt(style);
-        if (p) {
+        if (p && sig) {
+          // The characters' signature taunts.
+          const at: [number, number, number] | null = e.id === you ? null : [p.x, p.y, p.z];
+          this.hud.popup(tmpV.set(p.x, p.y + 3, p.z), sig.text, sig.color, 1.2, 1.4, e.id !== you);
+          if (body === 'sol') {
+            // Bent over, a massive fart and a green shockwave along the floor.
+            fx.fartCloud(p.x, p.y, p.z, 0, 0, true);
+            fx.shockwave(p.x, p.y + 0.05, p.z, 4.5, 0.5, 0x8ee000, true);
+            a.fart(at);
+          } else if (body === 'kesty') {
+            for (let i = 0; i < 10; i++) fx.sparkle(p.x + (Math.random() - 0.5) * 1.4, p.y + Math.random() * 1.6, p.z + (Math.random() - 0.5) * 1.4);
+            a.pop(at);
+          } else {
+            a.pop(at);
+          }
+        } else if (p) {
           const at: [number, number, number] | null = e.id === you ? null : [p.x, p.y, p.z];
           // Burp is the classic taunt sound; other packs replace it.
           if (style === 'burp' || pack !== 'classic') a.tauntSound(pack, at);
@@ -2078,6 +2104,29 @@ export class ClientGame {
     }
   }
 
+  /** When each SOL lets the next one go. */
+  private readonly nextFart = new Map<number, number>();
+
+  /**
+   * Little things characters do on their own: SOL farts constantly (a small green puff out the
+   * back every couple of seconds). Skipped far from the camera.
+   */
+  private characterIdle(id: number, x: number, y: number, z: number, yaw: number): void {
+    if (cosmeticKey(this.roster.get(id)?.cos, 'body') !== 'sol') return;
+    const next = this.nextFart.get(id);
+    const [lo, hi] = FART_INTERVAL;
+    if (next === undefined) {
+      this.nextFart.set(id, this.time + lo + Math.random() * (hi - lo));
+      return;
+    }
+    if (this.time < next) return;
+    this.nextFart.set(id, this.time + lo + Math.random() * (hi - lo));
+    if (this.r.camera.position.distanceToSquared(tmpV3.set(x, y, z)) > 45 * 45) return;
+    // Out the back, away from where he's facing.
+    this.effects.fartCloud(x, y, z, -Math.sin(yaw), -Math.cos(yaw), false);
+    if (Math.random() < 0.3) this.hud.popup(tmpV3.set(x, y + 1.2, z), 'pfft', '#9ed84a', 0.6, 0.7, true);
+  }
+
   /** The face scan to show for a roster entry ('' = none, or face scans turned off). */
   private faceKeyOf(entry: RosterEntry | undefined): string {
     if (!entry?.face || (!this.showFaces && entry.id !== this.youId)) return '';
@@ -2147,6 +2196,7 @@ export class ClientGame {
       return;
     }
     if (this.time < rv.hintUntil && rv.inflHint > c.inflation) c.inflation = rv.inflHint;
+    this.characterIdle(rv.id, c.px, c.py, c.pz, c.yaw);
     rv.man.group.position.set(c.px, c.py, c.pz);
     const p = rv.pose;
     p.time = this.time;
@@ -2396,6 +2446,7 @@ export class ClientGame {
     const pose = this.selfPose;
     man.setVisible(true);
     man.group.position.set(x, y, z);
+    this.characterIdle(this.youId, x, y, z, p.yaw);
     pose.time = this.time;
     pose.dt = dt;
     pose.inflation = p.inflation;

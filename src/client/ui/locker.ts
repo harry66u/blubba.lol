@@ -10,6 +10,7 @@ import { lookFromCosmetics, patternMask } from '../render/tubeMan';
 import { clear, el, hexColor } from './dom';
 
 const SLOT_ICONS: Record<CosmeticSlot, string> = {
+  body: '🧍',
   color: '🎨',
   accent: '🖌️',
   pattern: '🦓',
@@ -25,6 +26,14 @@ const SLOT_ICONS: Record<CosmeticSlot, string> = {
 };
 
 const ICONS: Record<string, string> = {
+  'body.classic': '🎈',
+  'body.chonk': '🍩',
+  'body.noodle': '🍝',
+  'body.bighead': '🧠',
+  'body.bor': '💪',
+  'body.abag': '👃',
+  'body.sol': '💨',
+  'body.kesty': '🤖',
   'face.smile': '🙂',
   'face.blush': '☺️',
   'face.tongue': '😛',

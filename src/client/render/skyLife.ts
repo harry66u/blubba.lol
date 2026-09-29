@@ -2,6 +2,18 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { MapDef } from '../../shared/maps/types';
 
+/** What the banner plane tows past, in turn (the last four are the characters' ads). */
+const BANNERS = [
+  'BLUBBA.LOL',
+  'STAY INFLATED!',
+  "BOR'S GYM: GET PUMPED",
+  'FLAIL HARDER!',
+  'RUN. ABAG IS COMING',
+  'FREE AIR TODAY',
+  'SOL: SMELL THE WIN',
+  'KESTY ROBOTICS',
+];
+
 // Sky scenery around every map: hot air balloons, a BLUBBA blimp, bird flocks, a banner plane,
 // floating islands, beach balls and party balloons. Client-only and far outside the blast zone,
 // so it never touches gameplay. Built for cheap draws: each object is one merged, vertex-colored
@@ -812,7 +824,7 @@ export class SkyLife {
       p.wait -= dt;
       if (p.wait <= 0) {
         this.launch(p, 30, 100, 16, 36, 17, 380, 42 * PLANE_SCALE, 12);
-        this.drawBanner(['BLUBBA.LOL', 'STAY INFLATED!', 'FLAIL HARDER!', 'FREE AIR TODAY'][this.bannerText++ % 4]);
+        this.drawBanner(BANNERS[this.bannerText++ % BANNERS.length]);
         this.plane.visible = true;
       }
     }

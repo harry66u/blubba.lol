@@ -10,11 +10,12 @@ import { PART_IDS, type PartId, type SpecialPartId, UTILITY_IDS, type UtilityId 
 
 // --- Cosmetics -------------------------------------------------------------------------------
 
-export const COSMETIC_SLOTS = ['color', 'accent', 'pattern', 'face', 'eyes', 'hat', 'base', 'trail', 'finish', 'taunt', 'koFx', 'sound'] as const;
+export const COSMETIC_SLOTS = ['body', 'color', 'accent', 'pattern', 'face', 'eyes', 'hat', 'base', 'trail', 'finish', 'taunt', 'koFx', 'sound'] as const;
 export type CosmeticSlot = (typeof COSMETIC_SLOTS)[number];
 
 export const SLOT_INFO: Record<CosmeticSlot, { name: string; plural: string }> = {
   color: { name: 'Color', plural: 'Colors' },
+  body: { name: 'Body', plural: 'Bodies' },
   accent: { name: 'Accent color', plural: 'Accents' },
   pattern: { name: 'Pattern', plural: 'Patterns' },
   face: { name: 'Face', plural: 'Faces' },
@@ -53,6 +54,18 @@ function reward(slot: CosmeticSlot, key: string, name: string, level: number, bl
 
 /** Everything in the store. Prices are fixed and shown up front. */
 export const ITEMS: CosmeticItem[] = [
+  // Body shapes, and four characters with their own outfits and props (see render/characters.ts).
+  // Looks only: every body has the same hitbox.
+  ...items('body', [
+    ['classic', 'Classic', 0, 'The original air dancer.'],
+    ['chonk', 'Chonk', 0, 'Short and extra wide.'],
+    ['noodle', 'Noodle', 150, 'Tall and skinny.'],
+    ['bighead', 'Big Head', 200, 'All brain.'],
+    ['bor', 'BOR', 0, 'Short, jacked, checkered shirt, never without his giant syringe of AIR.'],
+    ['abag', 'ABAG', 0, 'Will chase you across the whole map. Follow the nose.'],
+    ['sol', 'SOL', 0, 'All-black Amiri sweats. Constant gas.'],
+    ['kesty', 'KESTY', 0, 'Beep boop. A robot, built different.'],
+  ]),
   // Color keys are indexes into PLAYER_COLORS. The first ten are free, and so are Lavender and Cocoa.
   ...items('color', [
     ['0', 'Cherry', 0],
@@ -246,6 +259,7 @@ export const ITEM_BY_ID = new Map(ITEMS.map((i) => [i.id, i]));
 export type Cosmetics = Record<CosmeticSlot, string>;
 
 export const DEFAULT_COSMETICS: Cosmetics = {
+  body: 'body.classic',
   color: 'color.0',
   accent: 'accent.match',
   pattern: 'pattern.solid',

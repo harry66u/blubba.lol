@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { type BodyShape, type CharacterProps, bodyShape, buildProps, hasOutfit, outfitShine, outfitTextures } from './characters';
 import { buildFacePhoto, disposeFacePhoto } from './facePhoto';
 import { PLAYER_COLORS } from '../../shared/colors';
 import { type Cosmetics, cosmeticKey } from '../../shared/economy';
@@ -11,6 +12,8 @@ import { type EyeStyle, FACES_COVERING_EYES, animateBase, animateHat, applyFinis
 
 /** Cosmetic keys (see shared/economy.ts), with the accent color already turned into a hex. */
 export interface Look {
+  /** Body shape or character (see characters.ts). */
+  body: string;
   pattern: string;
   face: string;
   eyes: string;
@@ -26,7 +29,7 @@ export interface Look {
   accentShine: string;
 }
 
-export const DEFAULT_LOOK: Look = { pattern: 'solid', face: 'smile', eyes: 'classic', hat: 'spikes', base: 'classic', trail: 'none', finish: 'team', accent: -1, shine: '', accentShine: '' };
+export const DEFAULT_LOOK: Look = { body: 'classic', pattern: 'solid', face: 'smile', eyes: 'classic', hat: 'spikes', base: 'classic', trail: 'none', finish: 'team', accent: -1, shine: '', accentShine: '' };
 
 /**
  * Someone's look from their cosmetics. `colorIndex` is the PLAYER_COLORS entry they're drawn in
@@ -37,6 +40,7 @@ export function lookFromCosmetics(cos: Partial<Cosmetics> | undefined, colorInde
   const accentKey = cosmeticKey(cos, 'accent');
   const accent = teamMode || accentKey === 'match' ? undefined : PLAYER_COLORS[Number(accentKey)];
   return {
+    body: cosmeticKey(cos, 'body'),
     pattern: cosmeticKey(cos, 'pattern'),
     face: cosmeticKey(cos, 'face'),
     eyes: cosmeticKey(cos, 'eyes'),
@@ -481,6 +485,13 @@ export class TubeMan {
   private accentShineP = SHINES[''];
   private tauntStyle = '';
   private tauntT = 0;
+  /** Body shape, outfit and props of the current body (characters.ts). */
+  private shape: BodyShape = bodyShape('classic');
+  private readonly outfitMat: BodyMat;
+  private readonly sleeveMat: BodyMat;
+  private props: CharacterProps | null = null;
+  private readonly handProp = new THREE.Group();
+  private static readonly BLACK = new THREE.Color(0);
 
   constructor(colorHex: number, opts: { physical?: boolean; seed?: number; pattern?: Pattern; look?: Partial<Look> } = {}) {
     this.seed = opts.seed ?? Math.random() * 100;
@@ -496,6 +507,12 @@ export class TubeMan {
     this.bodyMat = makeMat(patternTexture(this.look.pattern));
     addPatternAccent(this.bodyMat, this.accentU);
     this.armMat = makeMat(null);
+    this.outfitMat = makeMat(null);
+    this.sleeveMat = makeMat(null);
+    for (const m of [this.outfitMat, this.sleeveMat]) {
+      m.color.set(0xffffff);
+      m.emissive.set(0);
+    }
     this.color.set(colorHex);
 
     this.body = new FlexTube(BODY_RINGS, 24, this.bodyMat);
@@ -543,8 +560,47 @@ export class TubeMan {
     this.crown = makeCrown();
     this.crown.visible = false;
     this.rig.add(this.crown);
-    this.rig.add(this.base, this.body.mesh, this.arms[0].mesh, this.arms[1].mesh, this.face, this.hair, this.bubble, this.gunMount, this.pin);
+    this.rig.add(this.base, this.body.mesh, this.arms[0].mesh, this.arms[1].mesh, this.face, this.hair, this.bubble, this.gunMount, this.pin, this.handProp);
     this.group.add(this.rig);
+    this.applyBody();
+  }
+
+  /** Shape, outfit and props for the current body (the classic tube man has none). */
+  private applyBody(): void {
+    const body = this.look.body;
+    this.shape = bodyShape(body);
+    if (this.props) {
+      if (this.props.face) this.face.remove(this.props.face);
+      if (this.props.hand) this.handProp.remove(this.props.hand);
+      this.props.dispose();
+    }
+    this.props = buildProps(body, this.color.getHex());
+    if (this.props?.face) this.face.add(this.props.face);
+    if (this.props?.hand) this.handProp.add(this.props.hand);
+    this.applyOutfit();
+    this.hair.scale.setScalar((HEAD_R * this.shape.head) / BODY_R);
+    this.applyFaceBase();
+    if (this.props?.faceCartoonOnly) this.props.faceCartoonOnly.visible = !this.facePhoto;
+  }
+
+  /** Characters with an outfit wear it on the body and sleeves (head and hands in their color). */
+  private applyOutfit(): void {
+    const tex = hasOutfit(this.look.body) ? outfitTextures(this.look.body, this.color.getHex()) : null;
+    if (tex) {
+      const sh = outfitShine(this.look.body);
+      this.outfitMat.map = tex.body;
+      this.sleeveMat.map = tex.arm;
+      for (const m of [this.outfitMat, this.sleeveMat]) {
+        m.metalness = sh.metal;
+        m.roughness = sh.rough;
+        m.needsUpdate = true;
+      }
+      this.body.mesh.material = this.outfitMat;
+      for (const arm of this.arms) arm.mesh.material = this.sleeveMat;
+    } else {
+      this.body.mesh.material = this.bodyMat;
+      this.applyAccent();
+    }
   }
 
   setColor(hex: number): void {
@@ -555,6 +611,8 @@ export class TubeMan {
     // A Matching accent follows the body color; some hats are tinted from it too.
     this.applyAccent();
     this.rebuildHat();
+    // Outfits paint the head and hands in the body color.
+    this.applyOutfit();
   }
 
   /** Puts a face scan on the head (null goes back to the cartoon face). */
@@ -569,6 +627,7 @@ export class TubeMan {
       this.face.add(this.facePhoto);
     }
     this.faceExtras.visible = !tex;
+    if (this.props?.faceCartoonOnly) this.props.faceCartoonOnly.visible = !tex;
     // Eyes follow the face and eye style (and hide under a photo).
     this.applyFaceBase();
   }
@@ -598,6 +657,7 @@ export class TubeMan {
     if (next.face !== prev.face || next.eyes !== prev.eyes) this.applyFaceBase();
     if (next.shine !== prev.shine || next.accentShine !== prev.accentShine) this.applyShine();
     if (next.accent !== prev.accent) this.applyAccent();
+    if (next.body !== prev.body) this.applyBody();
     if (next.base !== prev.base || next.accent !== prev.accent) {
       this.rig.remove(this.base);
       disposeGroup(this.base);
@@ -617,7 +677,7 @@ export class TubeMan {
   /** Base eye/mouth layout for the current face and eye style (update() animates on top). */
   private applyFaceBase(): void {
     const f = this.look.face;
-    const covered = FACES_COVERING_EYES.has(f);
+    const covered = FACES_COVERING_EYES.has(f) || !!this.props?.coversEyes;
     const st = eyeStyle(this.look.eyes);
     this.eyeKind = st;
     for (let i = 0; i < 2; i++) {
@@ -670,6 +730,7 @@ export class TubeMan {
       this.accentColor.copy(this.color);
       this.accentU.value.copy(this.color).multiplyScalar(MATCH_DARK);
     }
+    if (hasOutfit(this.look.body)) return;
     for (const arm of this.arms) arm.mesh.material = a >= 0 ? this.armMat : this.bodyMat;
   }
 
@@ -724,7 +785,7 @@ export class TubeMan {
 
   /** Height of the top of the head above the feet, in world units, for name tags. */
   headHeight(inflation: number): number {
-    return (BASE_H + BODY_LEN + 0.35) * inflationScale(inflation);
+    return (BASE_H + BODY_LEN * this.shape.length + 0.35) * inflationScale(inflation);
   }
 
   update(p: TubeManPose): void {
@@ -832,10 +893,14 @@ export class TubeMan {
     const radii = this.body.radii;
     const n = BODY_RINGS;
     const capStart = n - 6;
+    const sh = this.shape;
+    const bodyLen = BODY_LEN * sh.length;
+    const bodyR = BODY_R * sh.radius;
+    const headR = HEAD_R * sh.head;
     for (let i = 0; i < n; i++) {
       let u: number;
       let r: number;
-      const capU = 1 - HEAD_R / BODY_LEN;
+      const capU = 1 - headR / bodyLen;
       if (i < capStart) {
         u = (i / capStart) * capU;
         // Slight flare at the bottom where the tube meets the blower, and the head swelling out
@@ -843,13 +908,13 @@ export class TubeMan {
         const flare = 1 + 0.25 * Math.max(0, 1 - u * 6);
         const k = Math.min(1, Math.max(0, (u - 0.42) / (capU - 0.42)));
         const swell = k * k * (3 - 2 * k);
-        r = BODY_R * flare * (1 + (HEAD_R / BODY_R - 1) * swell);
+        r = bodyR * flare * (1 + (headR / bodyR - 1) * swell);
       } else {
         const a = ((i - capStart) / (n - 1 - capStart)) * (Math.PI / 2);
-        u = capU + (Math.sin(a) * HEAD_R) / BODY_LEN;
-        r = HEAD_R * Math.cos(a);
+        u = capU + (Math.sin(a) * headR) / bodyLen;
+        r = headR * Math.cos(a);
       }
-      const sArc = u * BODY_LEN * lenScale;
+      const sArc = u * bodyLen * lenScale;
       const bend = u * u;
       const wob1 = noise1(t * 1.7 + u * 1.2, this.seed) * wobbleAmp;
       const wob2 = noise1(t * 1.3 + u * 1.5, this.seed + 3) * wobbleAmp;
@@ -857,8 +922,8 @@ export class TubeMan {
       let fold = 0;
       if (p.doubled) fold = Math.max(0, u - 0.35) * 1.3;
       if (bow > 0) fold = Math.max(fold, Math.max(0, u - 0.3) * 1.25 * bow);
-      const x = (this.leanX * bend + wob1 * u) * BODY_LEN;
-      const z = (this.leanZ * bend * (p.doubled ? 0.4 : 1) + wob2 * u) * BODY_LEN + fold * 0.9;
+      const x = (this.leanX * bend + wob1 * u) * bodyLen;
+      const z = (this.leanZ * bend * (p.doubled ? 0.4 : 1) + wob2 * u) * bodyLen + fold * 0.9;
       const y = BASE_H + sArc - (Math.abs(x) + Math.abs(z)) * 0.18 * u - fold * 0.8;
       spine[i * 3] = x;
       spine[i * 3 + 1] = y;
@@ -1007,7 +1072,8 @@ export class TubeMan {
         as[i * 3 + 1] = py;
         as[i * 3 + 2] = pz;
         const fi = i / (ARM_RINGS - 1);
-        arm.radii[i] = (i === ARM_RINGS - 1 ? 0.02 : i === ARM_RINGS - 2 ? ARM_R * 0.8 : ARM_R * (1.15 - fi * 0.25)) * (1 - 0.3 * deflate);
+        const armR = ARM_R * this.shape.arm;
+        arm.radii[i] = (i === ARM_RINGS - 1 ? 0.02 : i === ARM_RINGS - 2 ? armR * 0.8 : armR * (1.15 - fi * 0.25)) * (1 - 0.3 * deflate);
         ang += noise1(t * 3.4 + i * 0.45, this.seed + side * 23) * 0.42 * this.flail;
         yaw += noise1(t * 2.9 + i * 0.4, this.seed + side * 29) * 0.3 * this.flail;
         if (p.doubled) ang -= 0.2;
@@ -1021,6 +1087,19 @@ export class TubeMan {
         pz += (bz * outK + fnz * fwdK) * seg;
       }
       arm.update(0, 1, 0);
+    }
+
+    // Character props: the syringe rides in the free hand, pointing along the arm.
+    if (this.props) {
+      if (this.props.hand) {
+        const a = this.arms[1].spine;
+        const k = (ARM_RINGS - 2) * 3;
+        const j = (ARM_RINGS - 4) * 3;
+        this.handProp.position.set(a[k], a[k + 1], a[k + 2]);
+        this.handProp.quaternion.setFromUnitVectors(Y_UP, SV1.set(a[k] - a[j], a[k + 1] - a[j + 1], a[k + 2] - a[j + 2]).normalize());
+        this.handProp.visible = !p.held;
+      }
+      this.props.animate(t, dt, Math.min(1, speedH / 8));
     }
 
     // Glow while charging, flash while braced; the crown wearer glows gold, your nemesis red.
@@ -1047,6 +1126,10 @@ export class TubeMan {
       flash = 0.9 * (this.impactT / 0.1);
     }
     paintGlow(this.bodyMat, this.color, this.shineP.glow + boost, tint, flash);
+    if (hasOutfit(this.look.body)) {
+      paintGlow(this.outfitMat, TubeMan.BLACK, boost, tint, flash);
+      paintGlow(this.sleeveMat, TubeMan.BLACK, boost, tint, flash);
+    }
     if (this.look.accent >= 0) paintGlow(this.armMat, this.accentColor, this.accentShineP.glow + boost, tint, flash);
     this.crown.visible = p.crowned;
     if (p.crowned) {
@@ -1091,6 +1174,9 @@ export class TubeMan {
     disposeGroup(this.faceExtras);
     if (this.facePhoto) disposeFacePhoto(this.facePhoto);
     disposeGroup(this.base);
+    this.props?.dispose();
+    this.outfitMat.dispose();
+    this.sleeveMat.dispose();
   }
 }
 
