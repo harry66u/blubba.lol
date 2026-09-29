@@ -80,6 +80,8 @@ const net = new Connection();
 const hud = new Hud();
 const game = new ClientGame(renderer, audio, hud, input, net, settings);
 const touch = touchMode ? new TouchControls(input) : null;
+// iPad with a trackpad or mouse: it aims and shoots like on a computer.
+if (touchMode) input.enableTrackpad();
 game.touch = touch;
 if (touchMode) input.lastDevice = 'touch';
 game.setLoadout(loadLoadout(), false);
@@ -681,6 +683,8 @@ function renderScoreboard(): void {
 // --- Wiring ----------------------------------------------------------------------------------
 
 input.onLockChange = (locked) => {
+  // A tablet playing with its trackpad: the on-screen controls get out of the way.
+  document.body.classList.toggle('mouse-play', touchMode && locked);
   if (screen !== 'playing') return;
   if (locked) padPlay = false;
   if (padPlay) return;

@@ -178,13 +178,46 @@ export class InputManager {
       if (document.hidden) this.releaseAll();
     });
     // Some browsers (iPad Safari, some school-managed Chromebooks) refuse pointer lock.
-    document.addEventListener('pointerlockerror', () => this.onLockError?.());
+    document.addEventListener('pointerlockerror', () => {
+      // A tablet's trackpad aims unlocked instead (the pointer stays on screen).
+      if (this.trackpadWanted) this.freeAim = true;
+      this.onLockError?.();
+    });
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.canvas;
       this.ignoreNextMove = true;
       if (!this.locked) this.releaseAll();
       this.onLockChange?.(this.locked);
     });
+  }
+
+  /** A trackpad or mouse clicked the game on a tablet (see enableTrackpad). */
+  private trackpadWanted = false;
+
+  /**
+   * Tablets: a trackpad or mouse (an iPad's Magic Keyboard) aims and shoots like on a computer,
+   * next to the touch controls. Clicking the game locks the pointer; if the browser won't, the
+   * trackpad aims without the lock.
+   */
+  enableTrackpad(): void {
+    window.addEventListener(
+      'pointerdown',
+      (e) => {
+        if (e.pointerType !== 'mouse' || this.locked || !this.enabled || !this.onGameSurface(e.target)) return;
+        this.trackpadWanted = true;
+        this.lastDevice = 'kbm';
+        this.requestLock();
+      },
+      true,
+    );
+  }
+
+  /** The game itself (the canvas, or the touch layer over it), not a menu or an on-screen button. */
+  private onGameSurface(t: EventTarget | null): boolean {
+    const el = t as HTMLElement | null;
+    if (!el) return false;
+    if (el === this.canvas) return true;
+    return !!el.closest?.('.touch-controls') && !el.closest('.tbtn, .touch-chat, .stick-base');
   }
 
   applySettings(s: Settings): void {
@@ -330,7 +363,7 @@ export class InputManager {
       return;
     }
     // Aiming without a lock: clicks on menus and buttons are theirs, not shots.
-    if (!this.locked && down && e.target !== this.canvas) return;
+    if (!this.locked && down && !this.onGameSurface(e.target)) return;
     if (down) this.press(code);
     else this.release(code);
   }

@@ -5897,3 +5897,8 @@ body.touch .ult-splash .tag {
     font-size: 12px;
   }
 }
+
+/* A tablet playing with a trackpad or mouse (pointer locked): hide the on-screen sticks and buttons. */
+body.mouse-play .touch-controls {
+  display: none;
+}
