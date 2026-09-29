@@ -316,8 +316,21 @@ export class Store {
     };
   }
 
-  /** Top ranked players (accounts with at least one ranked game). */
-  leaderboard(limit = 20): { name: string; rating: number; games: number; level: number }[] {
+  private board: { at: number; limit: number; rows: { name: string; rating: number; games: number; level: number }[] } | null = null;
+
+  /**
+   * Top ranked players (accounts with at least one ranked game). Reading every account is slow
+   * once there are many, and it runs on the same thread as the matches, so the result is reused
+   * for half a minute.
+   */
+  leaderboard(limit = 20, now = Date.now()): { name: string; rating: number; games: number; level: number }[] {
+    if (this.board && this.board.limit === limit && now - this.board.at < 30_000) return this.board.rows;
+    const rows = this.computeLeaderboard(limit);
+    this.board = { at: now, limit, rows };
+    return rows;
+  }
+
+  private computeLeaderboard(limit: number): { name: string; rating: number; games: number; level: number }[] {
     const rows = this.db.prepare("SELECT key, data FROM profiles WHERE key LIKE 'a:%'").all() as { key: string; data: string }[];
     const out: { name: string; rating: number; games: number; level: number }[] = [];
     for (const r of rows) {
