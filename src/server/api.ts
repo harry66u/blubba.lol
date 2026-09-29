@@ -6,7 +6,7 @@ import { type Account, type Store, accountKey, guestKey, validGuestId } from './
 
 const MAX_BODY = 4096;
 /** Face scans are small square photos (the client sends about 160 px, well under this). */
-const MAX_FACE_BYTES = 48 * 1024;
+const MAX_FACE_BYTES = 160 * 1024;
 const FACE_MIMES: Record<string, (b: Buffer) => boolean> = {
   'image/webp': (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP',
   'image/jpeg': (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,

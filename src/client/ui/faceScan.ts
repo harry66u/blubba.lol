@@ -2,7 +2,7 @@ import type { AccountClient } from '../net/account';
 import { el } from './dom';
 
 /** Saved face scans are this many pixels square (small enough to load instantly for everyone). */
-const OUT = 160;
+const OUT = 384;
 /** The on-screen framing area (CSS pixels). */
 const VIEW = 240;
 
@@ -205,9 +205,14 @@ export function buildFaceScan(account: AccountClient, onClose: () => void): { ro
     const out = document.createElement('canvas');
     out.width = out.height = OUT;
     drawFrame(out.getContext('2d')!, OUT, false);
-    // WebP where the browser can make it, JPEG otherwise (older Safari).
-    let data = out.toDataURL('image/webp', 0.82);
-    if (!data.startsWith('data:image/webp')) data = out.toDataURL('image/jpeg', 0.86);
+    // WebP where the browser can make it, JPEG otherwise (older Safari); a little lower quality
+    // only if a busy photo comes out too big to upload.
+    let data = '';
+    for (const q of [0.92, 0.85, 0.75, 0.6]) {
+      data = out.toDataURL('image/webp', q);
+      if (!data.startsWith('data:image/webp')) data = out.toDataURL('image/jpeg', q);
+      if (data.length < 200_000) break;
+    }
     saveBtn.disabled = true;
     try {
       await account.uploadFace(data);

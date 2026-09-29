@@ -50,7 +50,10 @@ export function faceTexture(account: number, version: number): THREE.Texture {
   if (!tex) {
     tex = loader.load(url);
     tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 4;
+    // Sharp up close, smooth far away (no pixel stair-steps).
+    tex.anisotropy = 8;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.magFilter = THREE.LinearFilter;
     cache.set(url, tex);
     if (cache.size > 64) {
       const [oldUrl, old] = cache.entries().next().value!;
