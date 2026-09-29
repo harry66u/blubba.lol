@@ -105,13 +105,14 @@ export class UltHud {
   }
 
   /** You popped your ult: its name fills the screen for a moment. */
-  splash(name: string, icon: string, color: string, tagline: string, by: string): void {
+  splash(name: string, icon: string, color: string, tagline: string, by: string, face: string | null = null): void {
     this.splashEl.textContent = '';
     this.splashEl.style.setProperty('--ult', color);
     add(
       this.splashEl,
       el('div', { class: 'rays' }),
-      el('div', { class: 'ico', text: icon }),
+      // The person you turn into, when they've lent their face; else the ult's icon.
+      face ? el('div', { class: 'who' }, el('img', { attrs: { src: face, alt: '' } }), el('span', { class: 'ico-badge', text: icon })) : el('div', { class: 'ico', text: icon }),
       el('div', { class: 'nm', text: `${name.toUpperCase()}!` }),
       el('div', { class: 'tag', text: tagline }),
       by ? el('div', { class: 'by', text: by }) : null,

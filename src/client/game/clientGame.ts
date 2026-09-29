@@ -77,6 +77,7 @@ import { MapView, type WarnArea } from '../render/mapView';
 import { BeachBall } from '../render/beachBall';
 import type { Renderer } from '../render/renderer';
 import { type Look, TubeMan, defaultPose, lookFromCosmetics, type TubeManPose } from '../render/tubeMan';
+import { Human, isHumanKey } from '../render/human';
 import { ViewModel } from '../render/viewModel';
 import { type Settings, saveSettings } from '../settings';
 import { esc, hexColor } from '../ui/dom';
@@ -119,6 +120,8 @@ interface RemoteView {
   inflHint: number;
   hintUntil: number;
   trail: TrailState;
+  /** The character they turned into with their ult (drawn instead of the tube man), if any. */
+  human: Human | null;
 }
 
 
@@ -324,7 +327,9 @@ export class ClientGame {
   /** Show other players' face scans (Settings). Your own always shows. */
   showFaces = true;
   /** Who turned into a character with their ult, until when (see transformInto). */
-  private readonly transforms = new Map<number, { body: string; until: number }>();
+  private readonly transforms = new Map<number, { body: string; until: number; at: number }>();
+  /** Your own character body while transformed. */
+  private selfHuman: Human | null = null;
   /** Faces the real BOR, ABAG, SOL and KESTY lent their characters (from /api/characters). */
   private characterFaces: Record<string, { account: number; v: number }> = {};
   private characterFacesAt = -1e9;
@@ -379,6 +384,11 @@ export class ClientGame {
       },
       jab: (id) => (id === this.youId ? this.selfMan?.jab() : this.remotes.get(id)?.man.jab()),
       keyOf: () => this.key('ult'),
+      charFace: (kind) => {
+        const c = ULT_CHARACTER[kind];
+        const f = c ? this.characterFaces[c.body] : undefined;
+        return f ? `/api/face/${f.account}?v=${f.v}` : null;
+      },
       shake: (amount, fov) => {
         this.trauma = Math.min(1, this.trauma + amount);
         this.fovKick += fov;
@@ -395,8 +405,8 @@ export class ClientGame {
     }
     for (const rv of this.remotes.values()) {
       const c = rv.cur;
-      if (!c || c.mode === MODE_DEAD || !rv.man.group.visible) continue;
-      out.push({ id: rv.id, ult: c.ult, ultTarget: c.ultTarget, x: c.px, y: c.py, z: c.pz, head: c.py + rv.man.headHeight(c.inflation) });
+      if (!c || c.mode === MODE_DEAD || !(rv.man.group.visible || rv.human)) continue;
+      out.push({ id: rv.id, ult: c.ult, ultTarget: c.ultTarget, x: c.px, y: c.py, z: c.pz, head: c.py + (rv.human ?? rv.man).headHeight(c.inflation) });
     }
     return out;
   }
@@ -813,13 +823,11 @@ export class ClientGame {
   /** What a player looks like (accents and shine are dropped in team modes, see lookFromCosmetics). */
   private lookOf(id: number): Look {
     const entry = this.roster.get(id);
-    const look = lookFromCosmetics(entry?.cos, entry?.color ?? 0, this.teamMode);
-    const t = this.transformOf(id);
-    return t ? { ...look, body: t.body } : look;
+    return lookFromCosmetics(entry?.cos, entry?.color ?? 0, this.teamMode);
   }
 
   /** The character someone turned into with their ult, while it lasts. */
-  private transformOf(id: number): { body: string; until: number } | null {
+  private transformOf(id: number): { body: string; until: number; at: number } | null {
     const t = this.transforms.get(id);
     if (t && t.until <= this.time) this.transforms.delete(id);
     return t && t.until > this.time ? t : null;
@@ -829,7 +837,7 @@ export class ClientGame {
   private transformInto(id: number, kind: UltId, x: number, y: number, z: number): void {
     const c = ULT_CHARACTER[kind];
     if (!c) return;
-    this.transforms.set(id, { body: c.body, until: this.time + c.seconds });
+    this.transforms.set(id, { body: c.body, until: this.time + c.seconds, at: this.time });
     this.effects.airPuff(x, y + 1.2, z, 12, 7, 0.3);
     this.effects.confettiBurst(x, y + 1.5, z, 24);
     if (id !== this.youId) this.hud.popup(tmpV.set(x, y + 3.4, z), `${c.name}!`, c.color, 1.4, 1.3, false);
@@ -2273,7 +2281,7 @@ export class ClientGame {
    * back every couple of seconds). Skipped far from the camera.
    */
   private characterIdle(id: number, x: number, y: number, z: number, yaw: number): void {
-    if (cosmeticKey(this.roster.get(id)?.cos, 'body') !== 'sol') return;
+    if (cosmeticKey(this.roster.get(id)?.cos, 'body') !== 'sol' && this.transformOf(id)?.body !== 'sol') return;
     const next = this.nextFart.get(id);
     const [lo, hi] = FART_INTERVAL;
     if (next === undefined) {
@@ -2290,17 +2298,34 @@ export class ClientGame {
 
   /** The face scan to show for a roster entry ('' = none, or face scans turned off). */
   private faceKeyOf(entry: RosterEntry | undefined): string {
-    const cf = entry ? this.charFaceOf(entry.id) : null;
-    if (cf) return `c${cf.account}.${cf.v}`;
     if (!entry?.face || (!this.showFaces && entry.id !== this.youId)) return '';
     return `${entry.face.account}.${entry.face.v}`;
   }
 
-  /** The face texture for a roster entry: a transformed character's lent face, else their own scan. */
+  /** The face texture for a roster entry's own face scan. */
   private faceTexOf(entry: RosterEntry | undefined): THREE.Texture | null {
-    const cf = entry ? this.charFaceOf(entry.id) : null;
-    if (cf) return faceTexture(cf.account, cf.v);
     return this.faceKeyOf(entry) && entry?.face ? faceTexture(entry.face.account, entry.face.v) : null;
+  }
+
+  /**
+   * While someone's ult has turned them into a character, that character's body is drawn instead
+   * of their tube man (with the real person's face if they lent it). Returns the body, or null.
+   */
+  private humanFor(id: number, current: Human | null): Human | null {
+    const t = this.transformOf(id);
+    const key = t && isHumanKey(t.body) ? t.body : null;
+    if (current && current.key !== key) {
+      this.r.scene.remove(current.group);
+      current.dispose();
+      current = null;
+    }
+    if (key && !current) {
+      current = new Human(key);
+      const cf = this.charFaceOf(id);
+      if (cf) current.setFace(faceTexture(cf.account, cf.v));
+      this.r.scene.add(current.group);
+    }
+    return current;
   }
 
   private createRemote(id: number): RemoteView {
@@ -2322,6 +2347,7 @@ export class ClientGame {
       lastTagText: '',
       lookKey: JSON.stringify(look),
       faceKey: '',
+      human: null,
       inflHint: 0,
       hintUntil: 0,
       trail: newTrailState(),
@@ -2331,6 +2357,10 @@ export class ClientGame {
   private removeRemote(rv: RemoteView): void {
     this.r.scene.remove(rv.man.group);
     rv.man.dispose();
+    if (rv.human) {
+      this.r.scene.remove(rv.human.group);
+      rv.human.dispose();
+    }
     rv.tag.el.remove();
   }
 
@@ -2359,7 +2389,8 @@ export class ClientGame {
       }
     }
     const alive = c.mode !== MODE_DEAD;
-    rv.man.setVisible(alive);
+    rv.human = this.humanFor(rv.id, alive ? rv.human : null);
+    rv.man.setVisible(alive && !rv.human);
     if (!alive) {
       rv.tag.el.style.display = 'none';
       rv.trail.on = false;
@@ -2395,15 +2426,23 @@ export class ClientGame {
     p.dashing = (c.flags & FLAG_DASHING) !== 0;
     p.protected = (c.flags & FLAG_PROTECTED) !== 0;
     this.ultView.pose(p, c.ult);
-    rv.man.update(p);
-    if (p.streaming && rv.man.muzzleWorld(tmpV3)) {
+    const hu = rv.human;
+    if (hu) {
+      hu.group.position.set(c.px, c.py, c.pz);
+      hu.setWeapon(WEAPON_IDS[c.weapon] ?? 'airCannon', this.remoteParts.get(rv.id) ?? null);
+      hu.update(p, this.time - (this.transforms.get(rv.id)?.at ?? this.time));
+      rv.trail.on = false;
+    } else {
+      rv.man.update(p);
+      this.trailFor(rv.trail, rv.man, p, c.px, c.py, c.pz);
+    }
+    if (p.streaming && (hu ?? rv.man).muzzleWorld(tmpV3)) {
       const d = lookDir(c.yaw, c.pitch, tmpDir);
       this.effects.leafStream(tmpV3.x, tmpV3.y, tmpV3.z, d.x, d.y, d.z, c.charge, dt);
     }
-    this.trailFor(rv.trail, rv.man, p, c.px, c.py, c.pz);
 
     // Name tag with inflation percentage above the head.
-    const headY = c.py + rv.man.headHeight(c.inflation) + 0.35;
+    const headY = c.py + (hu ?? rv.man).headHeight(c.inflation) + 0.35;
     const v = tmpV.set(c.px, headY, c.pz).project(this.r.camera);
     const dist = this.r.camera.position.distanceTo(tmpV2.set(c.px, headY, c.pz));
     if (v.z > 1 || dist > 90) {
@@ -2593,7 +2632,12 @@ export class ClientGame {
 
   /** Third-person camera is on and you're alive (so shots aim along the camera's center ray). */
   private get thirdPersonLive(): boolean {
-    return this.settings.thirdPerson && this.camLive && this.havePred && this.pred.mode !== MODE_DEAD && !this.replay.active;
+    return this.wantThird && this.camLive && this.havePred && this.pred.mode !== MODE_DEAD && !this.replay.active;
+  }
+
+  /** Third person from the settings, or while your ult has turned you into a character. */
+  private get wantThird(): boolean {
+    return this.settings.thirdPerson || !!this.transformOf(this.youId);
   }
 
   /** Flips between first and third person and remembers the choice. */
@@ -2638,6 +2682,8 @@ export class ClientGame {
   private poseSelf(dt: number, x: number, y: number, z: number, visible: boolean): void {
     if (!visible) {
       this.selfMan?.setVisible(false);
+      this.selfHuman = this.humanFor(this.youId, this.selfHuman);
+      this.selfHuman?.setVisible(false);
       // Your own trail only shows in third person: first person keeps your view clear.
       this.selfTrail.on = false;
       return;
@@ -2660,7 +2706,9 @@ export class ClientGame {
     const man = this.selfMan;
     const p = this.pred;
     const pose = this.selfPose;
-    man.setVisible(true);
+    this.selfHuman = this.humanFor(this.youId, this.selfHuman);
+    this.selfHuman?.setVisible(true);
+    man.setVisible(!this.selfHuman);
     man.group.position.set(x, y, z);
     this.characterIdle(this.youId, x, y, z, p.yaw);
     pose.time = this.time;
@@ -2687,6 +2735,14 @@ export class ClientGame {
     pose.dashing = p.dashTimer > 0;
     pose.protected = p.spawnProt > 0;
     this.ultView.pose(pose, publicUlt(p));
+    const hu = this.selfHuman;
+    if (hu) {
+      hu.group.position.set(x, y, z);
+      hu.setWeapon(this.weapon.id, this.activeParts);
+      hu.update(pose, this.time - (this.transforms.get(this.youId)?.at ?? this.time));
+      this.selfTrail.on = false;
+      return;
+    }
     man.setWeapon(this.weapon.id, this.activeParts);
     man.update(pose);
     this.trailFor(this.selfTrail, man, pose, x, y, z);
@@ -2722,7 +2778,7 @@ export class ClientGame {
     this.rollP += this.rollV * pdt;
     const shake = this.trauma * this.trauma;
     const alive = p.mode !== MODE_DEAD && this.havePred;
-    const third = alive && this.settings.thirdPerson;
+    const third = alive && this.wantThird;
     this.viewModel.root.visible = alive && !third;
     let fov = this.settings.fov + this.fovKick + (p.launchTimer > 0 ? 6 : 0);
     const flying = alive && p.launchTimer > 0 ? (p.hitStop > 0 ? Math.hypot(p.hsVx, p.hsVy, p.hsVz) : Math.hypot(p.vx, p.vy, p.vz)) : 0;
@@ -2734,7 +2790,8 @@ export class ClientGame {
       cam.position.set(x, y + eyeHeight(p), z);
       let roll = (Math.random() - 0.5) * shake * 0.1 + this.rollP;
       if (third) {
-        const scale = inflationScale(p.inflation);
+        // Pull back further for the bigger character bodies.
+        const scale = inflationScale(p.inflation) * (this.transformOf(this.youId) ? 1.6 : 1);
         const want = this.camDist + (CHASE.back * scale - this.camDist) * Math.min(1, dt * 5);
         this.camDist = chaseCamera(this.world, cam.position, this.input.yaw, this.input.pitch, scale, cam.position, want);
       } else {

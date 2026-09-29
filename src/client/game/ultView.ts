@@ -56,6 +56,8 @@ export interface UltHost {
   /** Plays Juice's syringe jab on a player's tube man. */
   jab(id: number): void;
   keyOf(): string;
+  /** Image URL of the face the ult's character wears (lent by the real person), or null. */
+  charFace(kind: UltId): string | null;
   /** Camera shake (0..1) and a field-of-view kick. */
   shake(amount: number, fov: number): void;
 }
@@ -257,7 +259,7 @@ export class UltView {
       // Already shown when you pressed it (predicted); otherwise show it now.
       if (this.time - this.predictedAt > 1) this.selfPop(e.kind);
     } else {
-      g.hud.addKill(`${this.nameHtml(e.id)} used <b style="color:${info.color}">${info.icon} ${esc(info.name.toUpperCase())}</b>`, e.targets.includes(you));
+      g.hud.addKill(`${this.nameHtml(e.id)} turned into <b style="color:${info.color}">${info.icon} ${esc(info.name.toUpperCase())}</b>`, e.targets.includes(you));
       const head = this.headOf(e.id);
       if (head) g.hud.popup(head.clone().setY(head.y + 1), `${info.name.toUpperCase()}!`, info.color, 1.3, 1.6);
       g.audio.ultGo(e.kind, at);
@@ -299,7 +301,7 @@ export class UltView {
   private selfPop(kind: UltId): void {
     const g = this.g;
     const info = ULT_INFO[kind];
-    g.hud.ult.splash(info.name, info.icon, info.color, info.tagline, info.by);
+    g.hud.ult.splash(info.name, info.icon, info.color, info.tagline, info.by, g.charFace(kind));
     g.hud.flash(`${info.color}88`, 500);
     g.audio.ultGo(kind, null);
     g.shake(0.3, 6);

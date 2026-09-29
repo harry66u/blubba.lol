@@ -36,7 +36,7 @@ export function randomUlt(): UltId {
 export interface UltInfo {
   name: string;
   icon: string;
-  /** Whose signature move it is ('' for the default). */
+  /** The move itself (the ult is named after the regular you turn into). */
   by: string;
   blurb: string;
   /** What it says when you pop it (full-screen splash). */
@@ -54,35 +54,35 @@ export const ULT_INFO: Record<UltId, UltInfo> = {
     color: '#2ec5ff',
   },
   juice: {
-    name: 'Juice',
+    name: 'BOR',
     icon: '💉',
-    by: "BOR's signature",
+    by: 'Juice',
     blurb: 'Jab the giant syringe (it is full of air) and get JACKED for 8 s: heavier, faster, and your shots hit 30% harder.',
-    tagline: "You're BOR: heavier, faster, harder hits",
+    tagline: 'JUICED: heavier, faster, harder hits',
     color: '#ff8a1f',
   },
   chase: {
-    name: 'The Chase',
+    name: 'ABAG',
     icon: '👃',
-    by: "ABAG's signature",
+    by: 'The Chase',
     blurb: 'Sniff out the nearest enemy in front of you and hunt them down: faster, endless dashes, shots curve toward them, grabs throw extra hard.',
-    tagline: "You're ABAG: sniff them out, run them down",
+    tagline: 'Sniff them out. Run them down.',
     color: '#ff5fd2',
   },
   cropDuster: {
-    name: 'Crop Duster',
+    name: 'SOL',
     icon: '💨',
-    by: "SOL's signature",
+    by: 'Crop Duster',
     blurb: 'Bend over and let rip: a huge green shockwave launches everyone nearby and leaves a cloud that inflates and slows.',
-    tagline: "You're SOL: everybody out of the cloud!",
+    tagline: 'Everybody out of the cloud!',
     color: '#8ee000',
   },
   robot: {
-    name: 'Robot Mode',
+    name: 'KESTY',
     icon: '🤖',
-    by: "KESTY's signature",
+    by: 'Robot Mode',
     blurb: 'TARGET ACQUIRED. Locks on to up to 3 enemies in view, then fires a barrage of 6 homing mini-rockets.',
-    tagline: "You're KESTY: TARGET ACQUIRED",
+    tagline: 'TARGET ACQUIRED. EXECUTING.',
     color: '#ff3b5c',
   },
 };
