@@ -14,7 +14,10 @@ type Op =
   | { k: 'profile'; key: string }
   | { k: 'delProfile'; key: string }
   | { k: 'report'; id: number }
-  | { k: 'prune'; sessionsBefore: number; guestsBefore: number };
+  | { k: 'prune'; sessionsBefore: number; guestsBefore: number }
+  /** Copies one row (by primary key) of a table in TABLES as it is now, or deletes matching rows. */
+  | { k: 'upsert'; table: string; key: Record<string, string | number> }
+  | { k: 'delete'; table: string; key: Record<string, string | number> };
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS blubba_accounts (
@@ -45,14 +48,31 @@ const SCHEMA = `
     room TEXT NOT NULL,
     reason TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS blubba_faces (
+    account_id BIGINT PRIMARY KEY,
+    mime TEXT NOT NULL,
+    data TEXT NOT NULL,
+    updated_at BIGINT NOT NULL,
+    hidden INTEGER NOT NULL DEFAULT 0,
+    reports INTEGER NOT NULL DEFAULT 0,
+    banned INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS blubba_face_reports (
+    account_id BIGINT NOT NULL,
+    reporter TEXT NOT NULL,
+    at BIGINT NOT NULL,
+    PRIMARY KEY (account_id, reporter)
+  );
 `;
 
-const TABLES = [
-  { local: 'accounts', remote: 'blubba_accounts', cols: ['id', 'name', 'name_lower', 'pass', 'recovery', 'created_at', 'flagged'] },
-  { local: 'sessions', remote: 'blubba_sessions', cols: ['token_hash', 'account_id', 'expires_at'] },
-  { local: 'profiles', remote: 'blubba_profiles', cols: ['key', 'data', 'updated_at'] },
-  { local: 'reports', remote: 'blubba_reports', cols: ['id', 'at', 'reporter', 'target', 'target_name', 'room', 'reason'] },
-] as const;
+const TABLES: readonly { local: string; remote: string; cols: readonly string[]; pk: readonly string[] }[] = [
+  { local: 'accounts', remote: 'blubba_accounts', cols: ['id', 'name', 'name_lower', 'pass', 'recovery', 'created_at', 'flagged'], pk: ['id'] },
+  { local: 'sessions', remote: 'blubba_sessions', cols: ['token_hash', 'account_id', 'expires_at'], pk: ['token_hash'] },
+  { local: 'profiles', remote: 'blubba_profiles', cols: ['key', 'data', 'updated_at'], pk: ['key'] },
+  { local: 'reports', remote: 'blubba_reports', cols: ['id', 'at', 'reporter', 'target', 'target_name', 'room', 'reason'], pk: ['id'] },
+  { local: 'faces', remote: 'blubba_faces', cols: ['account_id', 'mime', 'data', 'updated_at', 'hidden', 'reports', 'banned'], pk: ['account_id'] },
+  { local: 'face_reports', remote: 'blubba_face_reports', cols: ['account_id', 'reporter', 'at'], pk: ['account_id', 'reporter'] },
+];
 
 /**
  * Keeps a Postgres copy of everything the SQLite store saves, for hosts whose disk is wiped on
@@ -177,6 +197,18 @@ export class Mirror {
     this.push({ k: 'prune', sessionsBefore, guestsBefore });
   }
 
+  /** A row changed in one of the simpler tables (faces, face reports). */
+  row(table: string, key: Record<string, string | number>): void {
+    const i = this.queue.findIndex((o) => o.k === 'upsert' && o.table === table && sameKey(o.key, key));
+    if (i >= 0) this.queue.splice(i, 1);
+    this.push({ k: 'upsert', table, key });
+  }
+
+  /** Rows were deleted (every row matching `key`, which may be part of the primary key). */
+  deleteRows(table: string, key: Record<string, string | number>): void {
+    this.push({ k: 'delete', table, key });
+  }
+
   private push(op: Op): void {
     this.queue.push(op);
   }
@@ -283,8 +315,34 @@ export class Mirror {
         await q('DELETE FROM blubba_sessions WHERE expires_at < $1', [op.sessionsBefore]);
         await q("DELETE FROM blubba_profiles WHERE key LIKE 'g:%' AND updated_at < $1", [op.guestsBefore]);
         return;
+      case 'upsert': {
+        const t = TABLES.find((x) => x.local === op.table)!;
+        const keys = Object.keys(op.key);
+        const r = this.db.prepare(`SELECT ${t.cols.join(', ')} FROM ${t.local} WHERE ${keys.map((c) => `${c} = ?`).join(' AND ')}`).get(...keys.map((c) => op.key[c])) as
+          | Record<string, unknown>
+          | undefined;
+        if (!r) return;
+        const rest = t.cols.filter((c) => !t.pk.includes(c));
+        await q(
+          `INSERT INTO ${t.remote} (${t.cols.join(', ')}) VALUES (${t.cols.map((_, i) => `$${i + 1}`).join(', ')})
+           ON CONFLICT (${t.pk.join(', ')}) DO ${rest.length ? `UPDATE SET ${rest.map((c) => `${c} = excluded.${c}`).join(', ')}` : 'NOTHING'}`,
+          t.cols.map((c) => r[c]),
+        );
+        return;
+      }
+      case 'delete': {
+        const t = TABLES.find((x) => x.local === op.table)!;
+        const keys = Object.keys(op.key);
+        await q(`DELETE FROM ${t.remote} WHERE ${keys.map((c, i) => `${c} = $${i + 1}`).join(' AND ')}`, keys.map((c) => op.key[c]));
+        return;
+      }
     }
   }
+}
+
+function sameKey(a: Record<string, string | number>, b: Record<string, string | number>): boolean {
+  const ka = Object.keys(a);
+  return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k]);
 }
 
 /** Postgres BIGINTs arrive as strings; SQLite wants numbers. */

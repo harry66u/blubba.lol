@@ -1,9 +1,17 @@
+import { timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ITEM_BY_ID, type ProfileView, levelForXp, sanitizeCosmetics } from '../shared/economy';
 import { checkName } from '../shared/names';
 import { type Account, type Store, accountKey, guestKey, validGuestId } from './store';
 
 const MAX_BODY = 4096;
+/** Face scans are small square photos (the client sends about 160 px, well under this). */
+const MAX_FACE_BYTES = 48 * 1024;
+const FACE_MIMES: Record<string, (b: Buffer) => boolean> = {
+  'image/webp': (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP',
+  'image/jpeg': (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  'image/png': (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+};
 
 /** Tiny per-IP token bucket for the login/register endpoints. */
 class RateLimiter {
@@ -72,7 +80,39 @@ export class Api {
     return this.store.view(c.key, c.account?.name ?? null, !!c.account);
   }
 
+  /** True when the request carries the admin token (set BUBBA_ADMIN_TOKEN, 12+ characters). */
+  private isAdmin(req: IncomingMessage): boolean {
+    const want = process.env.BUBBA_ADMIN_TOKEN ?? '';
+    const got = String(req.headers['x-admin-token'] ?? '');
+    if (want.length < 12 || got.length !== want.length) return false;
+    return timingSafeEqual(Buffer.from(got), Buffer.from(want));
+  }
+
+  /** Face images are served as images, not JSON. Returns false if the path isn't one. */
+  private serveFace(req: IncomingMessage, res: ServerResponse, path: string): boolean {
+    const m = path.match(/^\/api\/(admin\/)?face\/(\d{1,12})$/);
+    if (!m || req.method !== 'GET') return false;
+    const admin = !!m[1];
+    const face = admin && !this.isAdmin(req) ? null : this.store.face(Number(m[2]), admin);
+    if (!face) {
+      res.writeHead(404, { 'content-type': 'text/plain', 'cache-control': 'no-store' });
+      res.end('No face');
+      return true;
+    }
+    res.writeHead(200, {
+      'content-type': face.mime,
+      'content-length': face.data.length,
+      // Links carry ?v=<version>, so a new scan is a new URL.
+      'cache-control': admin ? 'no-store' : 'public, max-age=86400',
+      'x-content-type-options': 'nosniff',
+      'content-security-policy': "default-src 'none'",
+    });
+    res.end(face.data);
+    return true;
+  }
+
   async handle(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
+    if (this.serveFace(req, res, path)) return;
     const send = (status: number, body: unknown) => {
       const text = JSON.stringify(body);
       res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'content-length': Buffer.byteLength(text) });
@@ -95,13 +135,13 @@ export class Api {
     return fwd || req.socket.remoteAddress || '?';
   }
 
-  private async body(req: IncomingMessage): Promise<Record<string, unknown>> {
+  private async body(req: IncomingMessage, max = MAX_BODY): Promise<Record<string, unknown>> {
     if (req.method !== 'POST') throw new ApiError(405, 'method', 'Use POST.');
     const chunks: Buffer[] = [];
     let size = 0;
     for await (const c of req) {
       size += (c as Buffer).length;
-      if (size > MAX_BODY) throw new ApiError(413, 'too_big', 'Request too large.');
+      if (size > max) throw new ApiError(413, 'too_big', 'Request too large.');
       chunks.push(c as Buffer);
     }
     try {
@@ -118,7 +158,49 @@ export class Api {
     switch (path) {
       case '/api/me': {
         const c = this.caller(req);
-        return { account: c.account ? { name: c.account.name } : null, profile: this.view(c) };
+        return { account: c.account ? { name: c.account.name, id: c.account.id } : null, profile: this.view(c), face: c.account ? this.store.faceStatus(c.account.id) : null };
+      }
+      case '/api/face': {
+        // Upload your own face scan (accounts only; it goes on your own tube man).
+        const b = await this.body(req, MAX_FACE_BYTES * 1.4 + 1024);
+        if (!this.writeLimiter.take(ip)) throw new ApiError(429, 'slow_down', 'Slow down a little.');
+        const c = this.caller(req);
+        if (!c.account || !c.key) throw new ApiError(401, 'account_required', 'Make a free account to use a face scan.');
+        if (b.mine !== true) throw new ApiError(400, 'not_mine', 'Only use a photo of your own face.');
+        const m = String(b.image ?? '').match(/^data:(image\/(?:webp|jpeg|png));base64,([A-Za-z0-9+/]+={0,2})$/);
+        if (!m) throw new ApiError(400, 'bad_image', "That picture didn't work. Try another one.");
+        const bytes = Buffer.from(m[2], 'base64');
+        if (bytes.length > MAX_FACE_BYTES || bytes.length < 200 || !FACE_MIMES[m[1]](bytes)) throw new ApiError(400, 'bad_image', "That picture didn't work. Try another one.");
+        if (!this.store.setFace(c.account.id, m[1], bytes.toString('base64'))) throw new ApiError(403, 'face_banned', "Face scans are turned off for your account.");
+        this.onProfileChange?.(c.key);
+        return { face: this.store.faceStatus(c.account.id) };
+      }
+      case '/api/face/remove': {
+        await this.body(req);
+        const c = this.caller(req);
+        if (!c.account || !c.key) throw new ApiError(401, 'account_required', 'Log in first.');
+        const st = this.store.faceStatus(c.account.id);
+        // A banned account keeps its (empty) ban row.
+        if (!st.banned) this.store.removeFace(c.account.id);
+        this.onProfileChange?.(c.key);
+        return { face: this.store.faceStatus(c.account.id) };
+      }
+      case '/api/admin/faces': {
+        if (!this.isAdmin(req)) throw new ApiError(404, 'not_found', 'Not found.');
+        return { faces: this.store.listFaces(), reports: this.store.reports(100) };
+      }
+      case '/api/admin/face': {
+        const b = await this.body(req);
+        if (!this.isAdmin(req)) throw new ApiError(404, 'not_found', 'Not found.');
+        const id = Number(b.id);
+        if (!Number.isInteger(id) || id <= 0) throw new ApiError(400, 'bad_id', 'Bad id.');
+        if (b.action === 'remove') this.store.removeFace(id);
+        else if (b.action === 'ban') this.store.removeFace(id, true);
+        else if (b.action === 'restore') this.store.restoreFace(id);
+        else throw new ApiError(400, 'bad_action', 'Use remove, ban or restore.');
+        console.log(`[admin] face ${b.action} for account ${id}`);
+        this.onProfileChange?.(accountKey(id));
+        return { faces: this.store.listFaces() };
       }
       case '/api/account/register': {
         const b = await this.body(req);

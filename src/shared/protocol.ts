@@ -62,6 +62,8 @@ export interface RosterEntry {
   cos: Cosmetics;
   /** Player level (0 for bots). */
   level: number;
+  /** Their face scan's version (image at /api/face/<account>?v=<face>), if they have one showing. */
+  face?: { account: number; v: number };
   /** Ranked rooms only. */
   rating?: number;
   score: number;

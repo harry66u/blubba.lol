@@ -51,6 +51,8 @@ export function validGuestId(id: unknown): id is string {
 }
 
 const SESSION_DAYS = 90;
+/** Different players reporting a face hides it until an admin looks. */
+export const FACE_HIDE_REPORTS = 3;
 const GUEST_TTL_DAYS = 120;
 const RECOVERY_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
@@ -132,6 +134,21 @@ export class Store {
         reason TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS reports_target ON reports(target);
+      CREATE TABLE IF NOT EXISTS faces (
+        account_id INTEGER PRIMARY KEY,
+        mime TEXT NOT NULL,
+        data TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        hidden INTEGER NOT NULL DEFAULT 0,
+        reports INTEGER NOT NULL DEFAULT 0,
+        banned INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE IF NOT EXISTS face_reports (
+        account_id INTEGER NOT NULL,
+        reporter TEXT NOT NULL,
+        at INTEGER NOT NULL,
+        PRIMARY KEY (account_id, reporter)
+      );
     `);
     this.prune();
   }
@@ -340,6 +357,98 @@ export class Store {
       if (acc) out.push({ name: acc.name, rating: data.rating, games: data.rankedGames, level: levelForXp(data.xp).level });
     }
     return out.sort((a, b) => b.rating - a.rating).slice(0, limit);
+  }
+
+  // --- Face scans ------------------------------------------------------------------------------
+  // Accounts can put a photo of their own face on their tube man. Players can report a face (it
+  // hides itself after FACE_HIDE_REPORTS different reporters), and admins can remove any face or
+  // stop an account from uploading again.
+
+  /** Saves (or replaces) an account's face. False if the account is banned from face scans. */
+  setFace(accountId: number, mime: string, base64: string, now = Date.now()): boolean {
+    const row = this.db.prepare('SELECT banned FROM faces WHERE account_id = ?').get(accountId) as { banned: number } | undefined;
+    if (row && Number(row.banned)) return false;
+    this.db
+      .prepare(
+        'INSERT INTO faces (account_id, mime, data, updated_at, hidden, reports, banned) VALUES (?, ?, ?, ?, 0, 0, 0) ON CONFLICT(account_id) DO UPDATE SET mime = excluded.mime, data = excluded.data, updated_at = excluded.updated_at, hidden = 0, reports = 0',
+      )
+      .run(accountId, mime, base64, now);
+    this.db.prepare('DELETE FROM face_reports WHERE account_id = ?').run(accountId);
+    this.mirror?.row('faces', { account_id: accountId });
+    this.mirror?.deleteRows('face_reports', { account_id: accountId });
+    return true;
+  }
+
+  /** Removes a face. `ban` also stops the account from uploading another one. */
+  removeFace(accountId: number, ban = false): void {
+    this.db.prepare('DELETE FROM face_reports WHERE account_id = ?').run(accountId);
+    this.mirror?.deleteRows('face_reports', { account_id: accountId });
+    if (ban) {
+      this.db
+        .prepare("INSERT INTO faces (account_id, mime, data, updated_at, hidden, reports, banned) VALUES (?, '', '', ?, 1, 0, 1) ON CONFLICT(account_id) DO UPDATE SET mime = '', data = '', hidden = 1, banned = 1")
+        .run(accountId, Date.now());
+      this.mirror?.row('faces', { account_id: accountId });
+    } else {
+      this.db.prepare('DELETE FROM faces WHERE account_id = ?').run(accountId);
+      this.mirror?.deleteRows('faces', { account_id: accountId });
+    }
+  }
+
+  /** Undoes a report-hide (and a ban). */
+  restoreFace(accountId: number): void {
+    this.db.prepare('UPDATE faces SET hidden = 0, reports = 0, banned = 0 WHERE account_id = ?').run(accountId);
+    this.db.prepare("DELETE FROM faces WHERE account_id = ? AND data = ''").run(accountId);
+    this.db.prepare('DELETE FROM face_reports WHERE account_id = ?').run(accountId);
+    if (this.db.prepare('SELECT 1 FROM faces WHERE account_id = ?').get(accountId)) this.mirror?.row('faces', { account_id: accountId });
+    else this.mirror?.deleteRows('faces', { account_id: accountId });
+    this.mirror?.deleteRows('face_reports', { account_id: accountId });
+  }
+
+  /** The face image, or null if there is none or it is hidden. `evenHidden` is for admins. */
+  face(accountId: number, evenHidden = false): { mime: string; data: Buffer; version: number } | null {
+    const r = this.db.prepare('SELECT mime, data, updated_at, hidden FROM faces WHERE account_id = ?').get(accountId) as
+      | { mime: string; data: string; updated_at: number; hidden: number }
+      | undefined;
+    if (!r || !r.data || (Number(r.hidden) && !evenHidden)) return null;
+    return { mime: r.mime, data: Buffer.from(r.data, 'base64'), version: Number(r.updated_at) };
+  }
+
+  /** What the owner sees: their face's version (for the image URL) and whether it's hidden or banned. */
+  faceStatus(accountId: number): { version: number | null; hidden: boolean; banned: boolean } {
+    const r = this.db.prepare('SELECT updated_at, hidden, banned, data FROM faces WHERE account_id = ?').get(accountId) as
+      | { updated_at: number; hidden: number; banned: number; data: string }
+      | undefined;
+    if (!r) return { version: null, hidden: false, banned: false };
+    return { version: r.data ? Number(r.updated_at) : null, hidden: !!Number(r.hidden), banned: !!Number(r.banned) };
+  }
+
+  /** Version stamp of an account's visible face (for rosters), or undefined. */
+  faceVersion(accountId: number | null): number | undefined {
+    if (accountId === null) return undefined;
+    const r = this.db.prepare("SELECT updated_at FROM faces WHERE account_id = ? AND hidden = 0 AND data != ''").get(accountId) as { updated_at: number } | undefined;
+    return r ? Number(r.updated_at) : undefined;
+  }
+
+  /** One report per reporter. Returns true when this report hid the face. */
+  reportFace(accountId: number, reporter: string, now = Date.now()): boolean {
+    const face = this.db.prepare('SELECT hidden, data FROM faces WHERE account_id = ?').get(accountId) as { hidden: number; data: string } | undefined;
+    if (!face || !face.data || Number(face.hidden)) return false;
+    const res = this.db.prepare('INSERT OR IGNORE INTO face_reports (account_id, reporter, at) VALUES (?, ?, ?)').run(accountId, reporter, now);
+    if (!Number(res.changes)) return false;
+    this.mirror?.row('face_reports', { account_id: accountId, reporter });
+    const n = Number((this.db.prepare('SELECT COUNT(*) AS n FROM face_reports WHERE account_id = ?').get(accountId) as { n: number }).n);
+    const hide = n >= FACE_HIDE_REPORTS;
+    this.db.prepare('UPDATE faces SET reports = ?, hidden = ? WHERE account_id = ?').run(n, hide ? 1 : 0, accountId);
+    this.mirror?.row('faces', { account_id: accountId });
+    return hide;
+  }
+
+  /** Every face with its owner and status, newest first (admin page). */
+  listFaces(): { id: number; name: string; updatedAt: number; hidden: boolean; banned: boolean; reports: number }[] {
+    const rows = this.db
+      .prepare('SELECT f.account_id AS id, a.name AS name, f.updated_at AS at, f.hidden AS hidden, f.banned AS banned, f.reports AS reports FROM faces f LEFT JOIN accounts a ON a.id = f.account_id ORDER BY f.updated_at DESC')
+      .all() as { id: number; name: string | null; at: number; hidden: number; banned: number; reports: number }[];
+    return rows.map((r) => ({ id: Number(r.id), name: r.name ?? '?', updatedAt: Number(r.at), hidden: !!Number(r.hidden), banned: !!Number(r.banned), reports: Number(r.reports) }));
   }
 
   // --- Reports ---------------------------------------------------------------------------------

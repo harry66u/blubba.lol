@@ -4,6 +4,7 @@ import { extname, join, resolve } from 'node:path';
 import { brotliCompressSync, gzipSync, constants as zlibConstants } from 'node:zlib';
 import pg from 'pg';
 import { WebSocketServer } from 'ws';
+import { ADMIN_HTML } from './adminPage';
 import { Api } from './api';
 import { Lobby } from './lobby';
 import { Store } from './store';
@@ -94,6 +95,11 @@ function serveStatic(req: IncomingMessage, res: ServerResponse): void {
   if (path === '/api/health') {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify({ ok: true, ...lobby.stats(), ...store.storageInfo() }));
+    return;
+  }
+  if (path === '/admin') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-robots-tag': 'noindex', 'x-frame-options': 'DENY' });
+    res.end(ADMIN_HTML);
     return;
   }
   if (path.startsWith('/api/')) {

@@ -64,7 +64,7 @@ describe.skipIf(!url)('database mirror (real Postgres)', () => {
   afterAll(() => pool?.end());
 
   it('accounts, sessions and progress survive a restart with a wiped disk', async () => {
-    for (const t of ['blubba_accounts', 'blubba_sessions', 'blubba_profiles', 'blubba_reports']) await pool!.query(`DROP TABLE IF EXISTS ${t}`);
+    for (const t of ['blubba_accounts', 'blubba_sessions', 'blubba_profiles', 'blubba_reports', 'blubba_faces', 'blubba_face_reports']) await pool!.query(`DROP TABLE IF EXISTS ${t}`);
     const a = new Store(':memory:');
     await a.attachMirror(pool!);
     const made = await a.createAccount('Survivor', 'correct horse');
@@ -73,6 +73,8 @@ describe.skipIf(!url)('database mirror (real Postgres)', () => {
     a.profile(key).coins = 321;
     a.saveProfile(key);
     a.addReport('g:someone', key, 'Survivor', 'ABCD', 'name');
+    a.setFace(made!.account.id, 'image/png', Buffer.from('a face').toString('base64'));
+    a.reportFace(made!.account.id, 'g:someone');
     await a.shutdown();
 
     // A fresh server with an empty local database loads everything back.
@@ -83,6 +85,8 @@ describe.skipIf(!url)('database mirror (real Postgres)', () => {
     expect(b.sessionAccount(token)).toEqual(made!.account);
     expect(b.profile(key).coins).toBe(321);
     expect(b.reports()).toHaveLength(1);
+    expect(b.face(made!.account.id)?.data.toString()).toBe('a face');
+    expect(b.listFaces()[0]).toMatchObject({ id: made!.account.id, reports: 1, hidden: false });
     // New accounts keep counting up from the loaded ids.
     const next = await b.createAccount('Second', 'another pass');
     expect(next!.account.id).toBeGreaterThan(made!.account.id);
@@ -90,7 +94,7 @@ describe.skipIf(!url)('database mirror (real Postgres)', () => {
   });
 
   it('moves an existing local database into an empty Postgres', async () => {
-    for (const t of ['blubba_accounts', 'blubba_sessions', 'blubba_profiles', 'blubba_reports']) await pool!.query(`DROP TABLE IF EXISTS ${t}`);
+    for (const t of ['blubba_accounts', 'blubba_sessions', 'blubba_profiles', 'blubba_reports', 'blubba_faces', 'blubba_face_reports']) await pool!.query(`DROP TABLE IF EXISTS ${t}`);
     const local = new Store(':memory:');
     const made = await local.createAccount('OldTimer', 'old password');
     local.profile(accountKey(made!.account.id)).xp = 999;

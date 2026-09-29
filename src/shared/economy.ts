@@ -354,10 +354,11 @@ export interface ProgressReport {
 /** The only way to talk: fixed, friendly presets. No free text. */
 export const QUICK_CHAT = ['Nice shot!', 'Good game!', 'Watch out!', 'Help!', "Let's go!", 'Oops!', 'Thanks!', 'Rematch?'] as const;
 
-export const REPORT_REASONS = ['name', 'cheating', 'mean', 'other'] as const;
+export const REPORT_REASONS = ['name', 'face', 'cheating', 'mean', 'other'] as const;
 export type ReportReason = (typeof REPORT_REASONS)[number];
 export const REPORT_REASON_TEXT: Record<ReportReason, string> = {
   name: 'Bad name',
+  face: 'Bad face picture',
   cheating: 'Cheating',
   mean: 'Being mean / griefing',
   other: 'Something else',

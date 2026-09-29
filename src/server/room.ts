@@ -381,6 +381,14 @@ export class Room {
     conn.reported.add(target);
     const reporterKey = conn.key ?? `anon:${conn.guestId || conn.playerId}`;
     this.store?.addReport(reporterKey, victim.key ?? `anon:${victim.guestId}`, victim.name, this.code, String(reason));
+    if (reason === 'face') {
+      // Enough different players reporting a face scan hides it until an admin looks.
+      if (victim.accountId !== null && this.store?.reportFace(victim.accountId, reporterKey)) {
+        this.rosterDirty = true;
+        this.send(victim, { type: 'renamed', name: victim.name, message: 'Other players reported your face scan, so it is hidden until a moderator checks it.' });
+      }
+      return;
+    }
     if (reason !== 'name') return;
     const set = this.nameReports.get(target) ?? new Set<string>();
     set.add(reporterKey);
@@ -500,6 +508,11 @@ export class Room {
     }
   }
 
+  private faceOf(conn: Conn | undefined): RosterEntry['face'] {
+    const v = conn && this.store ? this.store.faceVersion(conn.accountId) : undefined;
+    return v !== undefined && conn?.accountId != null ? { account: conn.accountId, v } : undefined;
+  }
+
   roster(): RosterEntry[] {
     return [...this.sim.players.values()].map((p) => {
       const conn = this.conns.get(p.id);
@@ -512,6 +525,7 @@ export class Room {
       team: p.team,
       cos: p.cos,
       level: profile ? levelForXp(profile.xp).level : p.isBot ? 0 : 1,
+      face: this.faceOf(conn),
       rating: this.ranked && profile ? profile.rating : undefined,
       score: p.score,
       kos: p.stats.kos,
