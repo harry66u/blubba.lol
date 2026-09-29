@@ -117,6 +117,8 @@ export interface SimPlayer {
   koTimes: number[];
   /** Sim time until which this player is turned into an ult character (bigger hitbox). */
   bigUntil: number;
+  /** Who hit this player, and when (sim time): for ult assists. Cleared on knockout. */
+  hitBy: Map<number, number>;
   /** Inflation before a max-pressure event (-1 when not in one). */
   savedInflation: number;
   /** Last time each target got a "blow" event from this player's leaf blower. */
@@ -360,6 +362,12 @@ export class GameSim {
   crownId = -1;
   /** Team scores (team knockouts or goals). */
   teamScores: [number, number] = [0, 0];
+
+  /** A team's score in its own units: knockouts, goals, or (Pump) its giant's fill 0..1. */
+  teamScoreOf(team: number): number {
+    const t = team === 1 ? 1 : 0;
+    return this.pumpGame ? this.pumpGame.fill[t] : this.teamScores[t];
+  }
   readonly ballGame: BallGame | null;
   readonly pumpGame: PumpGame | null;
   private finalAnnounced = false;
@@ -455,6 +463,7 @@ export class GameSim {
       chainCool: new Map(),
       koTimes: [],
       bigUntil: 0,
+      hitBy: new Map(),
       savedInflation: -1,
       cos: { ...(opts.cos ?? DEFAULT_COSMETICS) },
       outAt: Infinity,
@@ -2254,7 +2263,9 @@ export class GameSim {
       const winner = this.pumpGame.step(this.dt, list);
       for (const id of this.pumpGame.pumping) {
         const p = this.players.get(id);
-        if (p) p.stats.pumpTime += this.dt;
+        if (!p) continue;
+        p.stats.pumpTime += this.dt;
+        this.ults.onPump(p, this.dt);
       }
       if (winner !== null) {
         this.events.push({ t: 'pumpFull', tick: this.tick, team: winner });
@@ -2272,6 +2283,7 @@ export class GameSim {
       if (scorer && scorer.team === ev.team) {
         scorer.score++;
         scorer.stats.goals++;
+        this.ults.onGoal(scorer);
       }
       this.events.push({ t: 'goal', tick: this.tick, team: ev.team, scorer: ev.scorer, x: b.x, y: b.y, z: b.z });
       if (this.teamScores[ev.team] >= BALANCE.modes.ball.goalTarget) this.pendingEnd = true;
@@ -2674,7 +2686,7 @@ export class GameSim {
       if (this.mode === 'teamKnockout' && killer.team >= 0) this.teamScores[killer.team as 0 | 1] += points;
       killer.score += points;
       killer.stats.kos++;
-      this.ults.onKo(killer);
+      this.ults.onKo(killer, p);
       killer.streak++;
       this.streakReward(killer);
       p.nemesis = killer.id;

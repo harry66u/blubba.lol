@@ -271,3 +271,26 @@ The spec leaves the tech stack and many details open. This file records what was
 - **Reconnect rejoins, it doesn't resume.** After a drop you land back in the same private room
   or a room of the same mode with your saved progress; the match state of your old body is not
   restored (the server may have restarted).
+
+## Ult economy
+
+- **You earn it by fighting.** Landing hits is the main source (per inflation you add), a
+  knockout is a chunk (25%), an assist (you hit them within 5 s before someone else knocked them
+  out) is 12%, taking hits gives a little (so the player getting farmed isn't left behind), and
+  a slow trickle (a full meter in 90 s) means nobody is ever stuck. Ball goals (35%) and time on
+  your pump count in those modes, so objective players aren't punished for not brawling.
+- **Charge helps whoever is behind.** Earned charge (not the trickle) is multiplied by 1.3 for a
+  team trailing by 2+ (or 12% of a pump), or a player 3+ knockouts off the lead; a clear leader
+  gets 0.75. In the bot soak this keeps ult counts within a couple of each other across an
+  8-player free-for-all and gives the trailing team more ults than the leading one.
+- **Kept on knockout.** Dying never costs your ult: it's the losing player's way back into a
+  fight. A new spawn still deals a new random character. The meter resets only at match start.
+- **Readable at a glance.** The meter shows whose ult and how full ("ABAG 64%"), "+N%" floats off
+  it as you earn (labelled KO / ASSIST / GOAL for the big ones), it pulses and chimes when full
+  (the key to press glows in the ult's color), a one-time tip explains it at 50%, and enemies
+  with a ready ult show a ⚡ on their name tag.
+- **Inputs.** X on the keyboard (next to WASD), clicking the left stick on a controller (free,
+  and your thumb is already there), the ULT button on touch; all remappable.
+- **Target pace.** About one ult per player per minute of constant bot fighting (humans shoot
+  less, so slower), the first around a minute in; each ult should be worth zero to two
+  knockouts. `scripts/ult-soak.ts` prints these numbers per mode for balance passes.

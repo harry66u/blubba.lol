@@ -85,9 +85,10 @@ export class UltHud {
       this.arc.setAttribute('stroke', s.color);
       this.meter.title = s.name;
     });
-    this.setIf('ready', `${s.ready}|${s.alive}|${s.name}`, () => {
+    this.setIf('ready', `${s.ready}|${s.alive}|${s.name}|${s.ready ? 100 : q}`, () => {
       this.meter.classList.toggle('ready', s.ready && s.alive);
-      this.label.textContent = s.ready ? `${s.name.toUpperCase()} READY` : s.name.toUpperCase();
+      // Charging: whose ult and how full; full: READY.
+      this.label.textContent = s.ready ? `${s.name.toUpperCase()} READY` : `${s.name.toUpperCase()} ${q}%`;
     });
     this.setIf('key', s.key, () => (this.key.textContent = s.key));
     this.setIf('dead', s.alive, () => this.meter.classList.toggle('dead', !s.alive));
@@ -100,6 +101,16 @@ export class UltHud {
     this.setIf('gas', s.gassed, () => this.gas.classList.toggle('on', s.gassed));
     this.setIf('scan', s.scanning, () => this.scan.classList.toggle('on', s.scanning));
     this.setIf('chased', s.chased, () => this.chase.classList.toggle('on', s.chased));
+  }
+
+  /** Charge you just earned: "+12%" (and why, for knockouts, assists and goals) floats up off the meter. */
+  gain(amount: number, why: string): void {
+    if (amount <= 0) return;
+    const chips = this.meter.querySelectorAll('.ult-gain');
+    if (chips.length >= 3) chips[0].remove();
+    const chip = el('div', { class: `ult-gain${why ? ' big' : ''}`, text: `+${amount}%${why ? ` ${why}` : ''}` });
+    this.meter.append(chip);
+    window.setTimeout(() => chip.remove(), 1300);
   }
 
   /** The meter just filled: it bounces and rings. */

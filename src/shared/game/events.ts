@@ -94,6 +94,8 @@ export type GameEvent =
    */
   | { t: 'round'; tick: number; n: number; winner: number; wins: [number, number][]; over: boolean; timeUp: boolean }
   | { t: 'goal'; tick: number; team: 0 | 1; scorer: number; x: number; y: number; z: number }
+  /** Ult charge worth calling out (a knockout, an assist, a goal) for the player who earned it. */
+  | { t: 'charge'; tick: number; id: number; why: 'ko' | 'assist' | 'goal'; amount: number }
   | { t: 'ballOut'; tick: number; x: number; y: number; z: number }
   | { t: 'ballReset'; tick: number }
   | { t: 'pumpFull'; tick: number; team: 0 | 1 }

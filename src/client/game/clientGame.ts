@@ -1595,6 +1595,9 @@ export class ClientGame {
       case 'gotcha':
         this.ultView.onEvent(e);
         break;
+      case 'charge':
+        if (e.id === this.youId) this.ultView.onCharge(e.why, e.amount);
+        break;
       case 'grapple': {
         const from = () => this.handPos(e.id);
         const fixed = new THREE.Vector3(e.x, e.y, e.z);
@@ -3064,6 +3067,7 @@ export class ClientGame {
     this.tips.update(dt, {
       active: alive && this.input.enabled && this.match.phase !== 'results' && !this.replay.active,
       features: this.ctx.features,
+      ultHalf: this.pred.ult >= 0.5,
       keyOf: k,
       utilName: (i) => UTILITY_INFO[this.equippedUtils[i]].name,
     });

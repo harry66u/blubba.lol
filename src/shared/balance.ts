@@ -533,15 +533,34 @@ export const BALANCE = {
    * in the loadout. Each should be worth about 0-2 knockouts in a busy fight, never an instant win.
    */
   ults: {
+    /**
+     * The meter (0..1). Fighting fills it: landing hits is the main source, knockouts and assists
+     * are big chunks, taking hits helps a little, and it trickles in over time so nobody is ever
+     * stuck. Ball goals and pumping count in those modes. It's kept when you're knocked out, and
+     * earned charge is scaled by `catchUp` so it helps whoever is behind rather than snowballing.
+     */
     meter: {
-      /** Fill per second while alive (about 40 s on its own). */
-      perSecond: 1 / 40,
+      /** Fill per second while alive (a full meter in a minute and a half on its own). */
+      perSecond: 1 / 90,
       /** Fill per 100% of inflation you pump into enemies (shots, streams, throws, chains). */
-      perInflation: 1.6,
-      /** A knockout fills half of it. */
-      perKo: 0.5,
+      perInflation: 0.45,
+      /** A knockout. */
+      perKo: 0.25,
+      /** You hit someone in the last `assistWindow` seconds and a teammate (or anyone) knocked them out. */
+      perAssist: 0.12,
+      assistWindow: 5,
       /** Fill per 100% of inflation you take: a little help when you're the one getting blasted. */
-      perInflationTaken: 0.55,
+      perInflationTaken: 0.18,
+      /** Ball: scoring a goal. Pump: per second standing on your pump. */
+      perGoal: 0.35,
+      perPumpSecond: 1 / 60,
+      /**
+       * Catch-up on earned charge (not the trickle): behind (a team trailing by `teamGap`, or a
+       * player well off the lead) charges faster; a clear leader charges slower.
+       */
+      catchUp: { behind: 1.3, ahead: 0.75, teamGap: 2, pumpGap: 0.12, soloGap: 3 },
+      /** A 1v1 has one target to hit, so fighting charges faster there. */
+      duelMult: 1.4,
     },
     /** Big Blow: the next trigger pull fires one giant air blast at full power, with any weapon. */
     bigBlow: { projSpeed: 58, radius: 1.35, lifetime: 0.95, blastRadius: 5.4, knockback: 1.9, inflation: 0.24, fireCooldown: 0.5 },

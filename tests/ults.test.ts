@@ -110,6 +110,67 @@ describe('ult meter', () => {
   });
 });
 
+describe('earning ults fairly', () => {
+  it('assists pay the players who softened someone up, and big chunks are announced', () => {
+    const { sim, ps } = setup([{}, {}, {}]);
+    const [a, b, c] = ps;
+    // B lands a hit on C, then A knocks C out: A gets the knockout, B the assist.
+    sim.applyHit(c, b.id, 0, 0, -1, 1, 0.05, { direct: true, low: false, x: 0, y: 1, z: 0 });
+    const bAfterHit = b.state.ult;
+    c.lastAttacker = a.id;
+    c.lastAttackTime = sim.time;
+    sim.drainEvents();
+    sim.knockout(c);
+    const ev = sim.drainEvents();
+    expect(a.state.ult).toBeCloseTo(M.perKo, 5);
+    expect(b.state.ult).toBeCloseTo(bAfterHit + M.perAssist, 5);
+    expect(ev.filter((e) => e.t === 'charge').map((e) => (e as { why: string }).why).sort()).toEqual(['assist', 'ko']);
+    // An old hit (outside the window) is no assist.
+    sim.applyHit(a, b.id, 0, 0, -1, 1, 0.05, { direct: true, low: false, x: 0, y: 1, z: 0 });
+    sim.time += M.assistWindow + 1;
+    const bBefore = b.state.ult;
+    a.lastAttacker = c.id;
+    a.lastAttackTime = sim.time;
+    sim.knockout(a);
+    expect(b.state.ult).toBe(bBefore);
+  });
+
+  it('whoever is behind charges faster and a runaway leader slower, in free-for-all and teams', () => {
+    const { sim, ps } = setup([{}, {}, {}]);
+    const [a, b, c] = ps;
+    expect(sim.ults.catchUp(a)).toBe(1);
+    a.score = 5;
+    b.score = 1;
+    c.score = 4;
+    expect(sim.ults.catchUp(a)).toBe(1);
+    c.score = 2;
+    expect(sim.ults.catchUp(a)).toBe(M.catchUp.ahead);
+    expect(sim.ults.catchUp(b)).toBe(M.catchUp.behind);
+    // The multiplier applies to earned charge.
+    sim.ults.charge(b, 0.2);
+    expect(b.state.ult).toBeCloseTo(0.2 * M.catchUp.behind, 5);
+
+    const team = new GameSim({ map: DEALERSHIP, mode: 'teamKnockout', durationSec: 999 });
+    const t0 = team.addPlayer('x', { loadout: sanitizeLoadout({}) });
+    const t1 = team.addPlayer('y', { loadout: sanitizeLoadout({}) });
+    if (team.phase !== 'playing') team.startMatch();
+    expect(t0.team).not.toBe(t1.team);
+    team.teamScores[t0.team as 0 | 1] = 7;
+    team.teamScores[t1.team as 0 | 1] = 4;
+    expect(team.ults.catchUp(t0)).toBe(M.catchUp.ahead);
+    expect(team.ults.catchUp(t1)).toBe(M.catchUp.behind);
+    team.teamScores[t1.team as 0 | 1] = 6;
+    expect(team.ults.catchUp(t1)).toBe(1);
+  });
+
+  it('a full meter from fighting takes roughly 7-10 good hits or three knockouts, never a single one', () => {
+    // A strong charged hit adds about 10% inflation.
+    expect(0.1 * M.perInflation).toBeLessThan(0.2);
+    expect(M.perKo * M.catchUp.behind).toBeLessThan(0.5);
+    expect(1 / M.perSecond).toBeGreaterThan(45);
+  });
+});
+
 describe('activating an ult', () => {
   it('needs a full meter, empties it, and tells everyone', () => {
     const { sim, ps, ds } = setup([{ ult: 'juice' }, {}]);

@@ -6737,3 +6737,54 @@ body.mouse-play .touch-controls {
   display: flex;
   gap: 6px;
 }
+
+/* Ult charge you earned: "+12%" (or "+30% KO") floats up off the meter and fades. */
+.ult-meter .ult-gain {
+  position: absolute;
+  left: 50%;
+  bottom: 106px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  -webkit-text-stroke: 4px var(--ink);
+  paint-order: stroke fill;
+  pointer-events: none;
+  animation: ult-gain 1.25s ease-out forwards;
+}
+.ult-meter .ult-gain.big {
+  font-size: 19px;
+  color: var(--ult);
+}
+@keyframes ult-gain {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 6px) scale(0.8);
+  }
+  15% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1.08);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -26px) scale(1);
+  }
+}
+
+/* Ready: the key to press glows in the ult's color too. */
+.ult-meter.ready .ult-key {
+  background: var(--ult);
+  color: var(--ink);
+  border-color: var(--ink);
+  animation: ult-key 0.7s ease-in-out infinite alternate;
+}
+@keyframes ult-key {
+  to {
+    transform: translateX(-50%) scale(1.15);
+  }
+}

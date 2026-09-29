@@ -91,14 +91,79 @@ export class UltSystem {
   onHit(target: SimPlayer, attackerId: number, gain: number, fromUlt: boolean): void {
     const M = BALANCE.ults.meter;
     if (attackerId < 0 || attackerId === target.id) return;
-    chargeUlt(target.state, gain * M.perInflationTaken);
+    this.charge(target, gain * M.perInflationTaken);
     const a = this.sim.players.get(attackerId);
+    if (!a) return;
+    // Who's been hitting whom, for assists.
+    target.hitBy.set(attackerId, this.sim.time);
     // Ult hits don't refill the meter that fired them.
-    if (a && !fromUlt) chargeUlt(a.state, gain * M.perInflation);
+    if (!fromUlt) this.charge(a, gain * M.perInflation);
   }
 
-  onKo(killer: SimPlayer): void {
-    chargeUlt(killer.state, BALANCE.ults.meter.perKo);
+  /** A knockout: a chunk for the killer, a smaller one for everyone else who hit the victim lately. */
+  onKo(killer: SimPlayer, victim: SimPlayer): void {
+    const M = BALANCE.ults.meter;
+    this.charge(killer, M.perKo, 'ko');
+    for (const [id, at] of victim.hitBy) {
+      if (id === killer.id || this.sim.time - at > M.assistWindow) continue;
+      const helper = this.sim.players.get(id);
+      if (helper && this.sim.isEnemy(id, victim.id)) this.charge(helper, M.perAssist, 'assist');
+    }
+    victim.hitBy.clear();
+  }
+
+  /** Ball: a goal (own goals don't count). */
+  onGoal(scorer: SimPlayer): void {
+    this.charge(scorer, BALANCE.ults.meter.perGoal, 'goal');
+  }
+
+  /** Pump: standing on your pump fills it too. */
+  onPump(p: SimPlayer, dt: number): void {
+    this.charge(p, BALANCE.ults.meter.perPumpSecond * dt);
+  }
+
+  /**
+   * Earned charge, scaled by how the player (or their team) is doing: behind charges faster, a
+   * clear leader a little slower. Big chunks are announced to the player who earned them.
+   */
+  charge(p: SimPlayer, amount: number, why?: 'ko' | 'assist' | 'goal'): void {
+    if (amount <= 0) return;
+    const before = p.state.ult;
+    const mode = this.sim.mode === 'duel' ? BALANCE.ults.meter.duelMult : 1;
+    chargeUlt(p.state, amount * this.catchUp(p) * mode);
+    const got = p.state.ult - before;
+    if (why && got > 0.005) this.sim.events.push({ t: 'charge', tick: this.sim.tick, id: p.id, why, amount: Math.round(got * 100) });
+  }
+
+  /** The catch-up multiplier for a player right now (1 when things are close). */
+  catchUp(p: SimPlayer): number {
+    const C = BALANCE.ults.meter.catchUp;
+    const sim = this.sim;
+    if (sim.phase !== 'playing') return 1;
+    if (p.team >= 0 && (sim.mode === 'teamKnockout' || sim.mode === 'ball' || sim.mode === 'pump')) {
+      const mine = sim.teamScoreOf(p.team);
+      const theirs = sim.teamScoreOf(1 - p.team);
+      const gap = sim.mode === 'pump' ? C.pumpGap : C.teamGap;
+      if (theirs - mine >= gap) return C.behind;
+      if (mine - theirs >= gap) return C.ahead;
+      return 1;
+    }
+    // Free-for-all (and 1v1, and Sudden Death by rounds won): compared with the leader.
+    const score = (q: SimPlayer) => (sim.suddenDeath ? q.roundWins : q.score);
+    let best = -Infinity;
+    let second = -Infinity;
+    for (const q of sim.players.values()) {
+      const v = score(q);
+      if (v > best) {
+        second = best;
+        best = v;
+      } else if (v > second) second = v;
+    }
+    const mine = score(p);
+    const gap = sim.suddenDeath || sim.mode === 'duel' ? 2 : C.soloGap;
+    if (mine === best && best - second >= gap) return C.ahead;
+    if (best - mine >= gap) return C.behind;
+    return 1;
   }
 
   // --- Per tick ------------------------------------------------------------------------------

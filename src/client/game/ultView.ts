@@ -642,7 +642,7 @@ export class UltView {
     this.updateClouds(dt);
     this.updateRoad(players);
     this.auras(dt, players);
-    this.updateHud(players);
+    this.updateHud(players, dt);
   }
 
   /** A glowing nose bobbing over whoever each Chase is after. */
@@ -719,9 +719,38 @@ export class UltView {
     }
   }
 
-  private updateHud(players: UltPlayerView[]): void {
+  /** Ult charge you earned that deserves a callout (a knockout, an assist, a goal). */
+  onCharge(why: 'ko' | 'assist' | 'goal', amount: number): void {
+    const label = why === 'ko' ? 'KO' : why === 'assist' ? 'ASSIST' : 'GOAL';
+    this.g.hud.ult.gain(amount, label);
+    // Already shown: don't count it again as plain charge.
+    this.shownCharge += amount / 100;
+  }
+
+  /** Charge from hits and time, gathered up and shown as "+N%" now and then. */
+  private chargeFeedback(frac: number, dt: number): void {
+    const d = frac - this.lastFrac;
+    this.lastFrac = frac;
+    if (d > 0 && d < 0.9) this.pendingCharge += d;
+    this.chargeTimer -= dt;
+    if (this.chargeTimer > 0) return;
+    this.chargeTimer = 0.45;
+    const extra = this.pendingCharge - this.shownCharge;
+    this.pendingCharge = 0;
+    this.shownCharge = 0;
+    // The trickle over time (about 1% a second) isn't worth a popup; hits are.
+    if (extra >= 0.03) this.g.hud.ult.gain(Math.round(extra * 100), '');
+  }
+
+  private lastFrac = 0;
+  private pendingCharge = 0;
+  private shownCharge = 0;
+  private chargeTimer = 0;
+
+  private updateHud(players: UltPlayerView[], dt: number): void {
     const g = this.g;
     const p = g.pred();
+    this.chargeFeedback(g.alive() ? p.ult : this.lastFrac, dt);
     const alive = g.alive();
     const kind = ultOf(p);
     const info = ULT_INFO[kind];

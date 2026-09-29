@@ -5,8 +5,8 @@ export interface TipDef {
   action: Action;
   title: string;
   text: string;
-  /** Only shown when the room has this ability turned on. */
-  needs?: 'brace' | 'grab' | 'grapple';
+  /** Only shown when the room has this ability turned on (or, for the ult, once it's half full). */
+  needs?: 'brace' | 'grab' | 'grapple' | 'ultHalf';
 }
 
 export interface TipView {
@@ -17,6 +17,7 @@ export interface TipView {
 
 export const TIPS: TipDef[] = [
   { action: 'dash', title: 'DASH', text: 'A fart-powered burst. Works in mid-air: your best way back from the edge.' },
+  { action: 'ult', title: 'ULT', text: 'Your ult fills from hits, knockouts, assists and time. At 100%, press it to turn into the character on the meter!', needs: 'ultHalf' },
   { action: 'camera', title: 'CAMERA', text: 'Switch between first and third person.' },
   { action: 'reload', title: 'RELOAD', text: 'Top up your air before the next fight.' },
   { action: 'brace', title: 'BRACE', text: 'Tense up right before a hit to shrug off most of the knockback.', needs: 'brace' },
@@ -55,6 +56,8 @@ export interface TipContext {
   /** Alive and in a match where tips make sense. */
   active: boolean;
   features: { brace: boolean; grab: boolean; grapple: boolean };
+  /** The ult meter is at least half full (the ult tip waits for that). */
+  ultHalf: boolean;
   keyOf: (a: Action) => string;
   /** Replaces the generic utility text with the utility's name. */
   utilName: (slot: 0 | 1) => string;
@@ -100,7 +103,7 @@ export class TipCoach {
       return;
     }
     if (this.timer > 0) return;
-    const next = TIPS.find((t) => !this.saved.used[t.action] && (this.saved.shown[t.action] ?? 0) < MAX_SHOWS && (!t.needs || ctx.features[t.needs]));
+    const next = TIPS.find((t) => !this.saved.used[t.action] && (this.saved.shown[t.action] ?? 0) < MAX_SHOWS && (!t.needs || (t.needs === 'ultHalf' ? ctx.ultHalf : ctx.features[t.needs])));
     if (!next) {
       this.timer = 30;
       return;
