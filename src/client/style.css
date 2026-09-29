@@ -5852,3 +5852,48 @@ body.touch .ult-splash .tag {
   }
 }
 /* --- End map picker --------------------------------------------------------------------------- */
+
+/* Main menu: "🟢 37 active" (players today). */
+.active-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 6px;
+  padding: 4px 12px 4px 10px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.92);
+  border: 2px solid var(--ink);
+  box-shadow: var(--lip-sm);
+  font-weight: 800;
+  font-size: var(--fs-sm);
+  color: var(--ink);
+}
+.active-pill .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #2bd46a;
+  box-shadow: 0 0 0 3px rgba(43, 212, 106, 0.25);
+  animation: active-dot 1.6s ease-in-out infinite;
+}
+@keyframes active-dot {
+  50% {
+    box-shadow: 0 0 0 6px rgba(43, 212, 106, 0.08);
+  }
+}
+.active-pill.hidden {
+  display: none;
+}
+/* Phones held sideways: the active count sits beside the logo, not under it. */
+@media (max-height: 500px) and (min-width: 600px) {
+  .main-menu .menu-head {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+  }
+  .main-menu .menu-head .active-pill {
+    margin: 0 0 0 44px;
+    padding: 2px 9px 2px 8px;
+    font-size: 12px;
+  }
+}

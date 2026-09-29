@@ -161,7 +161,9 @@ export class Api {
     switch (path) {
       case '/api/me': {
         const c = this.caller(req);
+        if (c.key) this.store.markActive(c.key);
         return {
+          active: this.store.activeToday(),
           account: c.account ? { name: c.account.name, id: c.account.id } : null,
           profile: this.view(c),
           face: c.account ? this.store.faceStatus(c.account.id) : null,

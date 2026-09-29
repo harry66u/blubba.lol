@@ -34,6 +34,8 @@ export class AccountClient {
   account: { name: string; id?: number } | null = null;
   /** Your face scan: its version (null = none), and whether reports or a moderator hid it. */
   face: FaceStatus | null = null;
+  /** How many different players opened the game today (shown as "active" on the menu). */
+  active: number | null = null;
   /** "I'm the real BOR": the character you lent your face to, and whether an admin approved it. */
   character: { character: string; approved: boolean } | null = null;
   profile: ProfileView = AccountClient.blankProfile();
@@ -111,8 +113,9 @@ export class AccountClient {
   }
 
   async refresh(): Promise<void> {
-    const r = await this.call<{ account: { name: string; id: number } | null; profile: ProfileView | null; face: FaceStatus | null; character?: { character: string; approved: boolean } | null }>('/api/me');
+    const r = await this.call<{ active?: number; account: { name: string; id: number } | null; profile: ProfileView | null; face: FaceStatus | null; character?: { character: string; approved: boolean } | null }>('/api/me');
     this.face = r.face ?? null;
+    if (typeof r.active === 'number') this.active = r.active;
     this.character = r.character ?? null;
     // A stale token (expired or reset elsewhere): quietly fall back to guest.
     if (this.token && !r.account) this.setToken(null);

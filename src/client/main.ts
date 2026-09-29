@@ -30,6 +30,7 @@ import {
   buildConnecting,
   buildHowTo,
   buildMainMenu,
+  setActiveCount,
   buildPause,
   buildReplayBanner,
   buildResults,
@@ -199,7 +200,7 @@ function renderMenu(notice?: MenuNotice | string): void {
       onSettings: () => setOverlay('settings'),
       onHowTo: () => setOverlay('howto'),
       onNameChange: rememberName,
-    }, notice, lastMode, account.account?.name ?? null, buildDailyCard(account), lastMap),
+    }, notice, lastMode, account.account?.name ?? null, buildDailyCard(account), lastMap, account.active),
     buildAccountChip(account, () => openAccount('signup'), () => setOverlay('profile')),
   );
 }
@@ -212,6 +213,7 @@ function openAccount(tab: AccountTab): void {
 /** Called when the account or profile changes (log in/out, purchases, match rewards). */
 let lastAccountName: string | null = null;
 account.onChange(() => {
+  setActiveCount(account.active);
   // Drop anything the saved loadout has that isn't unlocked yet.
   const allowed = unlockedAt(account.profile.level);
   const clean = sanitizeLoadout(game.loadout, allowed);

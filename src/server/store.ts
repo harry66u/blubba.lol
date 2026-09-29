@@ -93,6 +93,15 @@ function normalizeRecovery(code: string): string {
  * SQLite persistence (Node's built-in driver, no native modules). Profiles are cached in memory
  * and written back when they change; the game only touches them at match end and from the API.
  */
+/** The calendar day in the game's home time zone (BUBBA_TZ, default New York), like 2026-09-29. */
+export function dayKey(now: number): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: process.env.BUBBA_TZ || 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+  } catch {
+    return new Date(now).toISOString().slice(0, 10);
+  }
+}
+
 export class Store {
   readonly db: DatabaseSync;
   private readonly cache = new Map<string, ProfileData>();
@@ -149,6 +158,11 @@ export class Store {
         at INTEGER NOT NULL,
         PRIMARY KEY (account_id, reporter)
       );
+      CREATE TABLE IF NOT EXISTS daily_active (
+        day TEXT NOT NULL,
+        key TEXT NOT NULL,
+        PRIMARY KEY (day, key)
+      );
       CREATE TABLE IF NOT EXISTS character_faces (
         account_id INTEGER PRIMARY KEY,
         char_key TEXT NOT NULL,
@@ -162,6 +176,10 @@ export class Store {
   /** Drops expired sessions and guest profiles nobody has used in months. */
   prune(now = Date.now()): void {
     this.db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(now);
+    // Only today's (and yesterday's) visitors are counted.
+    const keep = dayKey(now - 86400_000);
+    this.db.prepare('DELETE FROM daily_active WHERE day < ?').run(keep);
+    this.mirror?.deleteBefore('daily_active', 'day', keep);
     this.db.prepare("DELETE FROM profiles WHERE key LIKE 'g:%' AND updated_at < ?").run(now - GUEST_TTL_DAYS * 86400_000);
     this.mirror?.prune(now, now - GUEST_TTL_DAYS * 86400_000);
   }
@@ -457,6 +475,33 @@ export class Store {
       .prepare('SELECT f.account_id AS id, a.name AS name, f.updated_at AS at, f.hidden AS hidden, f.banned AS banned, f.reports AS reports FROM faces f LEFT JOIN accounts a ON a.id = f.account_id ORDER BY f.updated_at DESC')
       .all() as { id: number; name: string | null; at: number; hidden: number; banned: number; reports: number }[];
     return rows.map((r) => ({ id: Number(r.id), name: r.name ?? '?', updatedAt: Number(r.at), hidden: !!Number(r.hidden), banned: !!Number(r.banned), reports: Number(r.reports) }));
+  }
+
+  // --- Active today ---------------------------------------------------------------------------
+  // The main menu shows how many different players (guests and accounts) opened the game today.
+
+  private activeCache = { day: '', n: 0, at: 0 };
+
+  /** Counts this player as active today (once per day). */
+  markActive(key: string, now = Date.now()): void {
+    const day = dayKey(now);
+    const res = this.db.prepare('INSERT OR IGNORE INTO daily_active (day, key) VALUES (?, ?)').run(day, key);
+    if (Number(res.changes)) {
+      this.mirror?.row('daily_active', { day, key });
+      if (this.activeCache.day === day) this.activeCache.n++;
+    }
+  }
+
+  /** Different players seen today (cached for 30 s, bumped as new ones arrive). */
+  activeToday(now = Date.now()): number {
+    const day = dayKey(now);
+    const c = this.activeCache;
+    if (c.day !== day || now - c.at > 30_000) {
+      c.n = Number((this.db.prepare('SELECT COUNT(*) AS n FROM daily_active WHERE day = ?').get(day) as { n: number }).n);
+      c.day = day;
+      c.at = now;
+    }
+    return c.n;
   }
 
   // --- Character faces ---------------------------------------------------------------------------

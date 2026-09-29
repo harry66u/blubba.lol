@@ -17,7 +17,9 @@ type Op =
   | { k: 'prune'; sessionsBefore: number; guestsBefore: number }
   /** Copies one row (by primary key) of a table in TABLES as it is now, or deletes matching rows. */
   | { k: 'upsert'; table: string; key: Record<string, string | number> }
-  | { k: 'delete'; table: string; key: Record<string, string | number> };
+  | { k: 'delete'; table: string; key: Record<string, string | number> }
+  /** Deletes rows whose `col` sorts before `value` (old daily counts). */
+  | { k: 'deleteBefore'; table: string; col: string; value: string };
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS blubba_accounts (
@@ -63,6 +65,11 @@ const SCHEMA = `
     at BIGINT NOT NULL,
     PRIMARY KEY (account_id, reporter)
   );
+  CREATE TABLE IF NOT EXISTS blubba_daily_active (
+    day TEXT NOT NULL,
+    key TEXT NOT NULL,
+    PRIMARY KEY (day, key)
+  );
   CREATE TABLE IF NOT EXISTS blubba_character_faces (
     account_id BIGINT PRIMARY KEY,
     char_key TEXT NOT NULL,
@@ -78,6 +85,7 @@ const TABLES: readonly { local: string; remote: string; cols: readonly string[];
   { local: 'reports', remote: 'blubba_reports', cols: ['id', 'at', 'reporter', 'target', 'target_name', 'room', 'reason'], pk: ['id'] },
   { local: 'faces', remote: 'blubba_faces', cols: ['account_id', 'mime', 'data', 'updated_at', 'hidden', 'reports', 'banned'], pk: ['account_id'] },
   { local: 'face_reports', remote: 'blubba_face_reports', cols: ['account_id', 'reporter', 'at'], pk: ['account_id', 'reporter'] },
+  { local: 'daily_active', remote: 'blubba_daily_active', cols: ['day', 'key'], pk: ['day', 'key'] },
   { local: 'character_faces', remote: 'blubba_character_faces', cols: ['account_id', 'char_key', 'approved', 'at'], pk: ['account_id'] },
 ];
 
@@ -216,6 +224,11 @@ export class Mirror {
     this.push({ k: 'delete', table, key });
   }
 
+  /** Rows whose `col` is before `value` were deleted (one of the TABLES' columns). */
+  deleteBefore(table: string, col: string, value: string): void {
+    this.push({ k: 'deleteBefore', table, col, value });
+  }
+
   private push(op: Op): void {
     this.queue.push(op);
   }
@@ -341,6 +354,12 @@ export class Mirror {
         const t = TABLES.find((x) => x.local === op.table)!;
         const keys = Object.keys(op.key);
         await q(`DELETE FROM ${t.remote} WHERE ${keys.map((c, i) => `${c} = $${i + 1}`).join(' AND ')}`, keys.map((c) => op.key[c]));
+        return;
+      }
+      case 'deleteBefore': {
+        const t = TABLES.find((x) => x.local === op.table)!;
+        if (!t.cols.includes(op.col)) return;
+        await q(`DELETE FROM ${t.remote} WHERE ${op.col} < $1`, [op.value]);
         return;
       }
     }

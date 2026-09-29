@@ -185,6 +185,21 @@ function mapPicker(initial: string | null, onChange: (map: string | null) => voi
 }
 
 /** `side` sits beside the main card on wide screens and below it on narrow ones (the daily challenges). */
+/** "🟢 37 active": players who opened the game today. Hidden until the count arrives. */
+function activePill(n: number | null): HTMLElement {
+  const pill = el('div', { class: 'active-pill', attrs: { title: 'Players today' } }, el('span', { class: 'dot', attrs: { 'aria-hidden': 'true' } }), el('span', { class: 'n' }), ' active');
+  setActiveCount(n, pill);
+  return pill;
+}
+
+/** Updates the menu's active count in place (it arrives after the menu is drawn). */
+export function setActiveCount(n: number | null, pill: Element | null = document.querySelector('.active-pill')): void {
+  if (!pill) return;
+  pill.classList.toggle('hidden', !n);
+  const num = pill.querySelector('.n');
+  if (num && n) num.textContent = n.toLocaleString();
+}
+
 export function buildMainMenu(
   name: string,
   cb: MenuCallbacks,
@@ -193,6 +208,7 @@ export function buildMainMenu(
   accountName: string | null = null,
   side: HTMLElement | null = null,
   initialMap: string | null = null,
+  active: number | null = null,
 ): HTMLElement {
   const err = el('div', { class: 'error-text' });
   const nameInput = nameField(accountName ?? name, cb.onNameChange, err);
@@ -329,7 +345,7 @@ export function buildMainMenu(
     'div',
     { class: 'menu main-menu' },
     sky(),
-    el('header', { class: 'menu-head' }, logo(), el('div', { class: 'tagline', text: 'Blast your friends off the map!' })),
+    el('header', { class: 'menu-head' }, logo(), el('div', { class: 'tagline', text: 'Blast your friends off the map!' }), activePill(active)),
     el('div', { class: 'menu-body' }, nav, card, side),
   );
 }
