@@ -36,6 +36,9 @@ await page.waitForFunction(() => window.bubba?.game?.active, null, { timeout: 60
 await page.evaluate(() => window.bubba.net.send({ type: 'host', action: 'settings', settings: { bots: false, events: 'off' } }));
 await page.waitForTimeout(500);
 await page.evaluate(() => window.bubba.net.send({ type: 'debug', action: 'bots', count: 3 }));
+// Private rooms wait in the lobby until the host starts.
+await page.waitForTimeout(500);
+await page.evaluate(() => window.bubba.net.send({ type: 'host', action: 'start' }));
 await page.waitForFunction(() => window.bubba.game.pred.mode !== 4 && window.bubba.game.match.phase === 'playing', null, { timeout: 60000 });
 await page.evaluate(() => {
   const b = window.bubba;

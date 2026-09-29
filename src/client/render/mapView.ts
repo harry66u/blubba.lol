@@ -4,6 +4,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { DecorDef, MapDef, SolidDef, SolidKind, SurfaceLook } from '../../shared/maps/types';
 import type { World } from '../../shared/world';
 import { PropKit, buildProp } from './props';
+import { Branding } from './branding';
 import type { Quality } from './renderer';
 import { SkyLife } from './skyLife';
 import { TubeMan, defaultPose, type TubeManPose } from './tubeMan';
@@ -464,6 +465,8 @@ export class MapView {
   private teamColors: number[] = [0xff3b5c, 0x2ec5ff];
   private fanBlades: THREE.Object3D | null = null;
   private readonly sky: SkyLife;
+  /** Billboards, signs and deck banners around the map (placed from its bounds, so any map). */
+  readonly brand: Branding;
   private time = 0;
   /** Red flashing warnings over pieces of the map about to fall away. */
   private readonly warnViews = new Map<number, WarnView>();
@@ -486,9 +489,11 @@ export class MapView {
     this.buildModeProps();
     this.buildClouds();
     this.root.add(this.clouds);
-    // Balloons, a blimp, birds and floating islands far around the map.
+    // Blimps, balloons, birds and floating islands around the map, then its billboards and signs.
     this.sky = new SkyLife(map);
     this.root.add(this.sky.root);
+    this.brand = new Branding(map);
+    this.root.add(this.brand.root);
   }
 
   private buildSolids(): void {
@@ -1259,7 +1264,9 @@ export class MapView {
     }
     this.clouds.rotation.y += dt * 0.004;
     this.kit.update(dt, time);
-    this.sky.update(dt, this.quality() === 'low');
+    const low = this.quality() === 'low';
+    this.sky.update(dt, low);
+    this.brand.update(dt, this.world, low);
   }
 
   /**
@@ -1383,6 +1390,7 @@ export class MapView {
     for (const g of this.giants) g.man.dispose();
     this.sky.dispose();
     this.kit.dispose();
+    this.brand.dispose();
   }
 }
 

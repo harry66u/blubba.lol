@@ -35,6 +35,9 @@ await page.waitForTimeout(300);
 await page.screenshot({ path: `${out}/pause.png` });
 await page.keyboard.press('Escape');
 await lock();
+// Private rooms wait in the lobby until the host starts.
+await page.evaluate(() => window.bubba.net.send({ type: 'host', action: 'start' }));
+await page.waitForFunction(() => window.bubba.game.match.phase === 'playing', null, { timeout: 30000 });
 await page.evaluate(() => window.bubba.net.send({ type: 'debug', action: 'endIn', seconds: 2 }));
 await page.waitForFunction(() => window.bubba.game.match.phase === 'results', null, { timeout: 30000 });
 // Skip the replay to the results card.
