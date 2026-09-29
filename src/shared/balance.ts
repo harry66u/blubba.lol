@@ -45,20 +45,24 @@ export const BALANCE = {
   dash: {
     charges: 2,
     /** Seconds to recharge one dash charge (charges refill one at a time). */
-    rechargeTime: 2.4,
+    rechargeTime: 3.2,
     minInterval: 0.22,
-    speed: 19,
+    speed: 16.5,
     duration: 0.16,
-    /** An air dash sets vertical velocity to at least this, stopping a fall. */
-    airUpBoost: 3.5,
+    /** An air dash sets vertical velocity to at least this, slowing a fall. */
+    airUpBoost: 2.4,
     /** A ground dash turns into a slide for this long. */
     slideDuration: 0.55,
     slideFriction: 1.1,
     slideSteerAccel: 10,
     /** Minimum time after being launched before you can dash out of it. */
-    launchLockout: 0.18,
-    /** Fraction of launch velocity kept when you dash out of a launch. */
-    launchKeep: 0.4,
+    launchLockout: 0.3,
+    /** Fraction of launch velocity kept when you dash out of a launch (it steers, not cancels). */
+    launchKeep: 0.6,
+    /** A dash out of a launch is this fraction of a normal dash. */
+    launchDashMult: 0.7,
+    /** After dashing out of a launch, your next dash waits at least this long. */
+    launchDashCool: 0.9,
   },
 
   inflation: {
@@ -70,6 +74,11 @@ export const BALANCE = {
     /** Passive deflation per second after `decayDelay` seconds without being hit. 0 = off. */
     decayPerSec: 0,
     decayDelay: 4,
+    /**
+     * Quick shots inflate more than they launch: a shot adds power + (1 - power) × tapBonus of its
+     * weapon's inflation (an Air Cannon tap adds 75%, a full charge 100%).
+     */
+    tapBonus: 0.5,
   },
 
   knockback: {

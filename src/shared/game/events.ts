@@ -20,6 +20,8 @@ export type GameEvent =
       low: boolean;
       braced: boolean;
       infl: number;
+      /** Inflation this hit added. */
+      gain: number;
       /** Hits in the current air combo (1 = not a combo). */
       combo: number;
     }

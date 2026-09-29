@@ -109,6 +109,15 @@ export class Hud {
   private readonly chatFeed: HTMLElement;
   private readonly worldPopups: WorldPopup[] = [];
   private calloutTimer = 0;
+  /** Inflation you've pumped into people with hits in quick succession, under the crosshair. */
+  private readonly tally: HTMLElement;
+  private readonly tallyAmt: HTMLElement;
+  private readonly tallyHits: HTMLElement;
+  private tallySum = 0;
+  private tallyCount = 0;
+  private tallyTimer = 0;
+  private readonly inflationBox: HTMLElement;
+  private readonly speedLines: HTMLElement;
   private last: Partial<Record<string, string | number>> = {};
   private tmp = new THREE.Vector3();
 
@@ -146,6 +155,11 @@ export class Hud {
     this.pct = el('div', { class: 'pct', html: '0<small>%</small>' });
     this.balloon = el('div', { class: 'balloon' });
     const inflation = el('div', { class: 'inflation' }, this.balloon, el('div', {}, el('div', { class: 'lbl', text: 'INFLATION' }), this.pct));
+    this.inflationBox = inflation;
+    this.tallyAmt = el('div', { class: 'amt' });
+    this.tallyHits = el('div', { class: 'hits' });
+    this.tally = el('div', { class: 'hit-tally hidden' }, this.tallyAmt, this.tallyHits);
+    this.speedLines = el('div', { class: 'speed-lines' });
 
     this.ammoPips = el('div', { class: 'pips' });
     this.reloadFill = el('div');
@@ -220,7 +234,7 @@ export class Hud {
     this.chatWheel = el('div', { class: 'chat-wheel hidden' }, el('div', { class: 'hub', text: 'QUICK CHAT' }));
     this.chatFeed = el('div', { class: 'chat-feed' });
 
-    this.root.append(this.flashEl, this.nametags, this.popups, this.damage, this.crosshair, this.hitmarker, inflation, movement, ammo, utils, this.pinBadge, this.powerBadge, timer, this.killfeed, this.calloutBox, this.respawnBox, this.note, this.hintEl, this.escapeBox, this.ping, this.chatFeed, this.chatWheel, this.tipEl);
+    this.root.append(this.speedLines, this.flashEl, this.nametags, this.popups, this.damage, this.crosshair, this.hitmarker, this.tally, inflation, movement, ammo, utils, this.pinBadge, this.powerBadge, timer, this.killfeed, this.calloutBox, this.respawnBox, this.note, this.hintEl, this.escapeBox, this.ping, this.chatFeed, this.chatWheel, this.tipEl);
   }
 
   /** Current key (or controller button) for each ability, shown next to it. */
@@ -367,6 +381,87 @@ export class Hud {
       this.calloutTimer -= dt;
       if (this.calloutTimer <= 0) clear(this.calloutBox);
     }
+    if (this.tallyTimer > 0) {
+      this.tallyTimer -= dt;
+      this.tally.style.opacity = String(Math.min(1, this.tallyTimer / 0.4));
+      if (this.tallyTimer <= 0) {
+        this.tally.classList.add('hidden');
+        this.tallySum = 0;
+        this.tallyCount = 0;
+      }
+    }
+  }
+
+  /**
+   * Your hit landed: adds `gain` (0..1 inflation) to the running total under the crosshair. Hits
+   * within a couple of seconds stack, so the number keeps climbing while you stay on target.
+   * Returns how many hits are in the current run.
+   */
+  hitTally(gain: number, targetInflation: number): number {
+    this.tallySum += gain;
+    this.tallyCount++;
+    this.tallyTimer = 2.2;
+    const hue = 120 - Math.min(1, targetInflation) * 120;
+    this.tallyAmt.textContent = `+${Math.max(1, Math.round(this.tallySum * 100))}%`;
+    this.tallyAmt.style.color = `hsl(${hue}, 95%, 66%)`;
+    this.tallyHits.textContent = this.tallyCount > 1 ? `${this.tallyCount} HITS` : '';
+    this.tally.classList.remove('hidden', 'ko');
+    this.tally.style.opacity = '1';
+    this.tally.classList.remove('bump');
+    void this.tally.offsetWidth;
+    this.tally.classList.add('bump');
+    this.tally.classList.toggle('hot', targetInflation >= 0.75);
+    return this.tallyCount;
+  }
+
+  /** You popped someone: the tally turns into the score you just earned. */
+  tallyKo(word: string, points: number): void {
+    this.tallyAmt.textContent = `${word} +${points}`;
+    this.tallyAmt.style.color = '#ffd60a';
+    this.tallyHits.textContent = this.tallyCount > 1 ? `${this.tallyCount} HITS` : '';
+    this.tally.classList.remove('hidden', 'hot', 'bump');
+    this.tally.style.opacity = '1';
+    void this.tally.offsetWidth;
+    this.tally.classList.add('ko', 'bump');
+    this.tallyTimer = 1.6;
+    this.tallySum = 0;
+    this.tallyCount = 0;
+  }
+
+  /** You got hit: the inflation readout jolts and the added percentage flies off it. */
+  selfHit(gain: number, inflation: number, strength: number): void {
+    const hue = 120 - Math.min(1, inflation) * 120;
+    const g = el('div', { class: 'self-gain', text: `+${Math.max(1, Math.round(gain * 100))}%` });
+    g.style.color = `hsl(${hue}, 95%, 66%)`;
+    this.inflationBox.append(g);
+    g.animate(
+      [
+        { transform: 'translate(0, 0) scale(0.6)', opacity: 1 },
+        { transform: 'translate(10px, -34px) scale(1.25)', opacity: 1, offset: 0.25 },
+        { transform: 'translate(22px, -80px) scale(1)', opacity: 0 },
+      ],
+      { duration: 1100, easing: 'ease-out' },
+    ).onfinish = () => g.remove();
+    const k = 6 + strength * 14;
+    this.inflationBox.animate(
+      [
+        { transform: `translate(${-k}px, ${k * 0.4}px) rotate(-4deg) scale(1.12)` },
+        { transform: `translate(${k * 0.7}px, ${-k * 0.3}px) rotate(3deg)` },
+        { transform: `translate(${-k * 0.3}px, 0) rotate(-1deg)` },
+        { transform: 'none' },
+      ],
+      { duration: 320, easing: 'ease-out' },
+    );
+  }
+
+  /** Streaks racing in from the screen edges while you're flying (0 = off). */
+  setSpeedLines(v: number): void {
+    const q = Math.round(v * 20) / 20;
+    this.setIf('speed', q, () => {
+      this.speedLines.style.opacity = q.toFixed(2);
+      this.speedLines.classList.toggle('on', q > 0);
+    });
+    if (q > 0) this.speedLines.style.transform = `rotate(${Math.floor(Math.random() * 12) * 30}deg) scale(${1.15 - q * 0.1})`;
   }
 
   /** Shows team scores (or pump fill bars); null hides the strip. */
@@ -417,11 +512,12 @@ export class Hud {
   }
 
   /** `strength` 0..1: harder hits draw a bigger, hotter marker. */
-  hitMarker(strength = 0.5): void {
+  hitMarker(strength = 0.5, hot = false): void {
     this.hitmarker.classList.remove('show');
     void this.hitmarker.offsetWidth;
     this.hitmarker.style.setProperty('--hm', (0.9 + strength * 0.9).toFixed(2));
     this.hitmarker.classList.toggle('big', strength > 0.5);
+    this.hitmarker.classList.toggle('hot', hot);
     this.hitmarker.classList.add('show');
     this.crosshair.classList.add('hit');
     window.setTimeout(() => this.crosshair.classList.remove('hit'), 90);
@@ -480,16 +576,16 @@ export class Hud {
    * `minor` popups (other players' flavor text) are skipped when the screen is already busy or
    * the same word is already showing nearby, so a crowd of bots doesn't bury the action.
    */
-  popup(pos: THREE.Vector3, text: string, color = '#ffffff', scale = 1, life = 1, minor = false): void {
+  popup(pos: THREE.Vector3, text: string, color = '#ffffff', scale = 1, life = 1, minor = false, cls = ''): void {
     if (minor) {
       const busy = this.worldPopups.filter((p) => p.life > p.max * 0.3).length >= 4;
       const dup = this.worldPopups.some((p) => p.el.textContent === text && p.life > p.max * 0.4 && p.pos.distanceTo(pos) < 5);
       if (busy || dup) return;
     }
-    const e = el('div', { class: 'popup', text });
+    const e = el('div', { class: cls ? `popup ${cls}` : 'popup', text });
     e.style.color = color;
     this.popups.append(e);
-    this.worldPopups.push({ el: e, pos: pos.clone(), life, max: life, vy: 1.4, scale });
+    this.worldPopups.push({ el: e, pos: pos.clone(), life, max: life, vy: cls === 'gain' ? 2.4 : 1.4, scale });
     if (this.worldPopups.length > 30) {
       const old = this.worldPopups.shift();
       old?.el.remove();

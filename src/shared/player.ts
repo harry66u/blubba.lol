@@ -424,11 +424,13 @@ function stepMove(
     p.dashCharges -= 1;
     p.dashCool = D.minInterval;
     if (launched) {
-      p.vx = p.vx * D.launchKeep + dx * D.speed;
-      p.vz = p.vz * D.launchKeep + dz * D.speed;
+      const sp = D.speed * D.launchDashMult;
+      p.vx = p.vx * D.launchKeep + dx * sp;
+      p.vz = p.vz * D.launchKeep + dz * sp;
       p.vy = Math.max(p.vy * D.launchKeep, D.airUpBoost);
       p.launchTimer = 0;
       p.dashTimer = D.duration;
+      p.dashCool = D.launchDashCool;
       out.techEscape = true;
     } else {
       const along = Math.max(D.speed, p.vx * dx + p.vz * dz);

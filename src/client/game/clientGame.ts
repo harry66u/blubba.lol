@@ -63,6 +63,7 @@ import { ViewModel } from '../render/viewModel';
 import { type Settings, saveSettings } from '../settings';
 import { esc, hexColor } from '../ui/dom';
 import type { Hud, Nametag } from '../ui/hud';
+import { CRACKED_SHOT_DIST, koVerb } from '../ui/koWords';
 import type { TeamView } from '../ui/menus';
 import { CHASE, aimFromCamera, chaseCamera, rebaseMove } from './chaseCam';
 import { ServerClock } from './clock';
@@ -92,6 +93,9 @@ interface RemoteView {
   cur: PublicPlayer | null;
   lastTagText: string;
   lookKey: string;
+  /** Inflation from your own confirmed hit, shown before the snapshots catch up. */
+  inflHint: number;
+  hintUntil: number;
 }
 
 const UTIL_ICONS: Record<string, string> = { 'Bounce Pad': '🟣', 'Air Grenade': '💥', 'Inflatable Wall': '🧱', 'Vacuum Grenade': '🌀' };
@@ -207,8 +211,15 @@ export class ClientGame {
   /** View punch: the camera kicks up when you fire and springs back (visual only, aim is unchanged). */
   private punch = 0;
   private punchV = 0;
+  /** Camera roll jolt when you get hit from the side (spring, visual only). */
+  private rollP = 0;
+  private rollV = 0;
+  /** Your latest hit on each player: when, from how far, and their air combo. */
+  private readonly myHits = new Map<number, { at: number; dist: number; combo: number }>();
   private deathAt = 0;
   private killerId = -1;
+  /** How you were knocked out ("cracked"), for the respawn screen. */
+  private deathVerb = 'popped';
   private deathPos = new THREE.Vector3();
   private time = 0;
   private lastCharge = 0;
@@ -930,18 +941,7 @@ export class ClientGame {
           this.remotes.get(e.target)?.man.impact(e.speed, e.dx, e.dz);
           if (e.target === you) this.selfMan?.impact(e.speed, e.dx, e.dz);
         }
-        if (mine) {
-          // Their new inflation pops off them, greener to redder as they near bursting.
-          const pct = Math.round(e.infl * 100);
-          this.hud.popup(tmpV.set(e.x, e.y - 0.3, e.z), `${pct}%`, `hsl(${120 - Math.min(1, e.infl) * 120}, 95%, ${pct >= 75 ? 62 : 68}%)`, 0.8 + e.infl * 0.7, 0.9);
-        }
-        if (e.target === you) {
-          this.trauma = Math.min(1, this.trauma + 0.35 + e.speed * 0.02);
-          if (e.speed > 12 && !e.braced) this.hud.flash('rgba(255, 255, 255, 0.45)', 160);
-          // Direction the hit came from relative to where we're looking.
-          const ang = Math.atan2(-e.dx, -e.dz) - this.input.yaw;
-          this.hud.damageFrom(-ang + Math.PI);
-        }
+        if (e.target === you) this.feelHit(e);
         if (e.low) {
           a.groan(e.target === you ? null : pos);
           this.hud.popup(tmpV.set(e.x, e.y + 1.2, e.z), 'OOF!', '#ff9f1c', 1.3, 1.1);
@@ -993,7 +993,7 @@ export class ClientGame {
           e.killer >= 0 && e.tags.includes('sd')
             ? `<b style="color:${vc}">${esc(victimName)}</b> fell off · <b style="color:${kc}">${esc(killerName)}</b> <b>+${e.points}</b>`
             : e.killer >= 0
-              ? `<b style="color:${kc}">${esc(killerName)}</b> popped <b style="color:${vc}">${esc(victimName)}</b>${suffix}`
+              ? `<b style="color:${kc}">${esc(killerName)}</b> ${this.verbFor(e)} <b style="color:${vc}">${esc(victimName)}</b>${suffix}`
               : `<b style="color:${vc}">${esc(victimName)}</b> fell off`;
         this.hud.addKill(html, e.killer === you || e.victim === you);
         a.squeal(e.victim === you ? null : [e.x, Math.max(e.y, -10), e.z]);
@@ -1016,6 +1016,7 @@ export class ClientGame {
         if (e.victim === you) {
           this.deathAt = this.time;
           this.killerId = e.tags.includes('sd') ? -1 : e.killer;
+          this.deathVerb = this.verbFor(e);
           this.deathPos.set(e.x, Math.max(e.y, -6), e.z);
           this.audio.setCharge(0);
         }
@@ -1116,6 +1117,18 @@ export class ClientGame {
     void immediate;
   }
 
+  /** Your last hit on this knockout's victim, if you're the one who knocked them out. */
+  private myLastHit(e: Extract<GameEvent, { t: 'ko' }>): { dist: number; combo: number } | null {
+    if (e.killer !== this.youId || e.victim === this.youId) return null;
+    const last = this.myHits.get(e.victim);
+    return last && this.time - last.at <= BALANCE.knockback.creditWindow ? last : null;
+  }
+
+  /** Your long-range knockouts are always "cracked". */
+  private verbFor(e: Extract<GameEvent, { t: 'ko' }>): string {
+    return (this.myLastHit(e)?.dist ?? 0) >= CRACKED_SHOT_DIST ? 'cracked' : koVerb(e);
+  }
+
   /** Big text and announcer lines for knockouts worth shouting about. */
   private koCallout(e: Extract<GameEvent, { t: 'ko' }>, killerName: string, victimName: string): void {
     const you = this.youId;
@@ -1134,6 +1147,25 @@ export class ClientGame {
     let line = '';
     let color = '#ffd60a';
     let priority = 1;
+    const mine = e.killer === you && e.victim !== you;
+    const last = this.myLastHit(e);
+    const longShot = !!last && last.dist >= CRACKED_SHOT_DIST;
+    const juggled = !!last && last.combo >= 3;
+    const verb = this.verbFor(e);
+    this.myHits.delete(e.victim);
+    if (mine) {
+      // The knockout pays off: gold flash, confetti where they went flying, and the score.
+      this.hud.tallyKo(`${verb.toUpperCase()}!`, e.points);
+      this.hud.flash('rgba(255, 200, 40, 0.4)', 380);
+      const B = this.map.blast;
+      this.effects.confettiBurst(
+        Math.max(B.minX + 4, Math.min(B.maxX - 4, e.x)),
+        Math.max(-4, Math.min(30, e.y)) + 1,
+        Math.max(B.minZ + 4, Math.min(B.maxZ - 4, e.z)),
+        40,
+      );
+      this.fovKick += 5;
+    }
     if (tags.includes('multi')) {
       main = 'POP-TASTIC!';
       line = 'Unstoppable!';
@@ -1161,6 +1193,16 @@ export class ClientGame {
       line = 'Sweet revenge!';
       color = '#ff3b5c';
       priority = 2;
+    } else if (longShot) {
+      main = 'CRACKED SHOT!';
+      line = 'Cracked!';
+      color = '#2ec5ff';
+      priority = 3;
+    } else if (juggled) {
+      main = 'JUGGLED!';
+      line = 'Juggled!';
+      color = '#ff5fd2';
+      priority = 2;
     } else if (tags.includes('pin')) {
       main = 'PINNED!';
       line = 'Pop!';
@@ -1172,13 +1214,14 @@ export class ClientGame {
       priority = 2;
     }
     if (main) {
-      sub = e.killer === you ? `You popped ${victimName}${pts}` : `${killerName} popped ${victimName}`;
+      const far = longShot ? ` from ${Math.round(last.dist)} m` : '';
+      sub = e.killer === you ? `You ${verb} ${victimName}${far}${pts}` : `${killerName} ${verb} ${victimName}`;
       this.hud.callout(main, sub, 2, color);
       this.announcer.say(line, priority);
       this.audio.koConfirm();
-    } else if (e.killer === you && e.victim !== you) {
+    } else if (mine) {
       this.audio.koConfirm();
-      this.hud.callout('POPPED!', `${victimName}${pts}`, 1.8);
+      this.hud.callout(`${verb.toUpperCase()}!`, `${victimName}${pts}`, 1.8);
     }
   }
 
@@ -1602,7 +1645,7 @@ export class ClientGame {
     const man = new TubeMan(color, { physical: this.r.profile.physical, seed: id * 13.7, look });
     this.r.scene.add(man.group);
     const tag = this.hud.createNametag(entry?.name ?? '...', entry?.bot ?? false, this.tagTeam(id));
-    return { id, man, pose: defaultPose(), tag, color, name: entry?.name ?? '...', bot: entry?.bot ?? false, cur: null, lastTagText: '', lookKey: JSON.stringify(look) };
+    return { id, man, pose: defaultPose(), tag, color, name: entry?.name ?? '...', bot: entry?.bot ?? false, cur: null, lastTagText: '', lookKey: JSON.stringify(look), inflHint: 0, hintUntil: 0 };
   }
 
   private removeRemote(rv: RemoteView): void {
@@ -1636,6 +1679,7 @@ export class ClientGame {
       rv.tag.el.style.display = 'none';
       return;
     }
+    if (this.time < rv.hintUntil && rv.inflHint > c.inflation) c.inflation = rv.inflHint;
     rv.man.group.position.set(c.px, c.py, c.pz);
     const p = rv.pose;
     p.time = this.time;
@@ -1750,11 +1794,60 @@ export class ClientGame {
     }
   }
 
+  /**
+   * You got hit: the view snaps away from the blow (pitch and roll toward the push), the field of
+   * view punches out as you're launched, the screen flashes, and the inflation you took flies off
+   * your meter.
+   */
+  private feelHit(e: Extract<GameEvent, { t: 'hit' }>): void {
+    const k = Math.min(1, e.speed / 30);
+    this.trauma = Math.min(1, this.trauma + 0.35 + e.speed * 0.02);
+    const yaw = this.input.yaw;
+    const fwd = e.dx * -Math.sin(yaw) + e.dz * -Math.cos(yaw);
+    const side = e.dx * Math.cos(yaw) + e.dz * -Math.sin(yaw);
+    const jolt = e.braced ? 0.35 : 1;
+    this.punchV += -fwd * (2.5 + k * 8) * jolt;
+    this.rollV += -side * (3 + k * 9) * jolt;
+    this.fovKick += (4 + k * 12) * jolt;
+    if (!e.braced) {
+      this.hud.flash(`rgba(255, ${Math.round(90 - e.infl * 60)}, 90, ${(0.3 + k * 0.35).toFixed(2)})`, 220 + k * 200);
+      if (e.speed > 12) this.hud.flash('rgba(255, 255, 255, 0.5)', 140);
+    }
+    if ((e.gain ?? 0) > 0.001) this.hud.selfHit(e.gain, e.infl, k);
+    // Direction the hit came from relative to where we're looking.
+    const ang = Math.atan2(-e.dx, -e.dz) - yaw;
+    this.hud.damageFrom(-ang + Math.PI);
+  }
+
   /** Your shot landed: marker, crunch, shake and a beat of hit-stop, scaled by how hard it hit. */
   private confirmHit(e: Extract<GameEvent, { t: 'hit' }>): void {
     const k = Math.min(1, e.speed / 30);
-    this.hud.hitMarker(k);
-    this.audio.hitConfirm(k);
+    const gain = e.gain ?? 0;
+    const hot = e.infl >= 0.75;
+    const chain = this.hud.hitTally(gain, e.infl);
+    this.hud.hitMarker(k, hot);
+    this.audio.hitConfirm(k, chain);
+    this.myHits.set(e.target, { at: this.time, dist: Math.hypot(e.x - this.pred.px, e.y - this.pred.py, e.z - this.pred.pz), combo: e.combo });
+    // Their body and name tag show the new inflation right away, not a snapshot later, and the
+    // inflation you added flies off the body you're looking at.
+    const rv = this.remotes.get(e.target);
+    const c = rv?.cur;
+    if (rv) {
+      rv.inflHint = e.infl;
+      rv.hintUntil = this.time + 0.6;
+      rv.tag.pct.animate([{ transform: 'scale(1.9)', filter: 'brightness(1.8)' }, { transform: 'scale(1)', filter: 'none' }], { duration: 380, easing: 'cubic-bezier(0.3, 1.6, 0.5, 1)' });
+    }
+    const hue = 120 - Math.min(1, e.infl) * 120;
+    const bodyY = c ? c.py + BALANCE.player.height * inflationScale(e.infl) * 0.8 : e.y + 0.4;
+    this.hud.popup(
+      tmpV.set((c ? c.px : e.x) + (Math.random() - 0.5) * 0.9, bodyY, (c ? c.pz : e.z) + (Math.random() - 0.5) * 0.9),
+      `+${Math.max(1, Math.round(gain * 100))}%`,
+      `hsl(${hue}, 95%, ${hot ? 62 : 68}%)`,
+      0.75 + Math.min(0.45, gain * 2.5) + (hot ? 0.15 : 0),
+      0.95,
+      false,
+      'gain',
+    );
     this.audio.impact(e.speed, null, 1.3);
     this.trauma = Math.min(1, this.trauma + 0.2 + k * 0.5);
     this.fovKick -= 1 + k * 4;
@@ -1876,17 +1969,21 @@ export class ClientGame {
     const pdt = Math.min(dt, 1 / 30);
     this.punchV += (-320 * this.punch - 30 * this.punchV) * pdt;
     this.punch += this.punchV * pdt;
+    this.rollV += (-260 * this.rollP - 22 * this.rollV) * pdt;
+    this.rollP += this.rollV * pdt;
     const shake = this.trauma * this.trauma;
     const alive = p.mode !== MODE_DEAD && this.havePred;
     const third = alive && this.settings.thirdPerson;
     this.viewModel.root.visible = alive && !third;
     let fov = this.settings.fov + this.fovKick + (p.launchTimer > 0 ? 6 : 0);
+    const flying = alive && p.launchTimer > 0 ? (p.hitStop > 0 ? Math.hypot(p.hsVx, p.hsVy, p.hsVz) : Math.hypot(p.vx, p.vy, p.vz)) : 0;
+    this.hud.setSpeedLines(Math.max(0, Math.min(1, (flying - 9) / 22)));
     if (alive) {
       const x = this.prevX + (p.px - this.prevX) * alpha + this.errX;
       const y = this.prevY + (p.py - this.prevY) * alpha + this.errY;
       const z = this.prevZ + (p.pz - this.prevZ) * alpha + this.errZ;
       cam.position.set(x, y + eyeHeight(p), z);
-      let roll = (Math.random() - 0.5) * shake * 0.1;
+      let roll = (Math.random() - 0.5) * shake * 0.1 + this.rollP;
       if (third) {
         const scale = inflationScale(p.inflation);
         const want = this.camDist + (CHASE.back * scale - this.camDist) * Math.min(1, dt * 5);
@@ -2012,7 +2109,8 @@ export class ClientGame {
     if (!alive && this.havePred) {
       const killer = this.killerId >= 0 ? this.nameOf(this.killerId) : null;
       const left = Math.max(0, BALANCE.match.respawnDelay - (this.time - this.deathAt));
-      this.hud.setRespawn(killer ? `Popped by ${killer}!` : 'You fell off!', this.match.phase === 'results' ? '' : `Respawning in ${left.toFixed(1)}...`);
+      const verb = this.deathVerb.charAt(0).toUpperCase() + this.deathVerb.slice(1);
+      this.hud.setRespawn(killer ? `${verb} by ${killer}!` : 'You fell off!', this.match.phase === 'results' ? '' : `Respawning in ${left.toFixed(1)}...`);
     } else {
       this.hud.setRespawn(null);
     }

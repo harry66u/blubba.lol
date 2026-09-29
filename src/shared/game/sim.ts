@@ -205,6 +205,14 @@ export interface MatchResult {
   replay: ReplayData | null;
 }
 
+/**
+ * How much of a weapon's inflation a shot of this power adds. Quick taps inflate nearly as much as
+ * a full charge; charging mostly buys launch power.
+ */
+export function shotInflation(power: number): number {
+  return power + (1 - power) * BALANCE.inflation.tapBonus;
+}
+
 function newStats(): MatchStats {
   return { kos: 0, deaths: 0, falls: 0, hits: 0, shots: 0, longestLaunch: 0, chainKos: 0, timesPopped: 0, bestCombo: 0, throws: 0, stomps: 0, goals: 0, pumpTime: 0, crownKos: 0 };
 }
@@ -753,7 +761,7 @@ export class GameSim {
     dz = (dz / l) * (1 - b) + (pr.vz / sp) * b;
     const low = hit.y < s.py + h * K.lowHitFraction;
     const power = pr.power * pr.knockback;
-    this.applyHit(target, pr.owner, dx, dy, dz, power, pr.inflation * pr.power, { direct: true, low, x: hit.x, y: hit.y, z: hit.z });
+    this.applyHit(target, pr.owner, dx, dy, dz, power, pr.inflation * shotInflation(pr.power), { direct: true, low, x: hit.x, y: hit.y, z: hit.z });
     this.explode(pr, hit.x, hit.y, hit.z, target.id);
   }
 
@@ -784,7 +792,7 @@ export class GameSim {
         this.blastJump(p, dx, dy, dz, falloff, pr.charge);
       } else {
         const power = pr.power * pr.knockback * K.splashMult * falloff;
-        this.applyHit(p, pr.owner, dx, dy, dz, power, pr.inflation * pr.power * K.splashMult * falloff, {
+        this.applyHit(p, pr.owner, dx, dy, dz, power, pr.inflation * shotInflation(pr.power) * K.splashMult * falloff, {
           direct: false,
           low: false,
           x,
@@ -858,6 +866,7 @@ export class GameSim {
       this.knockout(target, 'pin');
       return;
     }
+    const inflBefore = s.inflation;
     s.inflation = Math.min(BALANCE.inflation.max, s.inflation + inflationAdd * (braced ? Br.inflationMult : 1));
     const mass = inflationMass(s.inflation);
     const speed = (power * (K.base + K.growth * Math.pow(s.inflation, K.growthExp))) / mass * (braced ? Br.knockbackMult : 1);
@@ -940,6 +949,7 @@ export class GameSim {
       low: info.low,
       braced,
       infl: s.inflation,
+      gain: s.inflation - inflBefore,
       combo: target.comboCount,
     });
   }
@@ -1044,7 +1054,7 @@ export class GameSim {
       if (ang > w.cone) continue;
       if (this.world.raycast(ex, ey, ez, vx, vy, vz, Math.max(0, d - r))) continue;
       const falloff = 1 - 0.5 * Math.max(0, Math.min(1, (d - 2) / Math.max(0.1, w.range - 2)));
-      this.applyHit(o, p.id, dx * 0.5 + vx * 0.5, dy * 0.5 + vy * 0.5, dz * 0.5 + vz * 0.5, power * w.knockback * falloff, w.inflation * power * falloff, {
+      this.applyHit(o, p.id, dx * 0.5 + vx * 0.5, dy * 0.5 + vy * 0.5, dz * 0.5 + vz * 0.5, power * w.knockback * falloff, w.inflation * shotInflation(power) * falloff, {
         direct: true,
         low: false,
         x: t.px - vx * r,
@@ -1110,7 +1120,7 @@ export class GameSim {
       hy = (hy / l) * (1 - b) + dy * b;
       hz = (hz / l) * (1 - b) + dz * b;
       const low = iy < t.py + h * K.lowHitFraction;
-      this.applyHit(best, p.id, hx, hy, hz, power * w.knockback, w.inflation * power, { direct: true, low, x: ix, y: iy, z: iz });
+      this.applyHit(best, p.id, hx, hy, hz, power * w.knockback, w.inflation * shotInflation(power), { direct: true, low, x: ix, y: iy, z: iz });
     }
     this.events.push({ t: 'tracer', tick: this.tick, id: p.id, x: ex, y: ey, z: ez, x2: ex + dx * endT, y2: ey + dy * endT, z2: ez + dz * endT, hit: !!best && bestT <= endT, power });
   }

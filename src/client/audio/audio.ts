@@ -350,9 +350,12 @@ export class Audio {
     osc.stop(t + 0.2);
   }
 
-  /** Satisfying pop when your shot connects. */
-  /** Your hit landed: a bright tick plus a low body thump that grows with how hard it hit (0..1). */
-  hitConfirm(strength = 0.5): void {
+  /**
+   * Your hit landed: a bright tick plus a low body thump that grows with how hard it hit (0..1),
+   * and a bell that climbs two semitones with each hit in a row (`chain`), so a streak of hits
+   * sounds like it's building to something.
+   */
+  hitConfirm(strength = 0.5, chain = 1): void {
     const out = this.out(null, 0.35 + strength * 0.15);
     if (!out) return;
     const ctx = this.ctx!;
@@ -375,9 +378,17 @@ export class Audio {
     sub.connect(sg).connect(out);
     sub.start(t);
     sub.stop(t + 0.22);
+    const step = Math.min(8, Math.max(0, chain - 1));
+    const bell = ctx.createOscillator();
+    bell.type = 'sine';
+    bell.frequency.value = 1046 * Math.pow(2, (step * 2) / 12);
+    const bg = ctx.createGain();
+    this.env(bg, t + 0.012, 0.003, 0.22 + step * 0.03, 0.22);
+    bell.connect(bg).connect(out);
+    bell.start(t + 0.012);
+    bell.stop(t + 0.3);
   }
 
-  /** Little fanfare when you knock someone out. */
   /** Streak reward earned: a rising whoosh into a bright chord. */
   powerUp(): void {
     const out = this.out(null, 0.4);
@@ -408,6 +419,7 @@ export class Audio {
     });
   }
 
+  /** Little fanfare when you knock someone out. */
   koConfirm(): void {
     const out = this.out(null, 0.35);
     if (!out) return;

@@ -2707,3 +2707,93 @@ body.touch .toast {
   padding: 6px 10px;
   text-align: center;
 }
+
+/* --- Hit feel: running hit tally, +X% pops, getting-hit jolts, speed lines -------------- */
+.hit-tally {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 34px);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.hit-tally .amt {
+  font-size: 30px;
+  line-height: 1;
+  -webkit-text-stroke: 5px var(--ink);
+  paint-order: stroke fill;
+  font-variant-numeric: tabular-nums;
+}
+.hit-tally .hits {
+  margin-top: 2px;
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: #fff;
+  text-shadow: 0 2px 0 var(--ink);
+}
+.hit-tally.bump .amt {
+  animation: tally-bump 0.28s cubic-bezier(0.3, 1.9, 0.5, 1);
+}
+.hit-tally.hot .amt {
+  text-shadow: 0 0 14px rgba(255, 60, 60, 0.95);
+}
+.hit-tally.ko .amt {
+  font-size: 30px;
+  text-shadow: 0 0 18px rgba(255, 200, 40, 0.9);
+}
+@keyframes tally-bump {
+  0% {
+    transform: scale(1.7) rotate(-6deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+.hitmarker.hot line {
+  stroke: #ff3b5c;
+}
+
+/* "+12%" flying off the body you just hit. */
+.popup.gain {
+  font-size: 34px;
+  -webkit-text-stroke: 6px var(--ink);
+  text-shadow: 0 4px 0 var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.inflation .self-gain {
+  position: absolute;
+  left: 60px;
+  top: -10px;
+  font-size: 34px;
+  -webkit-text-stroke: 5px var(--ink);
+  paint-order: stroke fill;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.speed-lines {
+  position: absolute;
+  inset: -20%;
+  pointer-events: none;
+  opacity: 0;
+  background: repeating-conic-gradient(from 0deg, rgba(255, 255, 255, 0.7) 0deg 1.4deg, transparent 1.4deg 8deg);
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent 0 34%, #000 62%);
+  mask-image: radial-gradient(circle at 50% 50%, transparent 0 34%, #000 62%);
+  visibility: hidden;
+}
+.speed-lines.on {
+  visibility: visible;
+}
+
+body.touch .hit-tally .amt {
+  font-size: 22px;
+}
+body.touch .inflation .self-gain {
+  left: 40px;
+  font-size: 24px;
+}
