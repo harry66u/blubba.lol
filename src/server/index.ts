@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { extname, join, resolve } from 'node:path';
 import { brotliCompressSync, gzipSync, constants as zlibConstants } from 'node:zlib';
+import pg from 'pg';
 import { WebSocketServer } from 'ws';
 import { Api } from './api';
 import { Lobby } from './lobby';
@@ -74,6 +75,7 @@ if (!DEV && !files.has('/index.html')) {
 }
 
 const store = new Store();
+await connectDatabase(store);
 const api = new Api(store);
 const lobby = new Lobby(store);
 api.onProfileChange = (key) => lobby.profileChanged(key);
@@ -91,7 +93,7 @@ function serveStatic(req: IncomingMessage, res: ServerResponse): void {
   }
   if (path === '/api/health') {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-    res.end(JSON.stringify({ ok: true, ...lobby.stats() }));
+    res.end(JSON.stringify({ ok: true, ...lobby.stats(), ...store.storageInfo() }));
     return;
   }
   if (path.startsWith('/api/')) {
@@ -161,12 +163,49 @@ server.listen(PORT, () => {
   console.log(`[blubba] server listening on http://localhost:${PORT}${DEV ? ' (dev: client served by Vite on :5173)' : ''}`);
 });
 
+let stopping = false;
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, () => {
+    if (stopping) return;
+    stopping = true;
     lobby.stop();
     wss.close();
-    store.close();
-    server.close(() => process.exit(0));
-    setTimeout(() => process.exit(0), 1000).unref();
+    server.close();
+    // Finish saving to the database before exiting (hosts allow several seconds after SIGTERM).
+    setTimeout(() => process.exit(0), 9000).unref();
+    void store.shutdown(8000).finally(() => process.exit(0));
   });
+}
+
+/**
+ * With DATABASE_URL set, accounts and progress are kept in Postgres, so they survive hosts that
+ * wipe the disk on every restart or deploy. Waits (retrying) until the database answers, so a
+ * new deploy only goes live once everyone's data is loaded.
+ */
+async function connectDatabase(store: Store): Promise<void> {
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    if (process.env.RENDER) {
+      console.warn('[blubba] WARNING: no DATABASE_URL set. Accounts and progress are saved to this server\'s disk, which Render wipes on every restart and deploy unless a persistent disk is attached at /data. See README "Keeping accounts".');
+    }
+    return;
+  }
+  const parsed = new URL(url);
+  const local = ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname);
+  const sslOff = parsed.searchParams.get('sslmode') === 'disable' || process.env.PGSSLMODE === 'disable';
+  // Hosted Postgres (Supabase, Neon, ...) needs TLS; their certificates aren't in Node's default
+  // store, so the connection is encrypted without verifying the chain.
+  parsed.searchParams.delete('sslmode');
+  const pool = new pg.Pool({ connectionString: parsed.toString(), ssl: local || sslOff ? false : { rejectUnauthorized: false }, max: 3, connectionTimeoutMillis: 10_000 });
+  pool.on('error', (e) => console.error('[blubba] database connection error:', e.message));
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const r = await store.attachMirror(pool);
+      console.log(`[blubba] database ready (${parsed.hostname}): ${r.accounts} accounts, ${r.profiles} profiles${r.uploaded ? ' (uploaded from the local file)' : ''}`);
+      return;
+    } catch (e) {
+      console.error(`[blubba] database not reachable (attempt ${attempt}), retrying in 3 s: ${e instanceof Error ? e.message : e}`);
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
 }

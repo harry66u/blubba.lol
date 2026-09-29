@@ -14,6 +14,7 @@ import {
   sanitizeCosmetics,
 } from '../shared/economy';
 import { type DailyState, dailyView, emptyDaily, sanitizeDaily } from '../shared/daily';
+import { Mirror, type SqlClient } from './mirror';
 
 const scrypt = promisify(scryptCb) as (password: string, salt: Buffer, keylen: number) => Promise<Buffer>;
 
@@ -93,6 +94,8 @@ function normalizeRecovery(code: string): string {
 export class Store {
   readonly db: DatabaseSync;
   private readonly cache = new Map<string, ProfileData>();
+  /** Durable Postgres copy (set with `attachMirror`), for hosts that wipe the disk. */
+  mirror: Mirror | null = null;
 
   constructor(path = process.env.BUBBA_DB ?? 'data/bubba.db') {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
@@ -137,6 +140,27 @@ export class Store {
   prune(now = Date.now()): void {
     this.db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(now);
     this.db.prepare("DELETE FROM profiles WHERE key LIKE 'g:%' AND updated_at < ?").run(now - GUEST_TTL_DAYS * 86400_000);
+    this.mirror?.prune(now, now - GUEST_TTL_DAYS * 86400_000);
+  }
+
+  /**
+   * Loads everything from Postgres (the source of truth from now on) and starts copying every
+   * change back to it. Call before serving anyone.
+   */
+  async attachMirror(pg: SqlClient): Promise<{ accounts: number; profiles: number; uploaded: boolean }> {
+    const mirror = new Mirror(pg, this.db);
+    const loaded = await mirror.load();
+    this.cache.clear();
+    this.mirror = mirror;
+    mirror.start();
+    this.prune();
+    return loaded;
+  }
+
+  /** Where saves go, for the health check. */
+  storageInfo(): { storage: 'postgres' | 'sqlite'; pendingWrites?: number; writeError?: string } {
+    if (!this.mirror) return { storage: 'sqlite' };
+    return { storage: 'postgres', pendingWrites: this.mirror.pending, ...(this.mirror.lastError ? { writeError: this.mirror.lastError } : {}) };
   }
 
   // --- Accounts ------------------------------------------------------------------------------
@@ -159,7 +183,9 @@ export class Store {
     // Re-check after the (async) hashing in case someone else took the name meanwhile.
     if (this.accountByName(name)) return null;
     const res = this.db.prepare('INSERT INTO accounts (name, name_lower, pass, recovery, created_at) VALUES (?, ?, ?, ?, ?)').run(name, name.toLowerCase(), pass, recovery, Date.now());
-    return { account: { id: Number(res.lastInsertRowid), name }, recoveryCode: code };
+    const id = Number(res.lastInsertRowid);
+    this.mirror?.account(id);
+    return { account: { id, name }, recoveryCode: code };
   }
 
   async login(name: string, password: string): Promise<Account | null> {
@@ -188,12 +214,16 @@ export class Store {
     const [pass, recovery] = await Promise.all([hashSecret(password), hashSecret(next)]);
     this.db.prepare('UPDATE accounts SET pass = ?, recovery = ? WHERE id = ?').run(pass, recovery, row.id);
     this.db.prepare('DELETE FROM sessions WHERE account_id = ?').run(row.id);
+    this.mirror?.account(Number(row.id));
+    this.mirror?.deleteSessionsOf(Number(row.id));
     return { account: { id: Number(row.id), name: row.name }, recoveryCode: next };
   }
 
   createSession(accountId: number): string {
     const token = randomBytes(32).toString('hex');
-    this.db.prepare('INSERT INTO sessions (token_hash, account_id, expires_at) VALUES (?, ?, ?)').run(sha256(token), accountId, Date.now() + SESSION_DAYS * 86400_000);
+    const hash = sha256(token);
+    this.db.prepare('INSERT INTO sessions (token_hash, account_id, expires_at) VALUES (?, ?, ?)').run(hash, accountId, Date.now() + SESSION_DAYS * 86400_000);
+    this.mirror?.session(hash);
     return token;
   }
 
@@ -205,11 +235,14 @@ export class Store {
   }
 
   deleteSession(token: string): void {
-    this.db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(sha256(token));
+    const hash = sha256(token);
+    this.db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hash);
+    this.mirror?.deleteSession(hash);
   }
 
   flagAccount(id: number): void {
     this.db.prepare('UPDATE accounts SET flagged = 1 WHERE id = ?').run(id);
+    this.mirror?.account(id);
   }
 
   // --- Profiles ------------------------------------------------------------------------------
@@ -246,6 +279,7 @@ export class Store {
     this.db
       .prepare('INSERT INTO profiles (key, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at')
       .run(key, JSON.stringify(data), Date.now());
+    this.mirror?.profile(key);
   }
 
   /** "Creating an account keeps a guest's existing progress." */
@@ -258,6 +292,7 @@ export class Store {
     this.cache.delete(from);
     this.saveProfile(to);
     this.db.prepare('DELETE FROM profiles WHERE key = ?').run(from);
+    this.mirror?.deleteProfile(from);
   }
 
   /** The profile as its owner sees it. Takes the key because the day's challenges are picked from it. */
@@ -297,11 +332,22 @@ export class Store {
   // --- Reports ---------------------------------------------------------------------------------
 
   addReport(reporter: string, target: string, targetName: string, room: string, reason: string): void {
-    this.db.prepare('INSERT INTO reports (at, reporter, target, target_name, room, reason) VALUES (?, ?, ?, ?, ?, ?)').run(Date.now(), reporter, target, targetName, room, reason);
+    const res = this.db.prepare('INSERT INTO reports (at, reporter, target, target_name, room, reason) VALUES (?, ?, ?, ?, ?, ?)').run(Date.now(), reporter, target, targetName, room, reason);
+    this.mirror?.report(Number(res.lastInsertRowid));
   }
 
   reports(limit = 100): { at: number; reporter: string; target: string; target_name: string; room: string; reason: string }[] {
     return this.db.prepare('SELECT at, reporter, target, target_name, room, reason FROM reports ORDER BY id DESC LIMIT ?').all(limit) as never;
+  }
+
+  /** Finishes writing to Postgres (if attached), then closes. */
+  async shutdown(ms = 8000): Promise<void> {
+    if (this.mirror) {
+      this.mirror.stop();
+      const ok = await this.mirror.drain(ms);
+      if (!ok) console.error(`[blubba] shutting down with ${this.mirror.pending} unsaved database change(s)`);
+    }
+    this.close();
   }
 
   close(): void {

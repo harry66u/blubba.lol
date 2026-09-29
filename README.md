@@ -126,4 +126,23 @@ docker run -p 8080:8080 -v blubba-data:/data blubba
 The `/data` volume holds the SQLite database (accounts, progress, reports). Run a single server
 process per database file.
 
+### Keeping accounts
+
+Hosts like Render's free plan wipe the server's disk on every restart and deploy (free servers
+also restart after sleeping), which would delete every account. To keep them, give the server a
+free Postgres database and set its connection string as `DATABASE_URL`:
+
+1. Create a free Postgres database at [Neon](https://neon.tech) or [Supabase](https://supabase.com).
+   Copy its connection string (on Supabase: Connect → **Session pooler**, which works over IPv4).
+   It looks like `postgresql://user:password@host:5432/dbname`.
+2. In Render: your service → **Environment** → add `DATABASE_URL` with that string → Save
+   (Render redeploys).
+3. Check `https://<your-site>/api/health`: it says `"storage":"postgres"` when it's working.
+
+The server loads everything from Postgres at startup (tables are created automatically, all named
+`blubba_*`), keeps working from its local SQLite copy, and writes every change back to Postgres
+within about a second. If a local database already exists and Postgres is empty, it is uploaded
+the first time. Run one server per database. Without `DATABASE_URL` on Render, the server logs a
+warning at startup.
+
 Put it behind HTTPS in production (the client automatically uses `wss://` on HTTPS pages).
