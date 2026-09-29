@@ -52,6 +52,7 @@ export interface Caller {
 export class Api {
   private readonly authLimiter = new RateLimiter(10, 10 / 60);
   private readonly writeLimiter = new RateLimiter(30, 1);
+  private readonly logLimiter = new RateLimiter(10, 10 / 60);
   /** Lets the lobby hear about purchases/equips so in-match players update right away. */
   onProfileChange: ((key: string) => void) | null = null;
 
@@ -187,6 +188,14 @@ export class Api {
       }
       case '/api/leaderboard':
         return { players: this.store.leaderboard(20) };
+      case '/api/clientlog': {
+        // Errors from players' browsers, so they show up in the server log.
+        const b = await this.body(req);
+        if (!this.logLimiter.take(ip)) return { ok: false };
+        const clean = (v: unknown, n: number) => String(v ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').slice(0, n);
+        console.warn(`[client] ${clean(b.message, 300)} | ${clean(b.page, 60)} | ${clean(b.ua, 160)}${b.stack ? `\n  ${clean(b.stack, 1200).replace(/ {2,}at /g, '\n  at ')}` : ''}`);
+        return { ok: true };
+      }
       case '/api/debug/grant': {
         // Test helper (only with BUBBA_DEBUG=1): add coins/XP to yourself.
         if (process.env.BUBBA_DEBUG !== '1') throw new ApiError(404, 'not_found', 'Not found.');

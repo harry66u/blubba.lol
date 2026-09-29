@@ -64,8 +64,13 @@ export class Lobby {
           for (const room of this.rooms.values()) {
             try {
               room.tick();
+              room.tickFailures = 0;
             } catch (err) {
               console.error(`[room ${room.code}] tick failed`, err);
+              if (++room.tickFailures >= 3) {
+                console.error(`[room ${room.code}] closing after repeated failures`);
+                room.abandon();
+              }
             }
           }
         }

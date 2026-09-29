@@ -14,7 +14,8 @@ import {
 export interface ConnectionHandlers {
   onMessage: (msg: ServerMessage) => void;
   onSnapshot: (snap: Snapshot) => void;
-  onClose: (reason: string) => void;
+  /** `code` 1012 means the server is restarting (an update); reconnecting soon will work. */
+  onClose: (reason: string, code: number) => void;
 }
 
 /** WebSocket connection to the game server. Opened early so joining is instant. */
@@ -49,7 +50,7 @@ export class Connection {
       this.pingTimer = null;
       this.openPromise = null;
       if (this.ws === ws) this.ws = null;
-      if (!this.closedByUs) this.handlers?.onClose(e.reason || 'Disconnected from the server.');
+      if (!this.closedByUs) this.handlers?.onClose(e.reason || 'Disconnected from the server.', e.code);
     };
     this.openPromise.catch(() => undefined);
     return this.openPromise;

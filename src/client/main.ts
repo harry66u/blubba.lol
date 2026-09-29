@@ -2,6 +2,7 @@ import { BALANCE } from '../shared/balance';
 import { QUICK_CHAT, unlockedAt } from '../shared/economy';
 import { sanitizeLoadout } from '../shared/loadout';
 import { randomGuestName } from '../shared/names';
+import type { ModeId } from '../shared/game/modes';
 import type { JoinRequest, ServerMessage } from '../shared/protocol';
 import { Audio } from './audio/audio';
 import { Music } from './audio/music';
@@ -10,11 +11,13 @@ import { InputManager } from './input/input';
 import { PAD } from './input/gamepad';
 import { TouchControls, isTouchDevice } from './input/touch';
 import { Connection } from './net/connection';
+import { installErrorReports } from './net/errorReport';
 import { AccountClient } from './net/account';
 import { type Quality, Renderer } from './render/renderer';
 import { isWeakGpu } from './render/gpu';
 import { type Settings, loadIdentity, loadSettings, saveIdentity, saveSettings } from './settings';
 import { clear } from './ui/dom';
+import { buildReconnecting } from './ui/reconnect';
 import { type AccountTab, buildAccountChip, buildAccountPanel, buildDailyCard, buildProfile, buildQueue } from './ui/accountUi';
 import { buildLocker } from './ui/locker';
 import { Hud } from './ui/hud';
@@ -22,6 +25,7 @@ import { type PlayMode, buildClickToPlay, buildHowTo, buildMainMenu, buildPause,
 import { buildLoadout, loadLoadout, saveLoadout } from './ui/loadout';
 
 const settings = loadSettings();
+installErrorReports();
 const identity = loadIdentity(() => randomGuestName());
 const canvas = document.getElementById('scene') as HTMLCanvasElement;
 const uiRoot = document.getElementById('ui') as HTMLElement;
@@ -76,12 +80,15 @@ fpsEl.className = 'ping';
 fpsEl.style.top = '24px';
 uiRoot.append(hud.root, ...(touch ? [touch.root] : []), scoreLayer, menuLayer, overlayLayer, fpsEl);
 
-type Screen = 'menu' | 'room-join' | 'connecting' | 'queue' | 'playing';
+type Screen = 'menu' | 'room-join' | 'connecting' | 'queue' | 'playing' | 'reconnecting';
 let screen: Screen = 'menu';
 let overlay: 'none' | 'pause' | 'settings' | 'howto' | 'click' | 'results' | 'loadout' | 'replay' | 'locker' | 'profile' | 'account' = 'none';
 let accountTab: AccountTab = 'signup';
 let lockerDispose: (() => void) | null = null;
 let pendingJoin: JoinRequest | null = null;
+/** The room you were last playing in, so a dropped connection can put you back. */
+let lastRoom: { code: string; isPrivate: boolean; mode: ModeId; ranked: boolean } | null = null;
+let reconnectTimer: number | null = null;
 let scoreboardOpen = false;
 /** Playing with a controller: no pointer lock needed. */
 let padPlay = false;
@@ -121,6 +128,7 @@ function setPath(path: string): void {
 // --- Screens -----------------------------------------------------------------------------------
 
 function showMenu(notice?: string): void {
+  stopReconnecting();
   screen = 'menu';
   setOverlay('none');
   setPath('/');
@@ -210,6 +218,59 @@ function startJoin(name: string, join: JoinRequest): void {
     showMenu(err.message || 'Could not connect. Check your Wi-Fi and try again.');
   });
 }
+
+/** Waits between reconnect tries (seconds): about a minute in all, enough for a server restart. */
+const RECONNECT_DELAYS = [0.5, 1.5, 3, 4, 5, 6, 8, 10, 10, 12];
+
+/**
+ * The connection dropped mid-match (Wi-Fi hiccup or a server update): keep trying to get back
+ * into the same room (or the same mode, for public rooms) before giving up.
+ */
+function reconnect(updating: boolean): void {
+  stopReconnecting();
+  reconnectUpdating = updating;
+  scheduleReconnect();
+}
+
+/** Queues the next try (a failed try can report twice: its promise and its socket closing). */
+function scheduleReconnect(): void {
+  if (reconnectTimer !== null) return;
+  const room = lastRoom;
+  if (!room || reconnectAttempt >= RECONNECT_DELAYS.length) {
+    showMenu('Lost connection to the server. Check your Wi-Fi and try again.');
+    return;
+  }
+  screen = 'reconnecting';
+  setOverlay('none');
+  clear(menuLayer);
+  menuLayer.append(buildReconnecting(reconnectUpdating, reconnectAttempt, () => showMenu()));
+  const delay = RECONNECT_DELAYS[reconnectAttempt++];
+  reconnectTimer = window.setTimeout(() => {
+    reconnectTimer = null;
+    if (screen !== 'reconnecting') return;
+    const join: JoinRequest = room.isPrivate ? { kind: 'code', code: room.code } : { kind: 'quick', mode: room.mode };
+    pendingJoin = join;
+    const tried = reconnectAttempt;
+    net.join(identity.name, identity.guestId, join, game.loadout, account.token ?? undefined).catch(() => {
+      if (screen === 'reconnecting') scheduleReconnect();
+    });
+    // A try that neither gets in nor fails (a stuck socket) is retried too.
+    window.setTimeout(() => {
+      if (screen === 'reconnecting' && reconnectAttempt === tried && reconnectTimer === null) {
+        net.close();
+        scheduleReconnect();
+      }
+    }, 12_000);
+  }, delay * 1000);
+}
+
+function stopReconnecting(): void {
+  if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  reconnectAttempt = 0;
+}
+let reconnectAttempt = 0;
+let reconnectUpdating = false;
 
 function goFullscreen(): void {
   const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
@@ -535,6 +596,8 @@ net.handlers = {
     }
     if (msg.type === 'welcome') {
       if (msg.room.ranked) padPlay = padPlay || input.lastDevice === 'pad';
+      stopReconnecting();
+      lastRoom = { code: msg.room.code, isPrivate: msg.room.isPrivate, mode: msg.room.settings.mode, ranked: msg.room.ranked };
       screen = 'playing';
       reported.clear();
       clear(menuLayer);
@@ -574,7 +637,18 @@ net.handlers = {
     game.onMessage(msg);
     if (msg.type === 'roster' && scoreboardOpen) renderScoreboard();
   },
-  onClose: (reason) => {
+  onClose: (reason, code) => {
+    // Dropped mid-match: get back in automatically (ranked matches can't be rejoined).
+    if (screen === 'reconnecting') {
+      scheduleReconnect();
+      return;
+    }
+    if (screen === 'playing' && lastRoom && !lastRoom.ranked && code !== 4001) {
+      game.leave();
+      input.exitLock();
+      reconnect(code === 1012);
+      return;
+    }
     if (screen === 'playing' || screen === 'connecting' || screen === 'queue') {
       game.leave();
       input.exitLock();

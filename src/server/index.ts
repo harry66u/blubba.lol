@@ -151,17 +151,50 @@ wss.on('connection', (ws) => {
     pingSent = Date.now();
     ws.ping();
   }, 5000);
-  ws.on('message', (data, isBinary) => lobby.handleMessage(ws, data as Buffer, isBinary));
+  // One bad message must never take the whole server (and every match on it) down.
+  ws.on('message', (data, isBinary) => {
+    try {
+      lobby.handleMessage(ws, data as Buffer, isBinary);
+    } catch (err) {
+      console.error('[ws] message handler failed', err);
+    }
+  });
   ws.on('close', () => {
     clearInterval(heartbeat);
-    lobby.handleClose(ws);
+    try {
+      lobby.handleClose(ws);
+    } catch (err) {
+      console.error('[ws] close handler failed', err);
+    }
   });
   ws.on('error', () => ws.close());
 });
 
+// Can't listen (port taken, no permission): exit so the host restarts us, rather than living on
+// as a server nobody can reach.
+server.on('error', (err) => {
+  console.error('[blubba] server error:', err);
+  process.exit(1);
+});
 server.listen(PORT, () => {
   console.log(`[blubba] server listening on http://localhost:${PORT}${DEV ? ' (dev: client served by Vite on :5173)' : ''}`);
 });
+
+// A bug somewhere shouldn't disconnect every player: log it and keep serving. If errors pour in,
+// exit and let the host restart a clean process.
+let crashes: number[] = [];
+function survive(kind: string, err: unknown): void {
+  console.error(`[blubba] ${kind}:`, err);
+  const now = Date.now();
+  crashes = crashes.filter((t) => now - t < 60_000);
+  crashes.push(now);
+  if (crashes.length > 50) {
+    console.error('[blubba] too many errors in a minute; restarting');
+    process.kill(process.pid, 'SIGTERM');
+  }
+}
+process.on('uncaughtException', (err) => survive('uncaught exception', err));
+process.on('unhandledRejection', (err) => survive('unhandled rejection', err));
 
 let stopping = false;
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
@@ -169,6 +202,8 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
     if (stopping) return;
     stopping = true;
     lobby.stop();
+    // 1012 "service restart": clients show "updating" and reconnect on their own.
+    for (const c of wss.clients) c.close(1012, 'Server restarting');
     wss.close();
     server.close();
     // Finish saving to the database before exiting (hosts allow several seconds after SIGTERM).

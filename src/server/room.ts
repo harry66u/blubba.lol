@@ -86,6 +86,8 @@ export class Room {
   private rankedSettled = false;
   /** The lobby drops closed rooms on its next sweep. */
   closed = false;
+  /** Ticks in a row that threw (the lobby closes the room after a few). */
+  tickFailures = 0;
   private readonly nameReports = new Map<number, Set<string>>();
 
   constructor(
@@ -441,6 +443,16 @@ export class Room {
       this.send(conn, { type: 'error', code: 'ranked_over', message: 'Ranked match complete. Queue again for another!' });
       conn.ws.close(4002, 'ranked_over');
     }
+    this.conns.clear();
+    this.closed = true;
+  }
+
+  /**
+   * Something in this room keeps failing: close it. Players' clients reconnect by themselves and
+   * land in a fresh room.
+   */
+  abandon(): void {
+    for (const conn of [...this.conns.values()]) conn.ws.close(1011, 'Room error');
     this.conns.clear();
     this.closed = true;
   }
