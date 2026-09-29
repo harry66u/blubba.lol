@@ -62,6 +62,13 @@ export const ITEMS: CosmeticItem[] = [
     ['chonk', 'Chonk', 0, 'Short and extra wide.'],
     ['noodle', 'Noodle', 150, 'Tall and skinny.'],
     ['bighead', 'Big Head', 200, 'All brain.'],
+    ['blocky', 'Blocky', 0, 'Square all the way up. A box that dances.'],
+    ['snowman', 'Snowman', 0, 'Three balls stacked up. Chilly.'],
+    ['pear', 'Pear', 0, 'Bottom-heavy and proud of it.'],
+    ['hourglass', 'Hourglass', 150, 'Big top, big bottom, tiny waist.'],
+    ['star', 'Star', 200, 'Five pointy ridges all the way up.'],
+    ['beads', 'Bubble Stack', 250, 'A stack of bubbles, like a balloon animal.'],
+    ['ghost', 'Ghost', 250, 'A flowing skirt that ripples. Boo.'],
     ['bor', 'BOR', 0, 'Short, jacked, checkered shirt, never without his giant syringe of AIR.'],
     ['abag', 'ABAG', 0, 'Will chase you across the whole map. Follow the nose.'],
     ['sol', 'SOL', 0, 'All-black Amiri sweats. Constant gas.'],
@@ -160,6 +167,7 @@ export const ITEMS: CosmeticItem[] = [
     ['sparkle', 'Sparkly', 300, 'Shiny cartoon eyes.'],
   ]),
   ...items('hat', [
+    ['none', 'No Hat', 0, 'Nothing on top.'],
     ['spikes', 'Tufts', 0, 'The classic air-dancer hair.'],
     ['flower', 'Daisy', 0, 'One big flower.'],
     ['bucket', 'Bucket Hat', 0],
@@ -542,11 +550,12 @@ export interface ProgressReport {
 /** The only way to talk: fixed, friendly presets. No free text. */
 export const QUICK_CHAT = ['Nice shot!', 'Good game!', 'Watch out!', 'Help!', "Let's go!", 'Oops!', 'Thanks!', 'Rematch?'] as const;
 
-export const REPORT_REASONS = ['name', 'face', 'cheating', 'mean', 'other'] as const;
+export const REPORT_REASONS = ['name', 'face', 'decal', 'cheating', 'mean', 'other'] as const;
 export type ReportReason = (typeof REPORT_REASONS)[number];
 export const REPORT_REASON_TEXT: Record<ReportReason, string> = {
   name: 'Bad name',
   face: 'Bad face picture',
+  decal: 'Bad decal picture',
   cheating: 'Cheating',
   mean: 'Being mean / griefing',
   other: 'Something else',

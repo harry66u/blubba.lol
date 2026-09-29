@@ -20,6 +20,28 @@ describe('bodies and characters', () => {
     expect(lookFromCosmetics({ body: 'body.kesty' }, 0).body).toBe('kesty');
   });
 
+  it('the body types really are different shapes, and stay sensible', () => {
+    // Profiles change the radius up the body; sections change the shape around it.
+    expect(BODY_SHAPES.blocky.section!(Math.PI / 4)).toBeGreaterThan(1.1);
+    expect(BODY_SHAPES.blocky.section!(0)).toBeCloseTo(1, 5);
+    expect(BODY_SHAPES.star.section!(0)).toBeGreaterThan(BODY_SHAPES.star.section!(Math.PI / 5));
+    const snow = BODY_SHAPES.snowman.profile!;
+    expect(snow(0.24)).toBeGreaterThan(snow(0.5));
+    expect(BODY_SHAPES.pear.profile!(0.1)).toBeGreaterThan(BODY_SHAPES.pear.profile!(0.9));
+    for (const [key, sh] of Object.entries(BODY_SHAPES)) {
+      for (let v = 0; v <= 1; v += 0.05) {
+        const r = sh.profile ? sh.profile(v) : 1;
+        expect(r, `${key} profile at ${v}`).toBeGreaterThan(0.3);
+        expect(r, `${key} profile at ${v}`).toBeLessThan(2.5);
+      }
+      for (let a = 0; a < Math.PI * 2; a += 0.2) {
+        const s = sh.section ? sh.section(a) : 1;
+        expect(s, `${key} section`).toBeGreaterThan(0.6);
+        expect(s, `${key} section`).toBeLessThan(1.5);
+      }
+    }
+  });
+
   it('characters come with their outfits and props', () => {
     expect(hasOutfit('bor') && hasOutfit('sol') && hasOutfit('kesty')).toBe(true);
     expect(hasOutfit('abag') || hasOutfit('classic')).toBe(false);

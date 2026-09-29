@@ -2,7 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ITEM_BY_ID, type ProfileView, levelForXp, sanitizeCosmetics } from '../shared/economy';
 import { checkName } from '../shared/names';
-import { type Account, type Store, accountKey, guestKey, validGuestId } from './store';
+import { type Account, type ImageKind, type Store, accountKey, guestKey, validGuestId } from './store';
 
 const MAX_BODY = 4096;
 /** Face scans are small square photos (the client sends about 160 px, well under this). */
@@ -91,15 +91,15 @@ export class Api {
     return timingSafeEqual(Buffer.from(got), Buffer.from(want));
   }
 
-  /** Face images are served as images, not JSON. Returns false if the path isn't one. */
+  /** Face and decal images are served as images, not JSON. Returns false if the path isn't one. */
   private serveFace(req: IncomingMessage, res: ServerResponse, path: string): boolean {
-    const m = path.match(/^\/api\/(admin\/)?face\/(\d{1,12})$/);
+    const m = path.match(/^\/api\/(admin\/)?(face|decal)\/(\d{1,12})$/);
     if (!m || req.method !== 'GET') return false;
     const admin = !!m[1];
-    const face = admin && !this.isAdmin(req) ? null : this.store.face(Number(m[2]), admin);
+    const face = admin && !this.isAdmin(req) ? null : this.store.image(m[2] as ImageKind, Number(m[3]), admin);
     if (!face) {
       res.writeHead(404, { 'content-type': 'text/plain', 'cache-control': 'no-store' });
-      res.end('No face');
+      res.end('No picture');
       return true;
     }
     res.writeHead(200, {
@@ -167,6 +167,7 @@ export class Api {
           account: c.account ? { name: c.account.name, id: c.account.id } : null,
           profile: this.view(c),
           face: c.account ? this.store.faceStatus(c.account.id) : null,
+          decal: c.account ? this.store.imageStatus('decal', c.account.id) : null,
           character: c.account ? this.store.characterClaim(c.account.id) : null,
         };
       }
@@ -195,6 +196,30 @@ export class Api {
         this.onProfileChange?.(c.key);
         return { face: this.store.faceStatus(c.account.id) };
       }
+      case '/api/decal': {
+        // Upload a picture for the front of your tube man (accounts only). Everyone in your
+        // matches sees it, so it can be reported and removed like a face scan.
+        const b = await this.body(req, MAX_FACE_BYTES * 1.4 + 1024);
+        if (!this.writeLimiter.take(ip)) throw new ApiError(429, 'slow_down', 'Slow down a little.');
+        const c = this.caller(req);
+        if (!c.account || !c.key) throw new ApiError(401, 'account_required', 'Make a free account to use a custom decal.');
+        if (b.ok !== true) throw new ApiError(400, 'rules', 'Only use a picture that is yours to use and fine for everyone to see.');
+        const m = String(b.image ?? '').match(/^data:(image\/(?:webp|jpeg|png));base64,([A-Za-z0-9+/]+={0,2})$/);
+        if (!m) throw new ApiError(400, 'bad_image', "That picture didn't work. Try another one.");
+        const bytes = Buffer.from(m[2], 'base64');
+        if (bytes.length > MAX_FACE_BYTES || bytes.length < 100 || !FACE_MIMES[m[1]](bytes)) throw new ApiError(400, 'bad_image', "That picture didn't work. Try another one.");
+        if (!this.store.setImage('decal', c.account.id, m[1], bytes.toString('base64'))) throw new ApiError(403, 'decal_banned', 'Custom decals are turned off for your account.');
+        this.onProfileChange?.(c.key);
+        return { decal: this.store.imageStatus('decal', c.account.id) };
+      }
+      case '/api/decal/remove': {
+        await this.body(req);
+        const c = this.caller(req);
+        if (!c.account || !c.key) throw new ApiError(401, 'account_required', 'Log in first.');
+        if (!this.store.imageStatus('decal', c.account.id).banned) this.store.removeImage('decal', c.account.id);
+        this.onProfileChange?.(c.key);
+        return { decal: this.store.imageStatus('decal', c.account.id) };
+      }
       case '/api/face/character': {
         // "I'm the real BOR": lend your own face scan to your character (an admin approves it).
         const b = await this.body(req);
@@ -213,7 +238,7 @@ export class Api {
         return { faces: this.store.characterFaces() };
       case '/api/admin/faces': {
         if (!this.isAdmin(req)) throw new ApiError(404, 'not_found', 'Not found.');
-        return { faces: this.store.listFaces(), reports: this.store.reports(100), claims: this.store.listCharacterClaims() };
+        return { faces: this.store.listFaces(), decals: this.store.listImages('decal'), reports: this.store.reports(100), claims: this.store.listCharacterClaims() };
       }
       case '/api/admin/character': {
         const b = await this.body(req);
@@ -226,18 +251,20 @@ export class Api {
         console.log(`[admin] character claim ${b.action} for account ${id}`);
         return { claims: this.store.listCharacterClaims() };
       }
-      case '/api/admin/face': {
+      case '/api/admin/face':
+      case '/api/admin/decal': {
         const b = await this.body(req);
         if (!this.isAdmin(req)) throw new ApiError(404, 'not_found', 'Not found.');
+        const kind: ImageKind = path === '/api/admin/decal' ? 'decal' : 'face';
         const id = Number(b.id);
         if (!Number.isInteger(id) || id <= 0) throw new ApiError(400, 'bad_id', 'Bad id.');
-        if (b.action === 'remove') this.store.removeFace(id);
-        else if (b.action === 'ban') this.store.removeFace(id, true);
-        else if (b.action === 'restore') this.store.restoreFace(id);
+        if (b.action === 'remove') kind === 'face' ? this.store.removeFace(id) : this.store.removeImage(kind, id);
+        else if (b.action === 'ban') kind === 'face' ? this.store.removeFace(id, true) : this.store.removeImage(kind, id, true);
+        else if (b.action === 'restore') this.store.restoreImage(kind, id);
         else throw new ApiError(400, 'bad_action', 'Use remove, ban or restore.');
-        console.log(`[admin] face ${b.action} for account ${id}`);
+        console.log(`[admin] ${kind} ${b.action} for account ${id}`);
         this.onProfileChange?.(accountKey(id));
-        return { faces: this.store.listFaces() };
+        return kind === 'face' ? { faces: this.store.listFaces() } : { decals: this.store.listImages('decal') };
       }
       case '/api/account/register': {
         const b = await this.body(req);

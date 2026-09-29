@@ -152,17 +152,10 @@ every Locker item including level rewards, and every loadout part and gadget fro
 Change who with `BUBBA_UNLOCK_ALL` (comma-separated account names, e.g. `Harry,Ben`; set it
 empty for nobody). Names are matched ignoring capitals, and guests never get it.
 
-### Moderation and character faces
+### Moderation
 
 Set `BUBBA_ADMIN_TOKEN` (12+ characters) in the server's environment, then open `/admin` and
 enter the token. From there you can remove any face scan (or remove it and stop that account
 uploading another), restore a face that reports hid, and read recent player reports.
-
-The same page handles **character faces**. Popping an ult turns you into one of the regulars
-(Juice: BOR, The Chase: ABAG, Crop Duster: SOL, Robot Mode: KESTY). The real person behind a
-character can lend it their face: they save a face scan of themselves on their own account and
-pick "Are you the real BOR, ABAG, SOL or KESTY?" in the face scan screen. The claim shows up
-under **Character faces** on `/admin`; approve it and everyone who turns into that character
-wears that face. Removing the face scan (by them or by you) takes it off the character too.
 
 Put it behind HTTPS in production (the client automatically uses `wss://` on HTTPS pages).

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { type BodyShape, type CharacterProps, bodyShape, buildProps, hasOutfit, outfitShine, outfitTextures } from './characters';
-import { buildFacePhoto, disposeFacePhoto } from './facePhoto';
+import { buildDecal, buildFacePhoto, disposeFacePhoto } from './facePhoto';
 import { PLAYER_COLORS } from '../../shared/colors';
 import { type Cosmetics, cosmeticKey } from '../../shared/economy';
 import { inflationScale } from '../../shared/player';
@@ -490,6 +490,8 @@ export class TubeMan {
   private faceExtras: THREE.Group;
   /** A player's face scan, worn instead of the cartoon eyes and mouth. */
   private facePhoto: THREE.Group | null = null;
+  /** The player's custom decal on the chest (null = none). */
+  private decal: THREE.Group | null = null;
   private eyeKind: EyeStyle;
   private shineP = SHINES[''];
   private accentShineP = SHINES[''];
@@ -535,7 +537,8 @@ export class TubeMan {
     }
     this.color.set(colorHex);
 
-    this.body = new FlexTube(BODY_RINGS, 24, this.bodyMat);
+    // 30 around: even steps for 5- and 6-sided cross-sections (star, blocky).
+    this.body = new FlexTube(BODY_RINGS, 30, this.bodyMat);
     this.arms = [new FlexTube(ARM_RINGS, 9, this.bodyMat), new FlexTube(ARM_RINGS, 9, this.bodyMat)];
     this.body.mesh.castShadow = true;
     for (const a of this.arms) a.mesh.castShadow = true;
@@ -592,6 +595,7 @@ export class TubeMan {
   private applyBody(): void {
     const body = this.look.body;
     this.shape = bodyShape(body);
+    this.body.setSection(this.shape.section ?? null);
     if (this.props) {
       if (this.props.face) this.face.remove(this.props.face);
       if (this.props.hand) this.handProp.remove(this.props.hand);
@@ -653,6 +657,19 @@ export class TubeMan {
     if (this.props?.faceCartoonOnly) this.props.faceCartoonOnly.visible = !tex;
     // Eyes follow the face and eye style (and hide under a photo).
     this.applyFaceBase();
+  }
+
+  /** Puts a custom decal on the chest (null takes it off). */
+  setDecal(tex: THREE.Texture | null): void {
+    if (this.decal) {
+      this.rig.remove(this.decal);
+      disposeFacePhoto(this.decal);
+      this.decal = null;
+    }
+    if (tex) {
+      this.decal = buildDecal(tex);
+      this.rig.add(this.decal);
+    }
   }
 
   /** The trail drawn behind this tube man while flying (see Effects.trail). */
@@ -951,6 +968,12 @@ export class TubeMan {
         const k = Math.min(1, Math.max(0, (u - 0.42) / (capU - 0.42)));
         const swell = k * k * (3 - 2 * k);
         r = bodyR * flare * (1 + (headR / bodyR - 1) * swell);
+        if (sh.profile) {
+          // Eased back to the plain tube by the neck, so the head and face sit the same on every body.
+          const v = u / capU;
+          const e = Math.min(1, Math.max(0, (v - 0.82) / 0.18));
+          r *= 1 + (sh.profile(v) - 1) * (1 - e * e * (3 - 2 * e));
+        }
       } else {
         const a = ((i - capStart) / (n - 1 - capStart)) * (Math.PI / 2);
         u = capU + (Math.sin(a) * headR) / bodyLen;
@@ -989,7 +1012,9 @@ export class TubeMan {
     const ny = N[headRing * 3 + 1];
     const nz = N[headRing * 3 + 2];
     const hr = radii[headRing];
-    this.face.position.set(hx + nx * hr * 0.92, hy + ny * hr * 0.92, hz + nz * hr * 0.92);
+    // (The front of the cross-section may bulge or dip: the star puts a point there.)
+    const fr = hr * 0.92 * this.body.sectionAt(0);
+    this.face.position.set(hx + nx * fr, hy + ny * fr, hz + nz * fr);
     // Orient the face so +z points along the ring normal and +y along the tube.
     const ti = headRing + 1;
     const up = SV1.set(spine[ti * 3] - hx, spine[ti * 3 + 1] - hy, spine[ti * 3 + 2] - hz).normalize();
@@ -997,12 +1022,28 @@ export class TubeMan {
     const right = SV3.crossVectors(up, fwd).normalize();
     const m = SM.makeBasis(right, up, fwd);
     this.face.quaternion.setFromRotationMatrix(m);
+    if (this.decal) {
+      // The decal rides on the front of the chest, turned like the face.
+      const di = Math.round(n * 0.3);
+      const o = di * 3;
+      const dr = radii[di] * this.body.sectionAt(0);
+      const k = radii[di] * 0.62;
+      this.decal.position.set(spine[o] + N[o] * (dr + 0.03), spine[o + 1] + N[o + 1] * (dr + 0.03), spine[o + 2] + N[o + 2] * (dr + 0.03));
+      const dup = SV1.set(spine[o + 3] - spine[o], spine[o + 4] - spine[o + 1], spine[o + 5] - spine[o + 2]).normalize();
+      const dfwd = SV2.set(N[o], N[o + 1], N[o + 2]);
+      const dright = SV3.crossVectors(dup, dfwd).normalize();
+      this.decal.quaternion.setFromRotationMatrix(SM.makeBasis(dright, dup, dfwd));
+      this.decal.scale.setScalar(k);
+      this.decal.visible = !p.held;
+    }
     if (this.facePhoto) {
-      // Sized to the head (it grows as you inflate) and squashed a little when you get hit.
-      const k = (hr * 0.8) / this.face.scale.x;
-      this.facePhoto.scale.set(k * (p.doubled ? 1.12 : 1), k * (p.launched ? 1.1 : p.doubled ? 0.85 : 1), k);
-      // The face group sits just under the skin; the photo goes on top of it.
-      this.facePhoto.position.z = (hr * 0.12) / this.face.scale.x;
+      // Sized to the head (it grows as you inflate) and squashed a little when you get hit. The
+      // patch bends around 1.2 half-widths, so at 0.86 of the head radius it hugs the head.
+      const k = (hr * 0.86) / this.face.scale.x;
+      this.facePhoto.scale.set(k * (p.doubled ? 1.08 : 1), k * (p.launched ? 1.06 : p.doubled ? 0.9 : 1), k);
+      // The face group sits just under the skin; the photo floats a hair above it so the head
+      // doesn't poke through where the tube bends.
+      this.facePhoto.position.z = (hr * 0.17) / this.face.scale.x;
     }
 
     // Expressions.
@@ -1227,7 +1268,7 @@ export class TubeMan {
     // pointing where the player aims, so it shows from behind in third person.
     if (this.gun) {
       const gi = Math.round(n * 0.42);
-      const side = radii[gi] + 0.2;
+      const side = radii[gi] * this.body.sectionAt(Math.PI * 1.5) + 0.2;
       const fwd = radii[gi] * 0.35;
       const o = gi * 3;
       this.gunMount.position.set(spine[o] - B[o] * side + N[o] * fwd, spine[o + 1] - B[o + 1] * side + N[o + 1] * fwd, spine[o + 2] - B[o + 2] * side + N[o + 2] * fwd);
@@ -1280,6 +1321,7 @@ export class TubeMan {
     disposeGroup(this.hat);
     disposeGroup(this.faceExtras);
     if (this.facePhoto) disposeFacePhoto(this.facePhoto);
+    if (this.decal) disposeFacePhoto(this.decal);
     disposeGroup(this.base);
     this.props?.dispose();
     this.outfitMat.dispose();

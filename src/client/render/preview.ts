@@ -26,7 +26,8 @@ export class TubePreview {
   private readonly trailState = newTrailState();
   private raf = 0;
   private last = 0;
-  private angle = 0;
+  /** Turned to face the camera (yaw 0 faces away, down -z). */
+  private angle = Math.PI;
   private dragging = false;
   private color: number;
   /** Seconds into the current hop (<0: not hopping). */
@@ -57,16 +58,33 @@ export class TubePreview {
     this.effects.trailDensity = PREVIEW_TRAIL_DENSITY;
     this.camera.position.set(0, 1.55, 6.2);
     this.camera.lookAt(0, 1.15, 0);
-    // Drag to spin.
-    this.canvas.addEventListener('pointerdown', () => (this.dragging = true));
+    // It stands still facing you; drag (mouse or finger) to turn it.
+    this.canvas.style.touchAction = 'none';
+    this.canvas.style.cursor = 'grab';
+    this.canvas.addEventListener('pointerdown', (e) => {
+      this.dragging = true;
+      this.dragX = e.clientX;
+      this.canvas.style.cursor = 'grabbing';
+      try {
+        this.canvas.setPointerCapture(e.pointerId);
+      } catch {
+        // Not capturable (synthetic events): window pointerup still ends the drag.
+      }
+    });
     window.addEventListener('pointerup', this.stopDrag);
+    window.addEventListener('pointercancel', this.stopDrag);
     this.canvas.addEventListener('pointermove', (e) => {
-      if (this.dragging) this.angle += e.movementX * 0.012;
+      if (!this.dragging) return;
+      this.angle += (e.clientX - this.dragX) * 0.012;
+      this.dragX = e.clientX;
     });
   }
 
+  private dragX = 0;
+
   private readonly stopDrag = () => {
     this.dragging = false;
+    this.canvas.style.cursor = 'grab';
   };
 
   setLook(color: number, look: Look, weapon: WeaponId): void {
@@ -81,6 +99,11 @@ export class TubePreview {
   /** Shows a face scan on the preview (null: the cartoon face). */
   setFace(tex: THREE.Texture | null): void {
     this.man.setFacePhoto(tex);
+  }
+
+  /** Shows a custom decal on the preview (null: none). */
+  setDecal(tex: THREE.Texture | null): void {
+    this.man.setDecal(tex);
   }
 
   /** Plays a taunt so you can see what you're buying. */
@@ -111,7 +134,6 @@ export class TubePreview {
         this.camera.aspect = w / h;
         this.camera.updateProjectionMatrix();
       }
-      if (!this.dragging) this.angle += dt * 0.5;
       if (this.showTrail && this.hopT < 0) {
         this.hopWait -= dt;
         if (this.hopWait <= 0) this.hop();
@@ -146,6 +168,7 @@ export class TubePreview {
   dispose(): void {
     cancelAnimationFrame(this.raf);
     window.removeEventListener('pointerup', this.stopDrag);
+    window.removeEventListener('pointercancel', this.stopDrag);
     this.man.dispose();
     this.renderer.dispose();
     this.renderer.forceContextLoss();

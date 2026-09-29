@@ -15,6 +15,9 @@ export class FlexTube {
   readonly normals: Float32Array;
   readonly binormals: Float32Array;
   private readonly pos: THREE.BufferAttribute;
+  /** Cross-section: radius multiplier at each vertex around a ring (null = round). */
+  private section: Float32Array | null = null;
+  private sectionFn: ((a: number) => number) | null = null;
 
   constructor(
     readonly rings: number,
@@ -55,6 +58,26 @@ export class FlexTube {
     this.geometry.setIndex(index);
     this.mesh = new THREE.Mesh(this.geometry, material);
     this.mesh.frustumCulled = false;
+  }
+
+  /**
+   * Gives the tube a cross-section other than a circle: `fn(a)` multiplies the radius at angle
+   * `a` around each ring (0 = along the ring normal, pi/2 = along the binormal). Null = round.
+   */
+  setSection(fn: ((a: number) => number) | null): void {
+    this.sectionFn = fn;
+    if (!fn) {
+      this.section = null;
+      return;
+    }
+    const s = new Float32Array(this.segs + 1);
+    for (let j = 0; j <= this.segs; j++) s[j] = fn((j / this.segs) * Math.PI * 2);
+    this.section = s;
+  }
+
+  /** The cross-section's radius multiplier at angle `a` (1 for a round tube). */
+  sectionAt(a: number): number {
+    return this.sectionFn ? this.sectionFn(a) : 1;
   }
 
   /**
@@ -106,10 +129,12 @@ export class FlexTube {
       const cy = spine[i * 3 + 1];
       const cz = spine[i * 3 + 2];
       const r = radii[i];
+      const sec = this.section;
       for (let j = 0; j <= segs; j++) {
         const a = (j / segs) * Math.PI * 2;
-        const ca = Math.cos(a) * r;
-        const sa = Math.sin(a) * r;
+        const rj = sec ? r * sec[j] : r;
+        const ca = Math.cos(a) * rj;
+        const sa = Math.sin(a) * rj;
         const k = (i * (segs + 1) + j) * 3;
         p[k] = cx + nx * ca + bx * sa;
         p[k + 1] = cy + ny * ca + by * sa;

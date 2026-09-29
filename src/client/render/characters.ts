@@ -20,15 +20,36 @@ export interface BodyShape {
   length: number;
   head: number;
   arm: number;
+  /** Radius multiplier up the body below the head (v: 0 at the base, 1 where the head starts). */
+  profile?: (v: number) => number;
+  /** Cross-section: radius multiplier by angle around the body (0 = the front). Round without. */
+  section?: (a: number) => number;
 }
 
 const CLASSIC: BodyShape = { radius: 1, length: 1, head: 1, arm: 1 };
+
+/** A round bump of height h centered at c, w wide (0 outside it). */
+const bump = (v: number, c: number, w: number, h: number) => Math.sqrt(Math.max(0, 1 - ((v - c) / w) ** 2)) * h;
+
+/** A rounded square (superellipse), flat side to the front. */
+const squircle = (a: number) => {
+  const n = 8;
+  return 1 / Math.pow(Math.abs(Math.cos(a)) ** n + Math.abs(Math.sin(a)) ** n, 1 / n);
+};
 
 export const BODY_SHAPES: Record<string, BodyShape> = {
   classic: CLASSIC,
   chonk: { radius: 1.3, length: 0.86, head: 1.06, arm: 1.2 },
   noodle: { radius: 0.76, length: 1.1, head: 0.88, arm: 0.8 },
   bighead: { radius: 0.94, length: 0.95, head: 1.38, arm: 1 },
+  // Different kinds of body, not just different sizes.
+  blocky: { radius: 1.05, length: 0.95, head: 1.02, arm: 1.1, section: squircle },
+  star: { radius: 1.05, length: 1, head: 1, arm: 1, section: (a) => 1 + 0.24 * Math.cos(5 * a) },
+  snowman: { radius: 1, length: 0.95, head: 1.05, arm: 0.85, profile: (v) => Math.max(0.42, bump(v, 0.24, 0.3, 1.6), bump(v, 0.68, 0.22, 1.2)) },
+  beads: { radius: 0.9, length: 1.05, head: 1, arm: 0.9, profile: (v) => 0.62 + 0.55 * Math.abs(Math.sin(v * Math.PI * 3.5 + 0.3)) },
+  pear: { radius: 1, length: 0.92, head: 0.92, arm: 0.95, profile: (v) => 1.7 - 0.95 * v },
+  ghost: { radius: 1.05, length: 0.95, head: 1.1, arm: 0.8, profile: (v) => 1 + 0.75 * Math.max(0, 1 - v * 2.4) ** 2, section: (a) => 1 + 0.06 * Math.cos(7 * a) },
+  hourglass: { radius: 1.05, length: 1, head: 1, arm: 1, profile: (v) => 1.4 - 0.7 * Math.sin(Math.min(1, v * 1.15) * Math.PI) },
   bor: { radius: 1.24, length: 0.86, head: 1, arm: 2 },
   abag: { radius: 0.96, length: 1.03, head: 1, arm: 1 },
   sol: { radius: 1.22, length: 0.97, head: 1, arm: 1.15 },

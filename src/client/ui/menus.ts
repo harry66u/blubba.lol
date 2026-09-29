@@ -672,6 +672,8 @@ export function buildScoreboard(
 function reportMenu(target: RosterEntry, actions: ScoreActions, cell: HTMLElement): void {
   clear(cell);
   for (const reason of REPORT_REASONS) {
+    // Picture reasons only for players showing that picture.
+    if ((reason === 'face' && !target.face) || (reason === 'decal' && !target.decal)) continue;
     cell.append(
       el('button', {
         class: 'btn small ghost report-pick',

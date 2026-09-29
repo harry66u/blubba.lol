@@ -72,7 +72,7 @@ import { type Action, type InputManager, codeLabel } from '../input/input';
 import type { Connection } from '../net/connection';
 import { Effects, LandingCircles, type Projectile3D, type ShotStyle, TRAIL_FLY_SPEED, type TrailState, newTrailState, shotStyleFor } from '../render/effects';
 import { FART_INTERVAL } from '../render/characters';
-import { faceTexture } from '../render/facePhoto';
+import { decalTexture, faceTexture } from '../render/facePhoto';
 import { MapView, type WarnArea } from '../render/mapView';
 import { BeachBall } from '../render/beachBall';
 import type { Renderer } from '../render/renderer';
@@ -116,6 +116,7 @@ interface RemoteView {
   lookKey: string;
   /** Which face scan they're wearing ('' = the cartoon face). */
   faceKey: string;
+  decalKey: string;
   /** Inflation from your own confirmed hit, shown before the snapshots catch up. */
   inflHint: number;
   hintUntil: number;
@@ -2361,6 +2362,12 @@ export class ClientGame {
     return `${entry.face.account}.${entry.face.v}`;
   }
 
+  /** The custom decal to show for a roster entry ('' = none; hidden with face scans turned off). */
+  private decalKeyOf(entry: RosterEntry | undefined): string {
+    if (!entry?.decal || (!this.showFaces && entry.id !== this.youId)) return '';
+    return `${entry.decal.account}.${entry.decal.v}`;
+  }
+
   /** The face texture for a roster entry's own face scan. */
   private faceTexOf(entry: RosterEntry | undefined): THREE.Texture | null {
     return this.faceKeyOf(entry) && entry?.face ? faceTexture(entry.face.account, entry.face.v) : null;
@@ -2408,6 +2415,7 @@ export class ClientGame {
       lastTagText: '',
       lookKey: JSON.stringify(look),
       faceKey: '',
+      decalKey: '',
       human: null,
       inflHint: 0,
       hintUntil: 0,
@@ -2447,6 +2455,11 @@ export class ClientGame {
       if (fk !== rv.faceKey) {
         rv.faceKey = fk;
         rv.man.setFacePhoto(fk ? this.faceTexOf(entry) : null);
+      }
+      const dk = this.decalKeyOf(entry);
+      if (dk !== rv.decalKey) {
+        rv.decalKey = dk;
+        rv.man.setDecal(dk && entry.decal ? decalTexture(entry.decal.account, entry.decal.v) : null);
       }
     }
     const alive = c.mode !== MODE_DEAD;
@@ -2754,7 +2767,8 @@ export class ClientGame {
     const look = this.lookOf(this.youId);
     const entry = this.roster.get(this.youId);
     const fk = this.faceKeyOf(entry);
-    const key = `${color}|${JSON.stringify(look)}|${this.r.profile.physical}|${fk}`;
+    const dk = this.decalKeyOf(entry);
+    const key = `${color}|${JSON.stringify(look)}|${this.r.profile.physical}|${fk}|${dk}`;
     if (!this.selfMan || key !== this.selfLookKey) {
       if (this.selfMan) {
         this.r.scene.remove(this.selfMan.group);
@@ -2762,6 +2776,7 @@ export class ClientGame {
       }
       this.selfMan = new TubeMan(color, { physical: this.r.profile.physical, seed: this.youId * 13.7, look });
       if (fk) this.selfMan.setFacePhoto(this.faceTexOf(entry));
+      if (dk && entry?.decal) this.selfMan.setDecal(decalTexture(entry.decal.account, entry.decal.v));
       this.r.scene.add(this.selfMan.group);
       this.selfLookKey = key;
     }

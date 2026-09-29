@@ -6282,31 +6282,6 @@ body.touch .ult-splash .tag {
   font-size: 13px;
 }
 
-/* Face scan: "Are you the real BOR?" */
-.face-scan .face-character {
-  width: 100%;
-  background: var(--wash);
-  border-radius: var(--r-md);
-  padding: 8px 12px;
-  text-align: left;
-}
-.face-scan .face-character .row {
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
-  font-weight: 700;
-  font-size: 14px;
-}
-.face-scan .face-character select {
-  font-family: var(--font);
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--ink);
-  background: white;
-  border: 2px solid var(--line);
-  border-radius: var(--r-sm);
-  padding: 4px 8px;
-}
 /* --- Map picker (main menu) -------------------------------------------------------------------
    A row of small tiles under the mode picker: "any map" and each knockout map, painted in that
    map's sky colors with its icon. The picked map's name shows above the row. Modes with their
@@ -6633,4 +6608,41 @@ body.mouse-play .touch-controls {
   .results-foot {
     margin-top: 4px;
   }
+}
+
+/* Locker: your own decal. */
+.decal-panel {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 6px;
+  text-align: center;
+}
+.decal-thumb {
+  width: 128px;
+  height: 128px;
+  border-radius: 18px;
+  border: 3px solid var(--ink);
+  object-fit: contain;
+  background: repeating-conic-gradient(#f1eef8 0 25%, #ffffff 0 50%) 0 0 / 16px 16px;
+}
+.decal-thumb.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  color: var(--ink-soft);
+}
+.decal-actions {
+  gap: 8px;
+  justify-content: center;
+}
+.decal-agree {
+  gap: 8px;
+  align-items: center;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: left;
 }

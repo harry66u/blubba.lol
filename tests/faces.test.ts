@@ -168,3 +168,43 @@ describe('character faces', () => {
     expect(store.characterClaim(bor.id)).toBeNull();
   });
 });
+
+describe('custom decals', () => {
+  it('accounts upload one after agreeing, it shows in matches, and reports and admins work like faces', async () => {
+    expect((await post('/api/decal', { image: dataUrl(PNG), ok: true }, { 'x-guest-id': 'guest-decalguest' })).status).toBe(401);
+    const a = await register('Stickered');
+    const auth = { authorization: `Bearer ${a.token}` };
+    expect((await post('/api/decal', { image: dataUrl(PNG) }, auth)).status).toBe(400);
+    expect((await post('/api/decal', { image: dataUrl(Buffer.alloc(400, 1)), ok: true }, auth)).status).toBe(400);
+    expect((await post('/api/decal', { image: dataUrl(PNG), ok: true }, auth)).status).toBe(200);
+    const img = await fetch(`${base}/api/decal/${a.id}`);
+    expect(img.status).toBe(200);
+    expect(Buffer.from(await img.arrayBuffer()).equals(PNG)).toBe(true);
+    const me = (await (await fetch(`${base}/api/me`, { headers: auth })).json()) as { decal: { version: number } };
+    expect(me.decal.version).toBeGreaterThan(0);
+
+    // In a match the roster carries it; enough reports hide it.
+    const owner = new Client();
+    const ownerId = await owner.join({ kind: 'create' }, a.token);
+    const code = (owner.msgs.find((m) => m.type === 'welcome') as Extract<ServerMessage, { type: 'welcome' }>).room.code;
+    await owner.waitFor((m) => m.type === 'roster' && !!m.players.find((p) => p.id === ownerId)?.decal);
+    const reporters: Client[] = [];
+    for (let i = 0; i < FACE_HIDE_REPORTS; i++) {
+      const c = new Client();
+      await c.join({ kind: 'code', code });
+      c.ws.send(JSON.stringify({ type: 'report', target: ownerId, reason: 'decal' }));
+      reporters.push(c);
+    }
+    await owner.waitFor((m) => m.type === 'roster' && !!m.players.find((p) => p.id === ownerId) && !m.players.find((p) => p.id === ownerId)?.decal);
+    expect((await fetch(`${base}/api/decal/${a.id}`)).status).toBe(404);
+    expect(store.imageStatus('decal', a.id).hidden).toBe(true);
+    const admin = { 'x-admin-token': ADMIN };
+    const list = (await (await fetch(`${base}/api/admin/faces`, { headers: admin })).json()) as { decals: { id: number; hidden: boolean }[] };
+    expect(list.decals.find((d) => d.id === a.id)?.hidden).toBe(true);
+    expect((await post('/api/admin/decal', { id: a.id, action: 'restore' }, admin)).status).toBe(200);
+    expect((await fetch(`${base}/api/decal/${a.id}`)).status).toBe(200);
+    expect((await post('/api/admin/decal', { id: a.id, action: 'ban' }, admin)).status).toBe(200);
+    expect((await post('/api/decal', { image: dataUrl(PNG), ok: true }, auth)).status).toBe(403);
+    for (const c of [owner, ...reporters]) c.ws.close();
+  });
+});

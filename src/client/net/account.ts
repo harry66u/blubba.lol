@@ -34,6 +34,8 @@ export class AccountClient {
   account: { name: string; id?: number } | null = null;
   /** Your face scan: its version (null = none), and whether reports or a moderator hid it. */
   face: FaceStatus | null = null;
+  /** Your custom decal (same states as a face scan). */
+  decal: FaceStatus | null = null;
   /** How many different players opened the game today (shown as "active" on the menu). */
   active: number | null = null;
   /** "I'm the real BOR": the character you lent your face to, and whether an admin approved it. */
@@ -113,8 +115,9 @@ export class AccountClient {
   }
 
   async refresh(): Promise<void> {
-    const r = await this.call<{ active?: number; account: { name: string; id: number } | null; profile: ProfileView | null; face: FaceStatus | null; character?: { character: string; approved: boolean } | null }>('/api/me');
+    const r = await this.call<{ active?: number; account: { name: string; id: number } | null; profile: ProfileView | null; face: FaceStatus | null; decal?: FaceStatus | null; character?: { character: string; approved: boolean } | null }>('/api/me');
     this.face = r.face ?? null;
+    this.decal = r.decal ?? null;
     if (typeof r.active === 'number') this.active = r.active;
     this.character = r.character ?? null;
     // A stale token (expired or reset elsewhere): quietly fall back to guest.
@@ -150,6 +153,7 @@ export class AccountClient {
     this.setToken(null);
     this.account = null;
     this.face = null;
+    this.decal = null;
     this.character = null;
     await this.refresh().catch(() => this.apply({ account: null, profile: AccountClient.blankProfile() }));
   }
@@ -165,6 +169,19 @@ export class AccountClient {
     const r = await this.call<{ face: FaceStatus }>('/api/face/remove', {});
     this.face = r.face;
     this.character = null;
+    this.emit();
+  }
+
+  /** Saves a custom decal (a square image as a data URL). `ok`: the player confirmed it's fine to use. */
+  async uploadDecal(image: string): Promise<void> {
+    const r = await this.call<{ decal: FaceStatus }>('/api/decal', { image, ok: true });
+    this.decal = r.decal;
+    this.emit();
+  }
+
+  async removeDecal(): Promise<void> {
+    const r = await this.call<{ decal: FaceStatus }>('/api/decal/remove', {});
+    this.decal = r.decal;
     this.emit();
   }
 

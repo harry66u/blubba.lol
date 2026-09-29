@@ -1,7 +1,7 @@
 import { FACE_HIDE_REPORTS } from './store';
 
 /**
- * The moderator page at /admin: every face scan (including ones hidden by reports) with remove,
+ * The moderator page at /admin: every face scan and decal (including ones hidden by reports) with remove,
  * ban and restore buttons, plus recent player reports. Everything it loads needs the admin token
  * (BUBBA_ADMIN_TOKEN), which the moderator types in once per tab.
  */
@@ -31,8 +31,8 @@ export const ADMIN_HTML = `<!doctype html>
 <h1>Blubba moderation</h1>
 <div class="row"><input id="tok" type="password" placeholder="Admin token" autocomplete="off"><button id="go">Load</button></div>
 <div id="msg" class="note">Enter the admin token (BUBBA_ADMIN_TOKEN on the server).</div>
-<h2>Character faces</h2><div class="note">Players who say they're the real BOR, ABAG, SOL or KESTY. Approve one and everyone who turns into that character in an ult wears their face scan.</div><div id="claims" class="grid"></div>
 <h2>Face scans</h2><div id="faces" class="grid"></div>
+<h2>Custom decals</h2><div class="note">Pictures players put on the front of their tube man.</div><div id="decals" class="grid"></div>
 <h2>Recent reports</h2><div style="overflow-x:auto"><table id="reports"></table></div>
 </main>
 <script>
@@ -48,46 +48,29 @@ async function load() {
   const r = await fetch('/api/admin/faces', { headers: headers() });
   if (!r.ok) { $('msg').textContent = 'Wrong token, or admin is off (set BUBBA_ADMIN_TOKEN, 12+ characters).'; return; }
   const d = await r.json();
-  $('msg').textContent = d.faces.length + ' face scan(s). Hidden ones were reported by ${FACE_HIDE_REPORTS}+ players.';
-  render(d.faces);
-  renderClaims(d.claims || []);
+  $('msg').textContent = d.faces.length + ' face scan(s), ' + (d.decals || []).length + ' decal(s). Hidden ones were reported by ${FACE_HIDE_REPORTS}+ players.';
+  render(d.faces, 'face');
+  render(d.decals || [], 'decal');
   $('reports').innerHTML = '<tr><th>When</th><th>Reported</th><th>Reason</th><th>Room</th><th>By</th></tr>' + d.reports.map((x) =>
     '<tr><td>' + new Date(x.at).toLocaleString() + '</td><td>' + esc(x.target_name) + ' <span class="note">' + esc(x.target) + '</span></td><td>' + esc(x.reason) + '</td><td>' + esc(x.room) + '</td><td class="note">' + esc(x.reporter) + '</td></tr>').join('');
 }
-function render(faces) {
-  const box = $('faces');
+function render(faces, kind) {
+  const box = $(kind + 's');
   box.innerHTML = '';
   for (const f of faces) {
     const c = document.createElement('div');
     c.className = 'card';
     const status = f.banned ? '<span class="tag">BANNED</span>' : f.hidden ? '<span class="tag">HIDDEN</span>' : 'showing';
     c.innerHTML = '<img alt=""><div><b>' + esc(f.name) + '</b> <span class="meta">#' + f.id + '</span></div><div class="meta">' + status + ' · ' + f.reports + ' report(s) · ' + new Date(f.updatedAt).toLocaleDateString() + '</div><div class="btns"></div>';
-    if (!f.banned) fetch('/api/admin/face/' + f.id, { headers: headers() }).then((r) => r.ok ? r.blob() : null).then((b) => { if (b) c.querySelector('img').src = URL.createObjectURL(b); });
+    if (!f.banned) fetch('/api/admin/' + kind + '/' + f.id, { headers: headers() }).then((r) => r.ok ? r.blob() : null).then((b) => { if (b) c.querySelector('img').src = URL.createObjectURL(b); });
     const btns = c.querySelector('.btns');
     const act = (label, action, cls) => { const b = document.createElement('button'); b.textContent = label; b.className = cls; b.onclick = async () => {
-      if (action !== 'restore' && !confirm(label + ' the face of ' + f.name + '?')) return;
-      const r = await fetch('/api/admin/face', { method: 'POST', headers: headers(), body: JSON.stringify({ id: f.id, action }) });
-      if (r.ok) render((await r.json()).faces); }; btns.append(b); };
+      if (action !== 'restore' && !confirm(label + ' the ' + kind + ' of ' + f.name + '?')) return;
+      const r = await fetch('/api/admin/' + kind, { method: 'POST', headers: headers(), body: JSON.stringify({ id: f.id, action }) });
+      if (r.ok) render((await r.json())[kind + 's'], kind); }; btns.append(b); };
     if (!f.banned) act('Remove', 'remove', 'warn');
     if (!f.banned) act('Remove + ban', 'ban', 'warn');
     if (f.hidden || f.banned) act('Restore', 'restore', 'ok');
-    box.append(c);
-  }
-}
-function renderClaims(claims) {
-  const box = $('claims');
-  box.innerHTML = claims.length ? '' : '<div class="note">No claims yet.</div>';
-  for (const f of claims) {
-    const c = document.createElement('div');
-    c.className = 'card';
-    c.innerHTML = '<img alt=""><div><b>' + esc(f.character.toUpperCase()) + '</b>: ' + esc(f.name) + ' <span class="meta">#' + f.id + '</span></div><div class="meta">' + (f.approved ? '<span class="tag">APPROVED</span>' : 'waiting') + ' · ' + new Date(f.at).toLocaleDateString() + '</div><div class="btns"></div>';
-    fetch('/api/admin/face/' + f.id, { headers: headers() }).then((r) => r.ok ? r.blob() : null).then((b) => { if (b) c.querySelector('img').src = URL.createObjectURL(b); });
-    const btns = c.querySelector('.btns');
-    const act = (label, action, cls) => { const b = document.createElement('button'); b.textContent = label; b.className = cls; b.onclick = async () => {
-      const r = await fetch('/api/admin/character', { method: 'POST', headers: headers(), body: JSON.stringify({ id: f.id, action }) });
-      if (r.ok) renderClaims((await r.json()).claims); }; btns.append(b); };
-    if (!f.approved) act('Approve', 'approve', 'ok');
-    act('Remove', 'remove', 'warn');
     box.append(c);
   }
 }

@@ -1,9 +1,9 @@
 import { PLAYER_COLORS } from '../../shared/colors';
-import { COSMETIC_SLOTS, type CosmeticItem, type CosmeticSlot, type Cosmetics, ITEMS, ITEM_BY_ID, SLOT_INFO, cosmeticKey, ownsItem, unlockLevelOf } from '../../shared/economy';
+import { COSMETIC_SLOTS, type CosmeticItem, type CosmeticSlot, type Cosmetics, DEFAULT_COSMETICS, ITEMS, ITEM_BY_ID, SLOT_INFO, cosmeticKey, ownsItem, unlockLevelOf } from '../../shared/economy';
 import type { WeaponId } from '../../shared/loadout';
 import type { Audio } from '../audio/audio';
 import type { AccountClient } from '../net/account';
-import { faceTexture } from '../render/facePhoto';
+import { decalTexture, faceTexture } from '../render/facePhoto';
 import { FACES_COVERING_EYES } from '../render/looks';
 import { TubePreview } from '../render/preview';
 import { lookFromCosmetics, patternMask } from '../render/tubeMan';
@@ -30,6 +30,13 @@ const ICONS: Record<string, string> = {
   'body.chonk': '🍩',
   'body.noodle': '🍝',
   'body.bighead': '🧠',
+  'body.blocky': '📦',
+  'body.snowman': '⛄',
+  'body.pear': '🍐',
+  'body.hourglass': '⌛',
+  'body.star': '⭐',
+  'body.beads': '🫧',
+  'body.ghost': '👻',
   'body.bor': '💪',
   'body.abag': '👃',
   'body.sol': '💨',
@@ -57,6 +64,7 @@ const ICONS: Record<string, string> = {
   'eyes.googly': '👀',
   'eyes.spiral': '🌀',
   'eyes.sparkle': '🥺',
+  'hat.none': '🚫',
   'hat.spikes': '🌱',
   'hat.flower': '🌼',
   'hat.bucket': '👒',
@@ -226,6 +234,13 @@ const CATEGORY_GROUPS: readonly (readonly CosmeticSlot[])[] = (() => {
 
 const categoryName = (s: CosmeticSlot): string => (s === 'body' ? 'Body' : SLOT_INFO[s].plural);
 
+/** What a slot goes back to when you take its item off: nothing for hats and trails, else the default. */
+function takeOff(slot: CosmeticSlot): string {
+  if (slot === 'hat') return 'hat.none';
+  if (slot === 'trail') return 'trail.none';
+  return DEFAULT_COSMETICS[slot];
+}
+
 /**
  * The locker: customize your tube man and buy cosmetics at fixed prices. Nothing here changes
  * how you play. Tap something you don't own to try it on in the preview, tap again to buy.
@@ -233,6 +248,8 @@ const categoryName = (s: CosmeticSlot): string => (s === 'body' ? 'Body' : SLOT_
 export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: () => void } {
   const { account, audio } = opts;
   let slot: CosmeticSlot = 'color';
+  /** The Decal page (your own uploaded picture) instead of a cosmetic category. */
+  let decalOpen = false;
   let pending: string | null = null;
   /** An item you're trying on (not owned yet): shown in the preview only. */
   let trying: CosmeticItem | null = null;
@@ -261,9 +278,11 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
   let preview: TubePreview | null = null;
   try {
     preview = new TubePreview(colorOf(), lookOf(), opts.weapon);
-    // Your face scan, if you have one showing.
+    // Your face scan and decal, if you have them showing.
     const f = account.face;
     if (f?.version && !f.hidden && account.account?.id) preview.setFace(faceTexture(account.account.id, f.version));
+    const d = account.decal;
+    if (d?.version && !d.hidden && account.account?.id) preview.setDecal(decalTexture(account.account.id, d.version));
   } catch {
     // No WebGL for a second canvas: the locker still works, just without the 3D preview.
     preview = null;
@@ -346,6 +365,7 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
           on: {
             click: () => {
               slot = s;
+              decalOpen = false;
               pending = null;
               trying = null;
               note.textContent = '';
@@ -363,6 +383,121 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
       cats.append(btn);
     }
   });
+  // Your own picture, after the store categories.
+  const decalBtn = el(
+    'button',
+    {
+      class: 'cat',
+      attrs: { role: 'tab', title: 'Custom decal' },
+      on: {
+        click: () => {
+          decalOpen = true;
+          pending = null;
+          trying = null;
+          note.textContent = '';
+          draw();
+          reveal(decalBtn);
+        },
+      },
+    },
+    el('span', { class: 'cat-icon', text: '🖼️', attrs: { 'aria-hidden': 'true' } }),
+    el('span', { class: 'cat-name', text: 'Decal' }),
+  );
+  cats.append(el('div', { class: 'cat-sep', attrs: { 'aria-hidden': 'true' } }), decalBtn);
+
+  /** Squares a picture (whole picture, transparent around it) and packs it small enough to upload. */
+  const packDecal = async (file: File): Promise<string> => {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      const size = 256;
+      const c = document.createElement('canvas');
+      c.width = c.height = size;
+      const g = c.getContext('2d')!;
+      const k = Math.min(size / img.naturalWidth, size / img.naturalHeight);
+      const w = img.naturalWidth * k;
+      const h = img.naturalHeight * k;
+      g.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+      for (const q of [0.9, 0.8, 0.65, 0.5]) {
+        let data = c.toDataURL('image/webp', q);
+        if (!data.startsWith('data:image/webp')) data = c.toDataURL('image/png');
+        if (data.length * 0.75 < 150 * 1024) return data;
+      }
+      throw new Error('That picture is too big. Try a smaller one.');
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  const decalPanel = (): HTMLElement => {
+    const d = account.decal;
+    const id = account.account?.id;
+    const panel = el('div', { class: 'decal-panel' });
+    const thumb =
+      d?.version && id ? el('img', { class: 'decal-thumb', attrs: { src: `/api/decal/${id}?v=${d.version}`, alt: 'Your decal' } }) : el('div', { class: 'decal-thumb empty', text: d?.hidden ? 'Hidden' : 'No decal' });
+    panel.append(thumb);
+    if (!account.account) {
+      panel.append(el('div', { class: 'small-note', text: 'Make a free account to put your own picture on your tube man.' }), el('button', { class: 'btn small blue', text: 'Sign up', on: { click: opts.onSignup } }));
+      return panel;
+    }
+    if (d?.banned) {
+      panel.append(el('div', { class: 'small-note', text: 'A moderator turned off custom decals for your account.' }));
+      return panel;
+    }
+    const agree = el('input', { attrs: { type: 'checkbox' } }) as HTMLInputElement;
+    const file = el('input', { class: 'hidden', attrs: { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif' } }) as HTMLInputElement;
+    const upload = el('button', { class: 'btn small blue', text: d?.version ? 'Change picture' : 'Upload a picture' }) as HTMLButtonElement;
+    upload.addEventListener('click', () => {
+      if (!agree.checked) {
+        note.textContent = 'Tick the box first: only use a picture that is yours to use and fine for everyone to see.';
+        return;
+      }
+      file.click();
+    });
+    file.addEventListener('change', async () => {
+      const f = file.files?.[0];
+      if (!f) return;
+      note.textContent = 'Uploading...';
+      try {
+        await account.uploadDecal(await packDecal(f));
+        const v = account.decal?.version;
+        if (v && id) preview?.setDecal(decalTexture(id, v));
+        note.textContent = 'Decal on! Everyone in your matches sees it.';
+      } catch (err) {
+        note.textContent = (err as Error).message;
+      }
+      draw();
+    });
+    const actions = el('div', { class: 'row decal-actions' }, upload, file);
+    if (d?.version || d?.hidden) {
+      actions.append(
+        el('button', {
+          class: 'btn small ghost',
+          text: 'Remove',
+          on: {
+            click: async () => {
+              try {
+                await account.removeDecal();
+                preview?.setDecal(null);
+                note.textContent = 'Decal removed.';
+              } catch (err) {
+                note.textContent = (err as Error).message;
+              }
+              draw();
+            },
+          },
+        }),
+      );
+    }
+    panel.append(
+      actions,
+      el('label', { class: 'row decal-agree' }, agree, el('span', { text: 'This picture is mine to use and fine for everyone to see' })),
+      el('div', { class: 'small-note', text: d?.hidden ? 'Other players reported your decal, so it is hidden until a moderator checks it.' : 'It goes on the front of your tube man. PNGs with a see-through background work best.' }),
+    );
+    return panel;
+  };
 
   const draw = () => {
     const p = account.profile;
@@ -373,22 +508,29 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
       for (const i of ITEMS) if (i.slot === slot) seen.add(i.id);
       saveSeen(seen);
     }
-    preview?.showTrails(slot === 'trail');
+    preview?.showTrails(slot === 'trail' && !decalOpen);
+    decalBtn.classList.toggle('on', decalOpen);
+    decalBtn.setAttribute('aria-selected', String(decalOpen));
     for (const [s, row] of catRows) {
-      const on = s === slot;
+      const on = s === slot && !decalOpen;
       row.btn.classList.toggle('on', on);
       row.btn.setAttribute('aria-selected', String(on));
       row.dot.classList.toggle('hidden', viewed.has(s) || !ITEMS.some((i) => i.slot === s && fresh.has(i.id)));
     }
-    slotNote.textContent = slotHint(slot);
+    slotNote.textContent = decalOpen ? 'Your own picture on the front of your tube man.' : slotHint(slot);
     clear(grid);
+    if (decalOpen) {
+      grid.append(decalPanel());
+      preview?.setLook(colorOf(), lookOf(), opts.weapon);
+      return;
+    }
     for (const item of ITEMS.filter((i) => i.slot === slot)) {
       const owned = ownsItem(p.owned, item.id, unlockLevelOf(p));
       const levelLocked = !!item.levelReq && !owned;
       const equipped = p.cosmetics[item.slot] === item.id;
       // One short status line, only when it matters (nothing for things you own).
       let status: HTMLElement | null = null;
-      if (equipped) status = el('div', { class: 'status on', text: '✓ Wearing' });
+      if (equipped) status = el('div', { class: 'status on', text: takeOff(item.slot) === item.id ? '✓ Wearing' : '✓ Wearing · tap to remove' });
       else if (levelLocked) status = el('div', { class: 'status level', text: `🔒 Lv ${item.levelReq}` });
       else if (owned) status = null;
       else if (pending === item.id) status = el('div', { class: 'status buy', text: `Tap again to buy · 🪙 ${item.price}` });
@@ -407,6 +549,11 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
                   trying = null;
                   pending = null;
                   if (!equipped) await account.equip({ [item.slot]: item.id });
+                  else {
+                    // Tapping what you're wearing takes it off.
+                    const off = takeOff(item.slot);
+                    if (off !== item.id) await account.equip({ [item.slot]: off });
+                  }
                 } else if (levelLocked) {
                   trying = item;
                   pending = null;

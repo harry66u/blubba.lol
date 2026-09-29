@@ -193,6 +193,7 @@ const spiral = () =>
 // --- Hats ------------------------------------------------------------------------------------
 
 export const HAT_KEYS = [
+  'none',
   'spikes',
   'party',
   'cap',
@@ -231,6 +232,8 @@ function pivot(x: number, y: number, z: number, rz: number, ...children: THREE.O
  * antennae, flower) are animated by the tube man.
  */
 export function buildHat(key: string, body: number): THREE.Group {
+  // Hat units: the head is a ball of radius 0.36 centered 0.32 below the origin (its top is at
+  // +0.04), so anything worn on it has to reach past that to show.
   const g = new THREE.Group();
   const dome = (r: number, color: THREE.Material, y: number, squash = 1) => {
     const m = part(new THREE.SphereGeometry(r, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), color, 0, y, 0);
@@ -238,6 +241,9 @@ export function buildHat(key: string, body: number): THREE.Group {
     return m;
   };
   switch (key) {
+    case 'none':
+      // Bald: nothing on top.
+      break;
     case 'party': {
       const cone = part(new THREE.ConeGeometry(0.2, 0.55, 20), stdMat(0xffffff, { map: stripes('#ff5fd2', '#ffd60a', 6) }), 0, 0.2, 0);
       const pom = part(new THREE.SphereGeometry(0.07, 12, 8), stdMat(0xffd60a), 0, 0.5, 0);
@@ -247,18 +253,20 @@ export function buildHat(key: string, body: number): THREE.Group {
     }
     case 'cap': {
       const mat = stdMat(shade(body, -0.2));
-      g.add(dome(0.37, mat, -0.3, 0.75));
-      const brim = part(new THREE.CylinderGeometry(0.22, 0.22, 0.035, 20), stdMat(0xffffff), 0, -0.28, 0.33);
+      g.add(dome(0.39, mat, -0.32, 1));
+      // The brim sticks out over the forehead, above the eyes.
+      const brim = part(new THREE.CylinderGeometry(0.22, 0.22, 0.035, 20), stdMat(0xffffff), 0, -0.14, 0.38);
       brim.scale.z = 1.3;
-      const button = part(new THREE.SphereGeometry(0.04, 8, 6), stdMat(0xffffff), 0, -0.02, 0);
+      brim.rotation.x = 0.18;
+      const button = part(new THREE.SphereGeometry(0.04, 8, 6), stdMat(0xffffff), 0, 0.08, 0);
       g.add(brim, button);
       break;
     }
     case 'beanie': {
       const mat = stdMat(shade(body, 0.18), { roughness: 0.9 });
-      g.add(dome(0.38, mat, -0.3, 0.85));
-      g.add(part(new THREE.CylinderGeometry(0.385, 0.385, 0.1, 24), stdMat(0xffffff, { roughness: 0.9 }), 0, -0.28, 0));
-      g.add(part(new THREE.SphereGeometry(0.1, 12, 8), stdMat(0xffffff, { roughness: 1 }), 0, 0.06, 0));
+      g.add(dome(0.39, mat, -0.32, 1.08));
+      g.add(part(new THREE.CylinderGeometry(0.4, 0.4, 0.1, 24), stdMat(0xffffff, { roughness: 0.9 }), 0, -0.29, 0));
+      g.add(part(new THREE.SphereGeometry(0.1, 12, 8), stdMat(0xffffff, { roughness: 1 }), 0, 0.14, 0));
       break;
     }
     case 'cone': {
@@ -279,10 +287,10 @@ export function buildHat(key: string, body: number): THREE.Group {
       break;
     }
     case 'propeller': {
-      g.add(dome(0.34, stdMat(0xffd60a), -0.28, 0.7));
-      g.add(part(new THREE.CylinderGeometry(0.02, 0.02, 0.2, 8), stdMat(0x9aa3b8, { metalness: 0.5 }), 0, 0.0, 0));
+      g.add(dome(0.385, stdMat(0xffd60a), -0.32, 1));
+      g.add(part(new THREE.CylinderGeometry(0.02, 0.02, 0.2, 8), stdMat(0x9aa3b8, { metalness: 0.5 }), 0, 0.1, 0));
       const blades = new THREE.Group();
-      blades.position.y = 0.1;
+      blades.position.y = 0.2;
       blades.add(part(new THREE.BoxGeometry(0.5, 0.02, 0.09), stdMat(0xff3b5c), 0.25, 0, 0), part(new THREE.BoxGeometry(0.5, 0.02, 0.09), stdMat(0x2ec5ff), -0.25, 0, 0));
       g.add(blades);
       g.userData.spin = blades;
@@ -344,7 +352,7 @@ export function buildHat(key: string, body: number): THREE.Group {
     case 'papercrown': {
       // Tissue paper from a party cracker: matte, flat, a little crooked. Not the gold crown.
       const paper = stdMat(shade(body, 0.28), { roughness: 0.95, map: paperZigzag(), alphaTest: 0.5, side: THREE.DoubleSide });
-      const band = part(new THREE.CylinderGeometry(0.34, 0.33, 0.24, 32, 1, true), paper, 0, -0.1, 0);
+      const band = part(new THREE.CylinderGeometry(0.35, 0.335, 0.24, 32, 1, true), paper, 0, -0.03, 0);
       band.castShadow = false;
       g.add(band);
       g.rotation.z = 0.14;
@@ -446,7 +454,7 @@ export function buildHat(key: string, body: number): THREE.Group {
     }
     case 'unicorn': {
       const swirl = stdMat(0xffffff, { roughness: 0.25, map: stripes('#fff4fb', '#ffb3e6', 5), emissive: 0xffc6f0, emissiveIntensity: 0.25 });
-      const horn = part(new THREE.ConeGeometry(0.085, 0.5, 18, 6), swirl, 0, 0.18, 0.16);
+      const horn = part(new THREE.ConeGeometry(0.085, 0.5, 18, 6), swirl, 0, 0.25, 0.16);
       horn.rotation.x = 0.4;
       g.add(horn);
       for (const s of [-1, 1]) {
