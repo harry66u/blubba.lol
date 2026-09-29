@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { BALANCE } from '../../shared/balance';
 import { utilityIcon } from '../../shared/loadout';
 import { clear, el, formatTime } from './dom';
+import { UltHud } from './ultHud';
 
 const ESCAPE_BAR_SEC = 0.8;
 
@@ -126,6 +127,8 @@ export class Hud {
   private readonly speedLines: HTMLElement;
   private last: Partial<Record<string, string | number>> = {};
   private tmp = new THREE.Vector3();
+  /** Ult meter, status and splash (ultHud.ts). */
+  readonly ult = new UltHud();
 
   constructor() {
     this.root = el('div', { class: 'hud hidden' });
@@ -242,6 +245,7 @@ export class Hud {
     this.chatFeed = el('div', { class: 'chat-feed' });
 
     this.root.append(this.speedLines, this.flashEl, this.nametags, this.popups, this.damage, this.crosshair, this.hitmarker, this.tally, inflation, movement, ammo, utils, this.pinBadge, this.powerBadge, timer, this.killfeed, this.calloutBox, this.respawnBox, this.note, this.hintEl, this.escapeBox, this.ping, this.chatFeed, this.chatWheel, this.tipEl);
+    this.root.insertBefore(this.ult.root, this.calloutBox);
   }
 
   /** Current key (or controller button) for each ability, shown next to it. */

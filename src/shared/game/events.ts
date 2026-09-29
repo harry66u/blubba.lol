@@ -1,8 +1,33 @@
+import type { UltId } from './ults';
+
 /** Discrete things that happen in a match. Sent to clients as JSON and used for effects. */
 export type GameEvent =
-  /** A projectile. `w` is 0 for weapon shots (then `wi` is the weapon index) or a utility kind. */
-  | { t: 'shot'; tick: number; id: number; owner: number; w: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; r: number; power: number; cs?: number; g?: number; wi?: number }
-  | { t: 'proj'; tick: number; id: number; x: number; y: number; z: number; vx: number; vy: number; vz: number }
+  /**
+   * A projectile. `w` is 0 for weapon shots (then `wi` is the weapon index) or a utility kind.
+   * Homing shots (ult rockets, shots fired during The Chase) carry a target id and turn rate (rad/s).
+   */
+  | {
+      t: 'shot';
+      tick: number;
+      id: number;
+      owner: number;
+      w: number;
+      x: number;
+      y: number;
+      z: number;
+      vx: number;
+      vy: number;
+      vz: number;
+      r: number;
+      power: number;
+      cs?: number;
+      g?: number;
+      wi?: number;
+      home?: number;
+      turn?: number;
+    }
+  /** A thrown utility bounced, or a homing rocket found a new target (`home`). */
+  | { t: 'proj'; tick: number; id: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; home?: number }
   | { t: 'boom'; tick: number; id: number; x: number; y: number; z: number; r: number; power: number; owner: number; k?: number }
   | { t: 'fizzle'; tick: number; id: number; x: number; y: number; z: number }
   | {
@@ -67,7 +92,7 @@ export type GameEvent =
   | { t: 'ballOut'; tick: number; x: number; y: number; z: number }
   | { t: 'ballReset'; tick: number }
   | { t: 'pumpFull'; tick: number; team: 0 | 1 }
-  | { t: 'loadout'; tick: number; id: number; weapon: string; parts: Record<string, string>; utils: string[] }
+  | { t: 'loadout'; tick: number; id: number; weapon: string; parts: Record<string, string>; utils: string[]; ult?: string }
   | { t: 'pickup'; tick: number; id: number; kind: 'soda' | 'pin'; x: number; y: number; z: number; active: boolean; by: number }
   /** A supply crate appeared high above (x, y, z) and sinks at `fall` m/s toward the ground at `groundY`. */
   | { t: 'loot'; tick: number; id: number; x: number; y: number; z: number; groundY: number; fall: number }
@@ -84,7 +109,15 @@ export type GameEvent =
   /** A Tornado started at (x, y, z) heading (dx, dz) at `speed` m/s until tick `until`. */
   | { t: 'tornado'; tick: number; id: number; owner: number; x: number; y: number; z: number; dx: number; dz: number; speed: number; until: number }
   | { t: 'tornadoGone'; tick: number; id: number; x: number; y: number; z: number }
-  | { t: 'swept'; tick: number; id: number; target: number; x: number; y: number; z: number };
+  | { t: 'swept'; tick: number; id: number; target: number; x: number; y: number; z: number }
+  /** Someone popped their ult. `targets`: The Chase's lock, or Robot Mode's locks. */
+  | { t: 'ult'; tick: number; id: number; kind: UltId; x: number; y: number; z: number; targets: number[] }
+  /** Crop Duster let rip: shockwave of radius `r`, and a gas cloud there until tick `until`. */
+  | { t: 'fart'; tick: number; id: number; x: number; y: number; z: number; r: number; until: number }
+  /** The Chase locked on to someone new (the last target got away or popped). */
+  | { t: 'sniff'; tick: number; id: number; target: number }
+  /** The Chase caught its target: the extra-strong throw. */
+  | { t: 'gotcha'; tick: number; id: number; target: number };
 
 /** What a supply crate can hold. */
 export type LootKind = 'deflate' | 'mega' | 'turbo' | 'gadgets' | 'feather' | 'spring';

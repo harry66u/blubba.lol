@@ -1,4 +1,5 @@
 import { BALANCE } from './balance';
+import { DEFAULT_ULT, ULT_IDS, type UltId } from './game/ults';
 
 export const WEAPON_IDS = ['airCannon', 'leafBlower', 'airHorn', 'pumpRifle', 'bubbleShotgun', 'balloonMortar', 'popGun'] as const;
 export type WeaponId = (typeof WEAPON_IDS)[number];
@@ -85,9 +86,11 @@ export interface Loadout {
   weapon: WeaponId;
   parts: Parts;
   utils: [UtilityId, UtilityId];
+  /** Ultimate ability (game/ults.ts). */
+  ult: UltId;
 }
 
-export const DEFAULT_LOADOUT: Loadout = { weapon: 'airCannon', parts: { ...STANDARD_PARTS }, utils: ['bouncePad', 'airGrenade'] };
+export const DEFAULT_LOADOUT: Loadout = { weapon: 'airCannon', parts: { ...STANDARD_PARTS }, utils: ['bouncePad', 'airGrenade'], ult: DEFAULT_ULT };
 
 export const WEAPON_INFO: Record<WeaponId, { name: string; blurb: string; role: string }> = {
   airCannon: { name: 'Air Cannon', blurb: 'Medium range and balanced. Charge it into a heavy shot.', role: 'All-rounder' },
@@ -340,6 +343,7 @@ export function weaponRange(w: WeaponStats): number {
 export interface LoadoutAllowed {
   parts?: readonly string[];
   utils?: readonly string[];
+  ults?: readonly string[];
 }
 
 /**
@@ -347,7 +351,7 @@ export interface LoadoutAllowed {
  * `mods` list keep their mods: each one moves into its part slot.
  */
 export function sanitizeLoadout(raw: unknown, allowed?: LoadoutAllowed): Loadout {
-  const r = (raw && typeof raw === 'object' ? raw : {}) as { weapon?: unknown; parts?: unknown; mods?: unknown; utils?: unknown };
+  const r = (raw && typeof raw === 'object' ? raw : {}) as { weapon?: unknown; parts?: unknown; mods?: unknown; utils?: unknown; ult?: unknown };
   const weapon = WEAPON_IDS.includes(r.weapon as WeaponId) ? (r.weapon as WeaponId) : DEFAULT_LOADOUT.weapon;
   const partsIn = (r.parts && typeof r.parts === 'object' ? r.parts : Array.isArray(r.mods) ? r.mods : null) as PartsInput;
   const parts = normalizeParts(partsIn, allowed?.parts);
@@ -359,7 +363,8 @@ export function sanitizeLoadout(raw: unknown, allowed?: LoadoutAllowed): Loadout
   }
   for (const d of DEFAULT_LOADOUT.utils) if (utils.length < 2 && !utils.includes(d)) utils.push(d);
   for (const u of UTILITY_IDS) if (utils.length < 2 && !utils.includes(u)) utils.push(u);
-  return { weapon, parts, utils: [utils[0], utils[1]] };
+  const ult = ULT_IDS.includes(r.ult as UltId) && (!allowed?.ults || allowed.ults.includes(r.ult as UltId)) ? (r.ult as UltId) : DEFAULT_ULT;
+  return { weapon, parts, utils: [utils[0], utils[1]], ult };
 }
 
 export function utilityCooldown(id: UtilityId): number {

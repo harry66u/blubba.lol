@@ -28,15 +28,27 @@ export function startLookdev(r: Renderer): (dt: number) => void {
     r.camera.position.set(0, 2.6, 7.5);
     r.camera.lookAt(0, 1.4, -2);
   }
+  // ?lookdev=ults: ult poses instead (plain, Juice's jab, Juice flexing, Crop Duster from the side, Robot Mode).
+  const ults = new URLSearchParams(location.search).get('lookdev') === 'ults';
   let t = 0;
+  let nextJab = 0;
   return (dt: number) => {
     t += dt;
-    for (const m of men) {
+    if (ults && t >= nextJab) {
+      nextJab = t + 3;
+      men[1].man.jab();
+    }
+    men.forEach((m, i) => {
       m.pose.time = t;
       m.pose.dt = dt;
-      m.pose.inflation = m.infl;
-      m.pose.yaw = Math.PI; // face the camera (+Z)
+      m.pose.inflation = ults ? 0.2 : m.infl;
+      m.pose.yaw = ults && i === 3 ? Math.PI / 2 : Math.PI; // face the camera (+Z)
+      if (ults) {
+        m.pose.jacked = i === 1 || i === 2;
+        m.pose.bentOver = i === 3;
+        m.pose.robot = i === 4;
+      }
       m.man.update(m.pose);
-    }
+    });
   };
 }

@@ -17,6 +17,7 @@ export type Action =
   | 'util1'
   | 'util2'
   | 'taunt'
+  | 'ult'
   | 'camera'
   | 'chat'
   | 'scoreboard';
@@ -36,6 +37,7 @@ export const ACTION_LABELS: Record<Action, string> = {
   util1: 'Utility 1',
   util2: 'Utility 2',
   taunt: 'Taunt',
+  ult: 'Ultimate ability (when the meter is full)',
   camera: 'Camera: first / third person',
   chat: 'Quick chat (hold)',
   scoreboard: 'Scoreboard',
@@ -57,6 +59,7 @@ export const DEFAULT_BINDINGS: Record<Action, string[]> = {
   util1: ['KeyC'],
   util2: ['KeyG'],
   taunt: ['KeyT'],
+  ult: ['KeyX'],
   camera: ['KeyV'],
   chat: ['KeyZ'],
   scoreboard: ['Tab'],
@@ -75,6 +78,7 @@ const PRESS_ACTIONS: Partial<Record<Action, PressKey>> = {
   util1: 'util1',
   util2: 'util2',
   taunt: 'taunt',
+  ult: 'ult',
 };
 
 const BLOCKED_CODES = new Set(['MetaLeft', 'MetaRight', 'ControlLeft', 'ControlRight', 'Escape']);
@@ -112,7 +116,7 @@ export class InputManager {
   lookDX = 0;
   lookDY = 0;
   readonly held = new Set<string>();
-  private counters: Record<PressKey, number> = { jump: 0, dash: 0, brace: 0, grab: 0, grapple: 0, reload: 0, util1: 0, util2: 0, taunt: 0 };
+  private counters: Record<PressKey, number> = { jump: 0, dash: 0, brace: 0, grab: 0, grapple: 0, reload: 0, util1: 0, util2: 0, taunt: 0, ult: 0 };
   private fireLatch = false;
   private bindings: Record<Action, string[]> = { ...DEFAULT_BINDINGS };
   private codeToActions = new Map<string, Action[]>();
@@ -530,6 +534,7 @@ export class InputManager {
     f.util1 = this.counters.util1;
     f.util2 = this.counters.util2;
     f.taunt = this.counters.taunt;
+    f.ult = this.counters.ult;
   }
 
   /** Resets counters to match a server state (e.g. after joining a new room). */

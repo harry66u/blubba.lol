@@ -17,7 +17,7 @@ export class Driver {
     this.sim.queueInput(this.player.id, f);
   }
 
-  press(key: 'jump' | 'dash' | 'brace' | 'grab' | 'grapple' | 'reload' | 'util1' | 'util2' | 'taunt'): void {
+  press(key: 'jump' | 'dash' | 'brace' | 'grab' | 'grapple' | 'reload' | 'util1' | 'util2' | 'taunt' | 'ult'): void {
     this.frame[key] = (this.frame[key] + 1) & 255;
   }
 

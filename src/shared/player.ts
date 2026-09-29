@@ -2,6 +2,7 @@ import { BALANCE } from './balance';
 import { BTN_FIRE, BTN_GRAB, type InputFrame, pressesSince } from './input';
 import type { WeaponStats } from './loadout';
 import { type Environment, NORMAL_ENV } from './game/chaos';
+import { ULT_IDS, activeUlt, ultSpeedMult } from './game/ults';
 import type { World } from './world';
 
 export type { WeaponStats } from './loadout';
@@ -30,6 +31,8 @@ export const PLAYER_FIELDS = [
   'turboTimer', 'megaShots',
   // Floor loot and gadgets: Feather (low gravity) seconds, Helium Bomb float seconds, Spring Shoes jumps left.
   'floatTimer', 'heliumTimer', 'springJumps',
+  // Ultimate (game/ults.ts): the meter (0..1), which ult you carry, and whatever is running.
+  'ult', 'ultKind', 'cUlt', 'ultArmed', 'juiceTimer', 'chaseTimer', 'chaseTarget', 'fartTimer', 'robotTimer', 'gasTimer',
 ] as const;
 
 export type PlayerField = (typeof PLAYER_FIELDS)[number];
@@ -48,6 +51,7 @@ export function createPlayerState(): PlayerState {
   s.hangId = -1;
   s.heldBy = -1;
   s.holding = -1;
+  s.chaseTarget = -1;
   s.dashCharges = BALANCE.dash.charges;
   s.ammo = BALANCE.weapons.airCannon.ammo;
   s.hoverTimer = BALANCE.weapons.leafBlower.hoverTime;
@@ -101,6 +105,8 @@ export interface ShotSpec {
   charge: number;
   /** A Mega Blast shot (streak reward): full power, bigger and harder. */
   mega: boolean;
+  /** The Big Blow (ult): one giant air blast, whatever weapon you carry. */
+  ult?: boolean;
 }
 
 /** Everything notable that happened during one player step; used for effects and server logic. */
@@ -127,6 +133,10 @@ export class StepResult {
   util1 = false;
   util2 = false;
   taunt = false;
+  /** You popped your ult this step. */
+  ult = false;
+  /** Crop Duster let rip this step (the shockwave goes off now). */
+  fartBlast = false;
   fired: ShotSpec | null = null;
   /** Leaf Blower stream strength this step (0 = not blowing). */
   stream = 0;
@@ -153,6 +163,8 @@ export class StepResult {
     this.util1 = false;
     this.util2 = false;
     this.taunt = false;
+    this.ult = false;
+    this.fartBlast = false;
     this.fired = null;
     this.stream = 0;
   }
@@ -213,6 +225,7 @@ export function stepPlayer(p: PlayerState, inp: InputFrame, ctx: StepContext, ou
   const u1P = pressesSince(inp.util1, p.cU1) > 0;
   const u2P = pressesSince(inp.util2, p.cU2) > 0;
   const tauntP = pressesSince(inp.taunt, p.cTaunt) > 0;
+  const ultP = pressesSince(inp.ult, p.cUlt) > 0;
   p.cJump = inp.jump;
   p.cDash = inp.dash;
   p.cBrace = inp.brace;
@@ -222,6 +235,7 @@ export function stepPlayer(p: PlayerState, inp: InputFrame, ctx: StepContext, ou
   p.cU1 = inp.util1;
   p.cU2 = inp.util2;
   p.cTaunt = inp.taunt;
+  p.cUlt = inp.ult;
 
   if (p.mode === MODE_DEAD) return;
 
@@ -229,6 +243,7 @@ export function stepPlayer(p: PlayerState, inp: InputFrame, ctx: StepContext, ou
   p.pitch = clamp(inp.pitch, -1.55, 1.55);
 
   tickTimers(p, dt);
+  stepUlt(p, ultP, dt, out);
 
   if (tauntP) out.taunt = true;
   if (u1P) out.util1 = true;
@@ -296,6 +311,64 @@ function tickTimers(p: PlayerState, dt: number): void {
   const I = BALANCE.inflation;
   if (I.decayPerSec > 0 && p.sinceHit > I.decayDelay && p.inflation > 0) {
     p.inflation = Math.max(0, p.inflation - I.decayPerSec * dt);
+  }
+}
+
+/**
+ * Ult timers, the meter filling over time, and activation. Only what changes your own movement or
+ * shooting happens here (so prediction stays exact); targets, shockwaves and rockets are the
+ * server's job (game/ultSim.ts), triggered by `out.ult` and `out.fartBlast`.
+ */
+function stepUlt(p: PlayerState, ultP: boolean, dt: number, out: StepResult): void {
+  const U = BALANCE.ults;
+  if (p.juiceTimer > 0) p.juiceTimer = Math.max(0, p.juiceTimer - dt);
+  if (p.robotTimer > 0) p.robotTimer = Math.max(0, p.robotTimer - dt);
+  p.gasTimer = Math.max(0, p.gasTimer - dt);
+  if (p.chaseTimer > 0) {
+    p.chaseTimer = Math.max(0, p.chaseTimer - dt);
+    // On the hunt, dashes recharge instantly.
+    p.dashCharges = BALANCE.dash.charges;
+    p.dashRecharge = 0;
+    if (p.chaseTimer <= 0) p.chaseTarget = -1;
+  }
+  if (p.fartTimer > 0) {
+    const before = p.fartTimer;
+    p.fartTimer = Math.max(0, p.fartTimer - dt);
+    const at = U.cropDuster.poseTime - U.cropDuster.windup;
+    if (before > at && p.fartTimer <= at) {
+      out.fartBlast = true;
+      // The fart jump: it lifts you up out of your own cloud.
+      if (p.mode === MODE_NORMAL) {
+        p.vy = Math.max(p.vy, U.cropDuster.selfLaunch);
+        p.onGround = 0;
+        p.groundId = -1;
+        p.slideTimer = 0;
+        p.jumpsUsed = Math.max(p.jumpsUsed, 1);
+      }
+    }
+  }
+  if (activeUlt(p) === null) p.ult = Math.min(1, p.ult + U.meter.perSecond * dt);
+  if (!ultP || p.ult < 1 - 1e-6 || p.mode === MODE_HELD || activeUlt(p) !== null) return;
+  p.ult = 0;
+  p.spawnProt = 0;
+  out.ult = true;
+  switch (ULT_IDS[p.ultKind] ?? 'bigBlow') {
+    case 'bigBlow':
+      p.ultArmed = 1;
+      break;
+    case 'juice':
+      p.juiceTimer = U.juice.duration;
+      break;
+    case 'chase':
+      p.chaseTimer = U.chase.duration;
+      p.chaseTarget = -1;
+      break;
+    case 'cropDuster':
+      p.fartTimer = U.cropDuster.poseTime;
+      break;
+    case 'robot':
+      p.robotTimer = U.robot.scanTime + U.robot.barrageTime;
+      break;
   }
 }
 
@@ -461,9 +534,10 @@ function stepMove(
   }
 
   // --- Friction and acceleration ---------------------------------------------------------
-  // Weapon parts change walking speed (tanks, grips) and the slow-down while charging.
+  // Weapon parts change walking speed (tanks, grips) and the slow-down while charging; ults can speed you up.
   const W = ctx.weapon;
-  const moveMult = (doubled ? K.doubleOverMoveMult : 1) * (p.charging ? W.chargeMove : 1) * W.moveMult * (p.holding >= 0 ? 0.6 : 1);
+  const ultMult = ultSpeedMult(p);
+  const moveMult = (doubled ? K.doubleOverMoveMult : 1) * (p.charging ? W.chargeMove : 1) * W.moveMult * (p.holding >= 0 ? 0.6 : 1) * ultMult;
   if (p.onGround && !jumpedNow) {
     const sliding = p.slideTimer > 0;
     // Caught in a leaf blower's stream: you skid instead of gripping the ground.
@@ -481,8 +555,8 @@ function stepMove(
       p.slideTimer = Math.max(0, p.slideTimer - dt);
       if (Math.hypot(p.vx, p.vz) < D.speed * 0.3) p.slideTimer = 0;
     } else {
-      // (Walking speed is friction-limited, so the parts' speed multiplier scales acceleration too.)
-      accelerate(p, wx, wz, P.walkSpeed * wishLen * moveMult, P.groundAccel * env.accelMult * W.moveMult, dt);
+      // (Walking speed is friction-limited, so the parts' speed multiplier, and ult boosts, scale acceleration too.)
+      accelerate(p, wx, wz, P.walkSpeed * wishLen * moveMult, P.groundAccel * env.accelMult * W.moveMult * Math.max(1, ultMult), dt);
     }
   } else if (p.dashTimer > 0) {
     p.dashTimer -= dt;
@@ -916,6 +990,30 @@ function stepWeapon(p: PlayerState, inp: InputFrame, ctx: StepContext, out: Step
   if (reloadP && canAct && p.ammo < W.ammo && p.reloadTimer <= 0 && !p.charging) {
     p.reloadTimer = W.reloadTime / rate;
     out.reloadStart = true;
+  }
+
+  // Big Blow (ult): the next pull of the trigger fires one giant air blast at once, with any weapon.
+  if (p.ultArmed > 0 && fireHeld && p.fireCool <= 0) {
+    lookDir(p.yaw, p.pitch, tmpDir);
+    const eye = eyeHeight(p);
+    out.fired = {
+      ox: p.px + tmpDir.x * 0.5,
+      oy: p.py + eye + tmpDir.y * 0.5,
+      oz: p.pz + tmpDir.z * 0.5,
+      dx: tmpDir.x,
+      dy: tmpDir.y,
+      dz: tmpDir.z,
+      power: 1,
+      charge: 1,
+      mega: false,
+      ult: true,
+    };
+    p.ultArmed = 0;
+    p.charging = 0;
+    p.charge = 0;
+    p.fireCool = BALANCE.ults.bigBlow.fireCooldown;
+    p.spawnProt = 0;
+    return;
   }
 
   if (W.kind === 'stream') {

@@ -27,6 +27,7 @@ for (const mode of MODE_IDS.filter((m) => !only || m === only)) {
       const shrinks: number[] = [];
       const left: string[] = [];
       let firstKoAt = -1;
+      let ults = 0;
       // Supply drops and the newer gadgets, to see bots use them.
       const extra: Record<string, number> = { loot: 0, lootGrab: 0, mine: 0, helium: 0, tornado: 0 };
       const start = sim.time;
@@ -36,6 +37,7 @@ for (const mode of MODE_IDS.filter((m) => !only || m === only)) {
           if (e.t === 'goal') goals++;
           if (e.t === 'ballOut') outs++;
           if (e.t in extra) extra[e.t]++;
+          if (e.t === 'ult') ults++;
           if (e.t === 'shrink') shrinks.push(Math.round(e.startTick * sim.dt - start));
           if (e.t === 'survivors') left.push(`${e.left.length}@${Math.round(sim.time - start)}s`);
           if (e.t === 'ko') {
@@ -59,7 +61,7 @@ for (const mode of MODE_IDS.filter((m) => !only || m === only)) {
           ` ${surv.length <= 1 ? 'LAST STANDING' : 'TIME UP (tie-break)'} left=[${left.join(' ')}]${ok ? '' : ' FAILED'}`;
       }
       console.log(
-        `${mode.padEnd(13)} ${mapId.padEnd(12)} ${String(len).padStart(3)}s kos=${kos} falls=${falls} firstKo=${firstKoAt}s shrinks=[${shrinks.join(',')}]` +
+        `${mode.padEnd(13)} ${mapId.padEnd(12)} ${String(len).padStart(3)}s kos=${kos} falls=${falls} ults=${ults} firstKo=${firstKoAt}s shrinks=[${shrinks.join(',')}]` +
           (sim.ballGame ? ` goals=${goals} outs=${outs}` : '') +
           pump +
           (r?.teams ? ` teams=${r.teams.scores.join('-')} winner=${r.teams.winner}` : mode === 'suddenDeath' ? sd : ` top=${r?.standings[0]?.name}:${r?.standings[0]?.score}`) +

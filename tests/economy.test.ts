@@ -33,14 +33,15 @@ describe('economy rules', () => {
     expect(levelForXp(250)).toMatchObject({ level: 3, into: 0 });
   });
 
-  it('unlocks weapon parts and utilities by level, never weapons', () => {
+  it('unlocks weapon parts, utilities and ults by level, never weapons', () => {
     // New players get Standard everywhere plus a couple of parts to try right away.
-    expect(unlockedAt(1)).toEqual({ parts: ['standard', 'stubbyBarrel', 'miniTank'], utils: ['bouncePad', 'airGrenade'] });
+    expect(unlockedAt(1)).toEqual({ parts: ['standard', 'stubbyBarrel', 'miniTank'], utils: ['bouncePad', 'airGrenade'], ults: ['bigBlow'] });
     expect(unlockedAt(2).parts).toContain('wideNozzle');
     // Every level up to 8 unlocks something, and by 8 everything is open.
     for (let lv = 2; lv <= 8; lv++) expect(UNLOCKS.some((u) => u.level === lv)).toBe(true);
     expect(unlockedAt(7).parts).not.toContain('kickStock');
     expect(unlockedAt(8).parts.length).toBe(PART_IDS.length);
+    expect(unlockedAt(10).ults).toEqual(['bigBlow', 'juice', 'chase', 'cropDuster', 'robot']);
     expect(unlockedAt(8).utils.length).toBe(4);
     expect(UNLOCKS.every((u) => (u.kind === 'part' ? (PART_IDS as readonly string[]).includes(u.id) : true))).toBe(true);
   });

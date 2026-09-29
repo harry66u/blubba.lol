@@ -20,9 +20,11 @@ import {
   weaponRange,
 } from '../../shared/loadout';
 import { type Cosmetics, ITEMS, cosmeticKey, ownsItem, unlockLevel } from '../../shared/economy';
+import { ULT_IDS } from '../../shared/game/ults';
 import { PLAYER_COLORS } from '../../shared/colors';
 import { GunPreview } from '../render/gunPreview';
 import { clear, el } from './dom';
+import { buildUltPicker } from './ultPicker';
 
 const KEY = 'bubba.loadout.v1';
 const BUILDS_KEY = 'bubba.builds.v1';
@@ -165,6 +167,7 @@ function sameGun(a: Loadout, b: Loadout): boolean {
 export interface LoadoutLocks {
   parts: readonly string[];
   utils: readonly string[];
+  ults?: readonly string[];
 }
 
 /** What the gun wears (from the player's cosmetics) and a way to change the finish. */

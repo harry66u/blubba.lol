@@ -47,6 +47,8 @@ import { CHAOS_KINDS, type ChaosEvent, type ChaosKind, type Environment, NORMAL_
 import { collapsePlan } from './shrink';
 import type { GameEvent, LootKind } from './events';
 import { type AirMine, LOOT_KINDS, type LootCrate, type Tornado, floorBelow, lostBelow, pickLootSpot, rollLoot, stepCrate, stepTornado } from './loot';
+import { UltSystem } from './ultSim';
+import { ULT_IDS, isUltProjectile, ultIndex, ultMassMult, ultPowerMult } from './ults';
 
 export type { ModeId } from './modes';
 export type MatchPhase = 'waiting' | 'playing' | 'results';
@@ -220,6 +222,11 @@ export interface Projectile {
   light?: boolean;
   /** Weapon index of a weapon shot (for visuals). */
   wi?: number;
+  /** Homing target id and turn rate in rad/s (ult rockets, shots fired during The Chase). */
+  homing?: number;
+  turn?: number;
+  /** Fired by an ult (its hits don't refill the ult meter). */
+  ult?: boolean;
 }
 
 export interface SimOptions {
@@ -303,6 +310,8 @@ export class GameSim {
   onPhaseChange: (() => void) | null = null;
   readonly bots = new Map<number, BotBrain>();
   readonly vacuums: VacuumField[] = [];
+  /** Ultimate abilities (meter, lock-ons, Crop Duster clouds, Robot Mode rockets). */
+  readonly ults = new UltSystem(this);
   readonly pickups: Pickup[] = [];
   readonly dynamicSolids = new Map<number, DynamicSolidInfo>();
   /** Floor loot: supply crates drifting down or waiting on the ground. */
@@ -445,7 +454,7 @@ export class GameSim {
       const slot = pick(PART_SLOTS);
       parts[slot] = pick(SLOT_PARTS[slot].slice(1));
     }
-    const loadout = sanitizeLoadout({ weapon: pick(WEAPON_IDS), parts, utils: [utils[0], utils[1]] });
+    const loadout = sanitizeLoadout({ weapon: pick(WEAPON_IDS), parts, utils: [utils[0], utils[1]], ult: pick(ULT_IDS) });
     // Bots dress up too, so every look shows up in public games.
     const cos = { ...DEFAULT_COSMETICS };
     for (const slot of COSMETIC_SLOTS) {
@@ -501,6 +510,7 @@ export class GameSim {
       p.state.charging = 0;
       p.state.charge = 0;
       p.state.reloadTimer = 0;
+      p.state.ultKind = ultIndex(l.ult);
       this.emitLoadout(p);
     } else {
       p.pendingLoadout = l;
@@ -508,7 +518,7 @@ export class GameSim {
   }
 
   private emitLoadout(p: SimPlayer): void {
-    this.events.push({ t: 'loadout', tick: this.tick, id: p.id, weapon: p.loadout.weapon, parts: { ...p.loadout.parts }, utils: [...p.loadout.utils] });
+    this.events.push({ t: 'loadout', tick: this.tick, id: p.id, weapon: p.loadout.weapon, parts: { ...p.loadout.parts }, utils: [...p.loadout.utils], ult: p.loadout.ult });
   }
 
   get teams(): boolean {
@@ -619,6 +629,7 @@ export class GameSim {
     this.chainReactions();
     this.stepProjectiles();
     this.stepVacuums();
+    this.ults.step();
     this.stepModes();
     this.stepPickups();
     this.stepLoot();
@@ -686,22 +697,28 @@ export class GameSim {
   private handleStepResult(p: SimPlayer, out: StepResult, input: InputFrame): void {
     const s = p.state;
     const tick = this.tick;
-    if (out.fired) {
+    this.ults.afterStep(p, out);
+    if (out.fired?.ult) {
+      this.ults.fireBigBlow(p, out.fired, input.seq);
+    } else if (out.fired) {
       const f = out.fired;
-      // Mega Blast shots hit harder (and projectiles are bigger with a wider blast).
-      const hard = f.mega ? f.power * BALANCE.streaks.megaKnockback : f.power;
+      // Mega Blast shots hit harder (and projectiles are bigger with a wider blast); so does Juice.
+      const boost = ultPowerMult(s);
+      const hard = (f.mega ? f.power * BALANCE.streaks.megaKnockback : f.power) * boost;
       switch (p.weapon.kind) {
         case 'cone':
+          this.ults.bendAim(p, f);
           this.fireCone(p, f.ox, f.oy, f.oz, f.dx, f.dy, f.dz, hard);
           break;
         case 'hitscan':
+          this.ults.bendAim(p, f);
           this.fireHitscan(p, f.dx, f.dy, f.dz, hard, input.viewTick);
           break;
         case 'spread':
           this.fireSpread(p, f.dx, f.dy, f.dz, hard, f.charge, input.viewTick);
           break;
         default:
-          this.spawnShot(p, f.ox, f.oy, f.oz, f.dx, f.dy, f.dz, f.power, f.charge, input.seq, f.mega);
+          this.spawnShot(p, f.ox, f.oy, f.oz, f.dx, f.dy, f.dz, f.power, f.charge, input.seq, f.mega, boost);
       }
     }
     p.streaming = out.stream > 0;
@@ -746,13 +763,13 @@ export class GameSim {
 
   // --- Projectiles -------------------------------------------------------------------------
 
-  private newProjectileId(): number {
+  newProjectileId(): number {
     const id = this.nextProjectileId;
     this.nextProjectileId = (this.nextProjectileId % 65535) + 1;
     return id;
   }
 
-  private spawnShot(p: SimPlayer, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, power: number, charge: number, clientSeq: number, mega = false): void {
+  private spawnShot(p: SimPlayer, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, power: number, charge: number, clientSeq: number, mega = false, boost = 1): void {
     const M = BALANCE.streaks;
     const w = p.weapon;
     const id = this.newProjectileId();
@@ -778,10 +795,16 @@ export class GameSim {
       expires: this.time + w.projLifetime,
       blastRadius: w.blastRadius * (0.8 + 0.2 * power) * (mega ? M.megaBlast : 1),
       inflation: w.inflation,
-      knockback: w.knockback * (mega ? M.megaKnockback : 1),
+      knockback: w.knockback * (mega ? M.megaKnockback : 1) * boost,
       light: w.light > 0,
       wi: weaponIndex(w.id),
     };
+    // The Chase: your shots curve toward whoever you're hunting.
+    const homing = this.ults.homing(p);
+    if (homing) {
+      proj.homing = homing.home;
+      proj.turn = homing.turn;
+    }
     this.projectiles.push(proj);
     // Pop Gun corks count as a quarter shot each (like their hits) so accuracy stays comparable.
     if (proj.light) {
@@ -808,6 +831,7 @@ export class GameSim {
       cs: clientSeq,
       g: proj.gravity > 0 ? proj.gravity : undefined,
       wi: proj.wi,
+      ...(homing ?? {}),
     });
   }
 
@@ -817,10 +841,11 @@ export class GameSim {
     const dt = this.dt;
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const pr = this.projectiles[i];
-      if (pr.weapon !== PROJ_AIR) {
+      if (pr.weapon !== PROJ_AIR && !isUltProjectile(pr.weapon)) {
         if (this.stepThrown(pr)) this.projectiles.splice(i, 1);
         continue;
       }
+      this.ults.steer(pr, dt);
       const speed = Math.hypot(pr.vx, pr.vy, pr.vz);
       const steps = Math.max(1, Math.ceil((speed * dt) / (pr.radius * 0.8)));
       const sdt = dt / steps;
@@ -888,7 +913,7 @@ export class GameSim {
     dz = (dz / l) * (1 - b) + (pr.vz / sp) * b;
     const low = hit.y < s.py + h * K.lowHitFraction;
     const power = pr.power * pr.knockback;
-    this.applyHit(target, pr.owner, dx, dy, dz, power, pr.inflation * shotInflation(pr.power), { direct: true, low, x: hit.x, y: hit.y, z: hit.z });
+    this.applyHit(target, pr.owner, dx, dy, dz, power, pr.inflation * shotInflation(pr.power), { direct: true, low, x: hit.x, y: hit.y, z: hit.z, ult: pr.ult });
     this.explode(pr, hit.x, hit.y, hit.z, target.id);
   }
 
@@ -964,7 +989,7 @@ export class GameSim {
   private explode(pr: Projectile, x: number, y: number, z: number, skipId: number): void {
     const K = BALANCE.knockback;
     const R = pr.blastRadius;
-    this.events.push({ t: 'boom', tick: this.tick, id: pr.id, x, y, z, r: R, power: pr.power, owner: pr.owner });
+    this.events.push({ t: 'boom', tick: this.tick, id: pr.id, x, y, z, r: R, power: pr.power, owner: pr.owner, ...(pr.weapon ? { k: pr.weapon } : {}) });
     this.pushBall(x, y, z, R, BALANCE.modes.ball.splashImpulse * pr.power * pr.knockback, pr.owner);
     for (const p of this.players.values()) {
       if (p.id === skipId || p.state.mode === MODE_DEAD) continue;
@@ -985,7 +1010,8 @@ export class GameSim {
       dy /= l;
       dz /= l;
       if (p.id === pr.owner) {
-        this.blastJump(p, dx, dy, dz, falloff, pr.charge);
+        // Your own ult blasts never launch you (a Big Blow in your face would be a free self-knockout).
+        if (!pr.ult) this.blastJump(p, dx, dy, dz, falloff, pr.charge);
       } else {
         const power = pr.power * pr.knockback * K.splashMult * falloff;
         this.applyHit(p, pr.owner, dx, dy, dz, power, pr.inflation * shotInflation(pr.power) * K.splashMult * falloff, {
@@ -994,6 +1020,7 @@ export class GameSim {
           x,
           y,
           z,
+          ult: pr.ult,
         });
       }
     }
@@ -1022,7 +1049,7 @@ export class GameSim {
     dz: number,
     power: number,
     inflationAdd: number,
-    info: { direct: boolean; low: boolean; x: number; y: number; z: number },
+    info: { direct: boolean; low: boolean; x: number; y: number; z: number; ult?: boolean },
   ): void {
     const K = BALANCE.knockback;
     const s = target.state;
@@ -1064,7 +1091,7 @@ export class GameSim {
     }
     const inflBefore = s.inflation;
     s.inflation = Math.min(BALANCE.inflation.max, s.inflation + inflationAdd * (braced ? Br.inflationMult : 1));
-    const mass = inflationMass(s.inflation);
+    const mass = inflationMass(s.inflation) * ultMassMult(s);
     // Floating in helium, you have nothing to brace your feet against.
     const floaty = s.heliumTimer > 0 ? BALANCE.utilities.heliumBomb.knockbackMult : 1;
     const speed = (power * (K.base + K.growth * Math.pow(s.inflation, K.growthExp))) / mass * (braced ? Br.knockbackMult : 1) * floaty;
@@ -1130,6 +1157,7 @@ export class GameSim {
     target.launchFromZ = s.pz;
     target.launchStartTick = this.tick;
     target.launchBy = attackerId;
+    this.ults.onHit(target, attackerId, s.inflation - inflBefore, !!info.ult);
 
     this.events.push({
       t: 'hit',
@@ -1458,7 +1486,7 @@ export class GameSim {
       if (ang > w.cone) continue;
       if (this.world.raycast(ex, ey, ez, vx, vy, vz, Math.max(0, d - r))) continue;
       const falloff = 1 - 0.6 * Math.min(1, d / w.range);
-      const accel = (w.knockback * strength * falloff * (K.base + K.growth * t.inflation)) / K.base / inflationMass(t.inflation);
+      const accel = (w.knockback * strength * falloff * ultPowerMult(s) * (K.base + K.growth * t.inflation)) / K.base / (inflationMass(t.inflation) * ultMassMult(t));
       let px = d0.x * 0.7 + vx * 0.3;
       let py = d0.y * 0.7 + vy * 0.3 + 0.2;
       let pz = d0.z * 0.7 + vz * 0.3;
@@ -1471,7 +1499,9 @@ export class GameSim {
       t.vy += py * accel * this.dt;
       t.vz += pz * accel * this.dt;
       t.blownTimer = 0.15;
+      const inflBefore = t.inflation;
       t.inflation = Math.min(BALANCE.inflation.max, t.inflation + w.inflation * strength * falloff * this.dt);
+      this.ults.onHit(o, p.id, t.inflation - inflBefore, false);
       t.sinceHit = 0;
       o.lastAttacker = p.id;
       o.lastAttackTime = this.time;
@@ -1638,7 +1668,7 @@ export class GameSim {
   }
 
   /** Pushes the ball away from a blast center. */
-  private pushBall(x: number, y: number, z: number, radius: number, impulse: number, by: number): void {
+  pushBall(x: number, y: number, z: number, radius: number, impulse: number, by: number): void {
     const ball = this.ballGame;
     if (!ball || !ball.inPlay) return;
     const b = ball.ball;
@@ -1695,7 +1725,7 @@ export class GameSim {
         dx /= d;
         dy /= d;
         dz /= d;
-        const accel = (V.pull * (1 - (d / V.radius) * 0.5)) / inflationMass(s.inflation);
+        const accel = (V.pull * (1 - (d / V.radius) * 0.5)) / (inflationMass(s.inflation) * ultMassMult(s));
         s.vx += dx * accel * this.dt;
         s.vy += (dy * accel + (dy > 0 ? 6 : 0)) * this.dt;
         s.vz += dz * accel * this.dt;
@@ -2320,7 +2350,7 @@ export class GameSim {
     const t = target.state;
     p.stats.throws++;
     this.events.push({ t: 'throw', tick: this.tick, id: p.id, target: target.id });
-    this.applyHit(target, p.id, dir.x, dir.y, dir.z, G.throwPower, G.throwInflation, {
+    this.applyHit(target, p.id, dir.x, dir.y, dir.z, G.throwPower * this.ults.throwMult(p, target), G.throwInflation, {
       direct: true,
       low: false,
       x: t.px,
@@ -2598,6 +2628,7 @@ export class GameSim {
       if (this.mode === 'teamKnockout' && killer.team >= 0) this.teamScores[killer.team as 0 | 1] += points;
       killer.score += points;
       killer.stats.kos++;
+      this.ults.onKo(killer);
       killer.streak++;
       this.streakReward(killer);
       p.nemesis = killer.id;
@@ -2803,7 +2834,8 @@ export class GameSim {
 
   respawn(p: SimPlayer): void {
     const s = p.state;
-    const keep = { cJump: s.cJump, cDash: s.cDash, cBrace: s.cBrace, cGrab: s.cGrab, cGrapple: s.cGrapple, cReload: s.cReload, cU1: s.cU1, cU2: s.cU2, cTaunt: s.cTaunt, yaw: s.yaw };
+    // The ult meter carries over from life to life.
+    const keep = { cJump: s.cJump, cDash: s.cDash, cBrace: s.cBrace, cGrab: s.cGrab, cGrapple: s.cGrapple, cReload: s.cReload, cU1: s.cU1, cU2: s.cU2, cTaunt: s.cTaunt, cUlt: s.cUlt, ult: s.ult, yaw: s.yaw };
     const fresh = createPlayerState();
     Object.assign(s, fresh, keep);
     if (p.pendingLoadout) {
@@ -2812,6 +2844,7 @@ export class GameSim {
       this.emitLoadout(p);
     }
     p.weapon = computeWeaponStats(p.loadout.weapon, p.loadout.parts);
+    s.ultKind = ultIndex(p.loadout.ult);
     s.hoverTimer = p.weapon.hoverTime;
     const sp = this.pickSpawn(p.id);
     s.px = sp[0];
@@ -2914,9 +2947,11 @@ export class GameSim {
       p.koTimes = [];
       p.savedInflation = -1;
       p.outAt = Infinity;
+      p.state.ult = 0;
       this.respawn(p);
     }
     this.projectiles.length = 0;
+    this.ults.reset();
     this.resetEntities();
     this.onPhaseChange?.();
   }

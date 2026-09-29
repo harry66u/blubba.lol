@@ -1,5 +1,6 @@
 import { type Cosmetics, DEFAULT_COSMETICS, type ProfileView, emptyStats, unlockedAt } from '../../shared/economy';
 import { PART_IDS, UTILITY_IDS } from '../../shared/loadout';
+import { ULT_IDS } from '../../shared/game/ults';
 
 const TOKEN_KEY = 'bubba.token.v1';
 
@@ -56,11 +57,12 @@ export class AccountClient {
   }
 
   /** What's locked in the loadout screen at the current level. */
-  get locked(): { parts: string[]; utils: string[] } {
+  get locked(): { parts: string[]; utils: string[]; ults: string[] } {
     const u = unlockedAt(this.profile.level);
     return {
       parts: PART_IDS.filter((m) => !u.parts.includes(m)),
       utils: UTILITY_IDS.filter((x) => !u.utils.includes(x)),
+      ults: ULT_IDS.filter((x) => !u.ults.includes(x)),
     };
   }
 

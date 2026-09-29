@@ -3,6 +3,7 @@ import { MODE_INFO, type ModeId } from '../../shared/game/modes';
 import { ITEM_BY_ID, type ProgressReport, SLOT_INFO, UNLOCKS, cosmeticKey, tierFor } from '../../shared/economy';
 import { DAILY, type DailyChallengeView, type DailyView } from '../../shared/daily';
 import { PART_INFO, type SpecialPartId, UTILITY_INFO, type UtilityId } from '../../shared/loadout';
+import { ULT_INFO, type UltId } from '../../shared/game/ults';
 import { checkName } from '../../shared/names';
 import type { AccountClient, LeaderboardRow } from '../net/account';
 import { add, clear, el, hexColor } from './dom';
@@ -361,7 +362,8 @@ function unlockName(id: string): string {
   // Cosmetic level rewards come through as item ids ('base.gold').
   const item = ITEM_BY_ID.get(id);
   if (item) return `${item.name} (${SLOT_INFO[item.slot].name.toLowerCase()}, in your locker)`;
-  return PART_INFO[id as SpecialPartId]?.name ?? UTILITY_INFO[id as UtilityId]?.name ?? id;
+  const ult = ULT_INFO[id as UltId];
+  return PART_INFO[id as SpecialPartId]?.name ?? UTILITY_INFO[id as UtilityId]?.name ?? (ult ? `${ult.icon} ${ult.name} (ult)` : id);
 }
 
 /** XP / coins / unlocks / rating earned this match, for the results screen. */
