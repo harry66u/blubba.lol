@@ -24,7 +24,21 @@ import {
   stepPlayer,
 } from '../player';
 import { World } from '../world';
-import { DEFAULT_LOADOUT, type Loadout, MOD_IDS, UTILITY_IDS, type UtilityId, WEAPON_IDS, computeWeaponStats, sanitizeLoadout, utilityCooldown } from '../loadout';
+import {
+  DEFAULT_LOADOUT,
+  type Loadout,
+  PART_SLOTS,
+  type PartId,
+  SLOT_PARTS,
+  UTILITY_IDS,
+  type UtilityId,
+  WEAPON_IDS,
+  computeWeaponStats,
+  sanitizeLoadout,
+  utilityCooldown,
+  weaponIndex,
+} from '../loadout';
+import { pelletDirs, pelletFalloff, shotDir, spreadAt } from '../shots';
 import { BOT_NAMES, BotBrain } from './bot';
 import type { ModeState } from '../protocol';
 import { COSMETIC_SLOTS, type Cosmetics, DEFAULT_COSMETICS, ITEMS } from '../economy';
@@ -104,6 +118,9 @@ export interface SimPlayer {
   /** Last time each target got a "blow" event from this player's leaf blower. */
   blowEvents: Map<number, number>;
   streaming: boolean;
+  /** Pop Gun corks count as a quarter of a shot / hit each in match stats (these hold the remainder). */
+  lightShots: number;
+  lightHits: number;
   /** Looks only; never read by the simulation. */
   cos: Cosmetics;
   /**
@@ -199,6 +216,10 @@ export interface Projectile {
   blastRadius: number;
   inflation: number;
   knockback: number;
+  /** Pop Gun corks: hits push and inflate a little instead of launching. */
+  light?: boolean;
+  /** Weapon index of a weapon shot (for visuals). */
+  wi?: number;
 }
 
 export interface SimOptions {
@@ -386,6 +407,8 @@ export class GameSim {
       history: [],
       blowEvents: new Map(),
       streaming: false,
+      lightShots: 0,
+      lightHits: 0,
       streak: 0,
       nemesis: -1,
       chainBy: -1,
@@ -396,7 +419,7 @@ export class GameSim {
       cos: { ...(opts.cos ?? DEFAULT_COSMETICS) },
       outAt: Infinity,
     };
-    p.weapon = computeWeaponStats(p.loadout.weapon, p.loadout.mods);
+    p.weapon = computeWeaponStats(p.loadout.weapon, p.loadout.parts);
     if (this.teams) p.team = opts.team ?? this.smallerTeam();
     this.players.set(id, p);
     if (this.suddenDeath && this.phase === 'playing' && this.time > this.matchStartedAt + BALANCE.modes.suddenDeath.joinGrace) {
@@ -415,7 +438,14 @@ export class GameSim {
     // Bots bring a mix of weapons and utilities so every loadout shows up in public games.
     const pick = <T,>(xs: readonly T[]) => xs[Math.floor(Math.random() * xs.length)];
     const utils = [...UTILITY_IDS].sort(() => Math.random() - 0.5);
-    const loadout = sanitizeLoadout({ weapon: pick(WEAPON_IDS), mods: Math.random() < 0.5 ? [pick(MOD_IDS)] : [], utils: [utils[0], utils[1]] });
+    // About half of them tinker with one or two weapon parts.
+    const parts: Partial<Record<(typeof PART_SLOTS)[number], PartId>> = {};
+    const tinker = Math.random() < 0.5 ? 1 + Math.floor(Math.random() * 2) : 0;
+    for (let i = 0; i < tinker; i++) {
+      const slot = pick(PART_SLOTS);
+      parts[slot] = pick(SLOT_PARTS[slot].slice(1));
+    }
+    const loadout = sanitizeLoadout({ weapon: pick(WEAPON_IDS), parts, utils: [utils[0], utils[1]] });
     // Bots dress up too, so every look shows up in public games.
     const cos = { ...DEFAULT_COSMETICS };
     for (const slot of COSMETIC_SLOTS) {
@@ -465,7 +495,7 @@ export class GameSim {
     if (p.state.mode === MODE_DEAD || this.phase === 'waiting') {
       p.loadout = l;
       p.pendingLoadout = null;
-      p.weapon = computeWeaponStats(l.weapon, l.mods);
+      p.weapon = computeWeaponStats(l.weapon, l.parts);
       p.state.ammo = p.weapon.ammo;
       p.state.charging = 0;
       p.state.charge = 0;
@@ -477,7 +507,7 @@ export class GameSim {
   }
 
   private emitLoadout(p: SimPlayer): void {
-    this.events.push({ t: 'loadout', tick: this.tick, id: p.id, weapon: p.loadout.weapon, mods: [...p.loadout.mods], utils: [...p.loadout.utils] });
+    this.events.push({ t: 'loadout', tick: this.tick, id: p.id, weapon: p.loadout.weapon, parts: { ...p.loadout.parts }, utils: [...p.loadout.utils] });
   }
 
   get teams(): boolean {
@@ -666,6 +696,9 @@ export class GameSim {
         case 'hitscan':
           this.fireHitscan(p, f.dx, f.dy, f.dz, hard, input.viewTick);
           break;
+        case 'spread':
+          this.fireSpread(p, f.dx, f.dy, f.dz, hard, f.charge, input.viewTick);
+          break;
         default:
           this.spawnShot(p, f.ox, f.oy, f.oz, f.dx, f.dy, f.dz, f.power, f.charge, input.seq, f.mega);
       }
@@ -722,6 +755,8 @@ export class GameSim {
     const M = BALANCE.streaks;
     const w = p.weapon;
     const id = this.newProjectileId();
+    // Lobbed weapons (the Balloon Mortar) launch a little above the aim.
+    const d = shotDir(w, dx, dy, dz, this.tmpDir);
     const proj: Projectile = {
       id,
       owner: p.id,
@@ -732,9 +767,9 @@ export class GameSim {
       x: ox,
       y: oy,
       z: oz,
-      vx: dx * w.projSpeed,
-      vy: dy * w.projSpeed,
-      vz: dz * w.projSpeed,
+      vx: d.x * w.projSpeed,
+      vy: d.y * w.projSpeed,
+      vz: d.z * w.projSpeed,
       radius: w.projRadius * (0.75 + 0.25 * power) * (mega ? M.megaRadius : 1),
       power,
       charge,
@@ -743,9 +778,18 @@ export class GameSim {
       blastRadius: w.blastRadius * (0.8 + 0.2 * power) * (mega ? M.megaBlast : 1),
       inflation: w.inflation,
       knockback: w.knockback * (mega ? M.megaKnockback : 1),
+      light: w.light > 0,
+      wi: weaponIndex(w.id),
     };
     this.projectiles.push(proj);
-    p.stats.shots++;
+    // Pop Gun corks count as a quarter shot each (like their hits) so accuracy stays comparable.
+    if (proj.light) {
+      p.lightShots += 0.25;
+      if (p.lightShots >= 1) {
+        p.lightShots -= 1;
+        p.stats.shots++;
+      }
+    } else p.stats.shots++;
     this.events.push({
       t: 'shot',
       tick: this.tick,
@@ -761,8 +805,12 @@ export class GameSim {
       r: proj.radius,
       power,
       cs: clientSeq,
+      g: proj.gravity > 0 ? proj.gravity : undefined,
+      wi: proj.wi,
     });
   }
+
+  private readonly tmpDir = { x: 0, y: 0, z: 0 };
 
   private stepProjectiles(): void {
     const dt = this.dt;
@@ -786,7 +834,8 @@ export class GameSim {
           if (p.id === pr.owner || p.state.mode === MODE_DEAD || !this.isEnemy(pr.owner, p.id)) continue;
           const hit = capsuleSphere(p.state, pr.x, pr.y, pr.z, pr.radius);
           if (hit) {
-            this.directHit(pr, p, hit);
+            if (pr.light) this.tapHit(pr, p, hit);
+            else this.directHit(pr, p, hit);
             done = true;
             break;
           }
@@ -799,15 +848,17 @@ export class GameSim {
           if (d < pr.radius + b.r) {
             const sp = Math.hypot(pr.vx, pr.vy, pr.vz) || 1;
             const k = BALANCE.modes.ball.shotImpulse * pr.power * pr.knockback;
-            ball.impulse((pr.vx / sp) * k, (pr.vy / sp) * k + 2, (pr.vz / sp) * k, pr.owner);
-            this.explode(pr, pr.x, pr.y, pr.z, -1);
+            ball.impulse((pr.vx / sp) * k, (pr.vy / sp) * k + (pr.light ? 0.3 : 2), (pr.vz / sp) * k, pr.owner);
+            if (pr.light) this.popCork(pr);
+            else this.explode(pr, pr.x, pr.y, pr.z, -1);
             done = true;
             break;
           }
         }
         // World: use a smaller core radius so big air blobs can skim floors.
         if (this.world.sphereHit(pr.x, pr.y, pr.z, pr.radius * 0.45) >= 0) {
-          this.explode(pr, pr.x, pr.y, pr.z, -1);
+          if (pr.light) this.popCork(pr);
+          else this.explode(pr, pr.x, pr.y, pr.z, -1);
           done = true;
         }
       }
@@ -838,6 +889,75 @@ export class GameSim {
     const power = pr.power * pr.knockback;
     this.applyHit(target, pr.owner, dx, dy, dz, power, pr.inflation * shotInflation(pr.power), { direct: true, low, x: hit.x, y: hit.y, z: hit.z });
     this.explode(pr, hit.x, hit.y, hit.z, target.id);
+  }
+
+  /**
+   * Pop Gun cork: a small push along its flight and a little air. No launch, no hit-stop and no
+   * combo, so a spray builds pressure instead of juggling. Stronger on inflated targets, like
+   * knockback.
+   */
+  private tapHit(pr: Projectile, target: SimPlayer, hit: CapsuleHit): void {
+    const K = BALANCE.knockback;
+    const Br = BALANCE.brace;
+    const s = target.state;
+    if (s.spawnProt > 0) {
+      this.events.push({ t: 'shield', tick: this.tick, target: target.id, x: hit.x, y: hit.y, z: hit.z });
+      this.popCork(pr);
+      return;
+    }
+    const braced = s.braceTimer > 0;
+    s.inflation = Math.min(BALANCE.inflation.max, s.inflation + pr.inflation * pr.power * (braced ? Br.inflationMult : 1));
+    s.sinceHit = 0;
+    if (s.mode !== MODE_HELD) {
+      const sp = Math.hypot(pr.vx, pr.vy, pr.vz) || 1;
+      let dx = pr.vx / sp;
+      let dy = Math.max(0, pr.vy / sp) + 0.25;
+      let dz = pr.vz / sp;
+      const l = Math.hypot(dx, dy, dz) || 1;
+      dx /= l;
+      dy /= l;
+      dz /= l;
+      const speed = ((pr.power * pr.knockback * (K.base + K.growth * Math.pow(s.inflation, K.growthExp))) / inflationMass(s.inflation)) * (braced ? Br.knockbackMult : 1);
+      // A second cork in quick succession shakes a hanging player off the ledge.
+      if ((s.mode === MODE_HANG || s.mode === MODE_CLIMB) && s.blownTimer > 0) releaseLedge(s, 0);
+      if (s.hitStop > 0) {
+        s.hsVx += dx * speed;
+        s.hsVy += dy * speed;
+        s.hsVz += dz * speed;
+      } else {
+        s.vx += dx * speed;
+        s.vy = Math.max(s.vy, 0) + dy * speed;
+        s.vz += dz * speed;
+      }
+      s.blownTimer = Math.max(s.blownTimer, 0.15);
+      if (s.onGround && s.vy > 0) {
+        s.onGround = 0;
+        s.groundId = -1;
+      }
+    }
+    depenetrate(s, this.world);
+    target.lastAttacker = pr.owner;
+    target.lastAttackTime = this.time;
+    if (target.launchBy !== pr.owner) {
+      target.launchBy = pr.owner;
+      target.launchFromX = s.px;
+      target.launchFromZ = s.pz;
+      target.launchStartTick = this.tick;
+    }
+    const a = this.players.get(pr.owner);
+    if (a) {
+      a.lightHits += 0.25;
+      if (a.lightHits >= 1) {
+        a.lightHits -= 1;
+        a.stats.hits++;
+      }
+    }
+    this.events.push({ t: 'tap', tick: this.tick, id: pr.id, attacker: pr.owner, target: target.id, x: hit.x, y: hit.y, z: hit.z, infl: s.inflation });
+  }
+
+  /** A cork that hit the world (or a shield): it just pops. */
+  private popCork(pr: Projectile): void {
+    this.events.push({ t: 'fizzle', tick: this.tick, id: pr.id, x: pr.x, y: pr.y, z: pr.z });
   }
 
   private explode(pr: Projectile, x: number, y: number, z: number, skipId: number): void {
@@ -883,7 +1003,7 @@ export class GameSim {
     const s = p.state;
     if (s.mode !== MODE_NORMAL) return;
     const BJ = BALANCE.blastJump;
-    const speed = BJ.speed * (BJ.minPower + (1 - BJ.minPower) * charge) * falloff;
+    const speed = BJ.speed * (BJ.minPower + (1 - BJ.minPower) * charge) * falloff * p.weapon.blastJump;
     if (s.vy < 0) s.vy = 0;
     s.vx += dx * speed;
     s.vy += Math.max(dy, 0.35) * speed;
@@ -1203,6 +1323,98 @@ export class GameSim {
   }
 
   private readonly scratchState = createPlayerState();
+  private readonly pelletBuf: number[] = [];
+  private readonly pelletScratch: PlayerState[] = [];
+
+  /**
+   * Bubble Shotgun: a fixed ring of pellets, judged (lag compensated) against what the shooter
+   * saw. Each target takes one combined hit sized by how many pellets landed and how far they flew.
+   */
+  private fireSpread(p: SimPlayer, dx: number, dy: number, dz: number, power: number, charge: number, viewTick: number): void {
+    const w = p.weapon;
+    const s = p.state;
+    const K = BALANCE.knockback;
+    const ex = s.px;
+    const ey = s.py + eyeHeight(s);
+    const ez = s.pz;
+    const spread = spreadAt(w, charge);
+    const dirs = pelletDirs(dx, dy, dz, spread, w.pellets, this.pelletBuf);
+    const rewind = viewTick > 0 ? Math.max(this.tick - 40, Math.min(this.tick, Math.round(viewTick))) : this.tick;
+    const targets: { o: SimPlayer; past: { px: number; py: number; pz: number }; st: PlayerState; n: number; dist: number; ix: number; iy: number; iz: number; low: number }[] = [];
+    for (const o of this.players.values()) {
+      if (o === p || o.state.mode === MODE_DEAD || !this.isEnemy(p.id, o.id)) continue;
+      const past = this.stateAt(o, rewind);
+      if (past.mode === MODE_DEAD) continue;
+      const st = this.pelletScratch[targets.length] ?? (this.pelletScratch[targets.length] = createPlayerState());
+      st.px = past.px;
+      st.py = past.py;
+      st.pz = past.pz;
+      st.inflation = past.inflation;
+      targets.push({ o, past, st, n: 0, dist: 0, ix: 0, iy: 0, iz: 0, low: 0 });
+    }
+    const ball = this.ballGame?.inPlay ? this.ballGame : null;
+    let ballPellets = 0;
+    const ends: number[] = [];
+    for (let k = 0; k < dirs.length; k += 3) {
+      const px = dirs[k];
+      const py = dirs[k + 1];
+      const pz = dirs[k + 2];
+      const wh = this.world.raycast(ex, ey, ez, px, py, pz, w.range);
+      let bestT = wh ? wh.dist : w.range;
+      let best: (typeof targets)[number] | null = null;
+      for (const t of targets) {
+        const tt = rayCapsule(ex, ey, ez, px, py, pz, t.st, playerRadius(t.st) + w.rayRadius);
+        if (tt !== null && tt < bestT) {
+          bestT = tt;
+          best = t;
+        }
+      }
+      const bt = ball ? ball.ray(ex, ey, ez, px, py, pz, bestT) : null;
+      if (bt !== null && bt < bestT) {
+        best = null;
+        bestT = bt;
+        ballPellets++;
+      }
+      if (best) {
+        const iy = ey + py * bestT;
+        best.n++;
+        best.dist += bestT;
+        best.ix += ex + px * bestT;
+        best.iy += iy;
+        best.iz += ez + pz * bestT;
+        if (iy < best.st.py + playerHeight(best.st) * K.lowHitFraction) best.low++;
+      }
+      ends.push(Math.round(bestT * 10) / 10);
+    }
+    p.stats.shots++;
+    if (ball && ballPellets > 0) {
+      const k = (BALANCE.modes.ball.shotImpulse * power * w.knockback * ballPellets) / w.pellets;
+      ball.impulse(dx * k, dy * k + 2, dz * k, p.id);
+    }
+    let hits = 0;
+    for (const t of targets) {
+      if (!t.n) continue;
+      hits += t.n;
+      const frac = t.n / w.pellets;
+      const fall = pelletFalloff(w, t.dist / t.n);
+      const cur = t.o.state;
+      // Average impact on the rewound body, moved to where the target is now.
+      const ix = t.ix / t.n + (cur.px - t.past.px);
+      const iy = t.iy / t.n + (cur.py - t.past.py);
+      const iz = t.iz / t.n + (cur.pz - t.past.pz);
+      const h = playerHeight(cur);
+      let hx = cur.px - ix;
+      let hy = cur.py + h * 0.5 - iy;
+      let hz = cur.pz - iz;
+      const l = Math.hypot(hx, hy, hz) || 1;
+      const b = K.travelBias;
+      hx = (hx / l) * (1 - b) + dx * b;
+      hy = (hy / l) * (1 - b) + dy * b;
+      hz = (hz / l) * (1 - b) + dz * b;
+      this.applyHit(t.o, p.id, hx, hy, hz, power * w.knockback * frac * fall, w.inflation * shotInflation(power) * frac * fall, { direct: true, low: t.low * 2 > t.n, x: ix, y: iy, z: iz });
+    }
+    this.events.push({ t: 'pellets', tick: this.tick, id: p.id, x: ex, y: ey, z: ez, dx, dy, dz, spread, power, ends, hits });
+  }
 
   /** Leaf Blower: push everyone in the stream this step. */
   private blow(p: SimPlayer, strength: number): void {
@@ -2598,7 +2810,7 @@ export class GameSim {
       p.pendingLoadout = null;
       this.emitLoadout(p);
     }
-    p.weapon = computeWeaponStats(p.loadout.weapon, p.loadout.mods);
+    p.weapon = computeWeaponStats(p.loadout.weapon, p.loadout.parts);
     s.hoverTimer = p.weapon.hoverTime;
     const sp = this.pickSpawn(p.id);
     s.px = sp[0];

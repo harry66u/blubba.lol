@@ -377,20 +377,28 @@ function setOverlay(next: typeof overlay): void {
         }),
       );
       break;
-    case 'loadout':
-      overlayLayer.append(
-        buildLoadout(
-          game.loadout,
-          (l) => {
-            saveLoadout(l);
-            game.setLoadout(l, true);
-          },
-          () => setOverlay(screen === 'playing' ? 'pause' : 'none'),
-          account.locked,
-          screen === 'playing' ? 'Changes apply the next time you respawn.' : '',
-        ),
-      );
+    case 'loadout': {
+      const builder = buildLoadout({
+        current: game.loadout,
+        onChange: (l) => {
+          saveLoadout(l);
+          game.setLoadout(l, true);
+        },
+        onClose: () => setOverlay(screen === 'playing' ? 'pause' : 'none'),
+        locked: account.locked,
+        note: screen === 'playing' ? 'Changes apply the next time you respawn.' : '',
+        looks: {
+          cosmetics: () => account.profile.cosmetics,
+          owned: () => account.profile.owned,
+          equipFinish: (id) => account.equip({ finish: id }),
+          onChange: (fn) => account.onChange(fn),
+        },
+      });
+      // Frees the 3D gun view's WebGL context when the builder closes.
+      lockerDispose = builder.dispose;
+      overlayLayer.append(builder.root);
       break;
+    }
     case 'howto':
       overlayLayer.append(
         buildHowTo(

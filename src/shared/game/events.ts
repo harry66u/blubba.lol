@@ -1,6 +1,7 @@
 /** Discrete things that happen in a match. Sent to clients as JSON and used for effects. */
 export type GameEvent =
-  | { t: 'shot'; tick: number; id: number; owner: number; w: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; r: number; power: number; cs?: number; g?: number }
+  /** A projectile. `w` is 0 for weapon shots (then `wi` is the weapon index) or a utility kind. */
+  | { t: 'shot'; tick: number; id: number; owner: number; w: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; r: number; power: number; cs?: number; g?: number; wi?: number }
   | { t: 'proj'; tick: number; id: number; x: number; y: number; z: number; vx: number; vy: number; vz: number }
   | { t: 'boom'; tick: number; id: number; x: number; y: number; z: number; r: number; power: number; owner: number; k?: number }
   | { t: 'fizzle'; tick: number; id: number; x: number; y: number; z: number }
@@ -42,6 +43,10 @@ export type GameEvent =
   | { t: 'honk'; tick: number; id: number; x: number; y: number; z: number; dx: number; dy: number; dz: number; power: number; range: number; cone: number }
   | { t: 'tracer'; tick: number; id: number; x: number; y: number; z: number; x2: number; y2: number; z2: number; hit: boolean; power: number }
   | { t: 'blow'; tick: number; id: number; target: number }
+  /** Bubble Shotgun volley: pellet directions come from pelletDirs(d, spread); `ends` are their lengths. */
+  | { t: 'pellets'; tick: number; id: number; x: number; y: number; z: number; dx: number; dy: number; dz: number; spread: number; power: number; ends: number[]; hits: number }
+  /** A Pop Gun cork landed (a light push, not a launch). `id` is the projectile. */
+  | { t: 'tap'; tick: number; id: number; attacker: number; target: number; x: number; y: number; z: number; infl: number }
   | { t: 'pop'; tick: number; id: number; target: number; x: number; y: number; z: number }
   | { t: 'vacuum'; tick: number; id: number; x: number; y: number; z: number; until: number }
   | { t: 'solid'; tick: number; id: number; min: [number, number, number]; max: [number, number, number]; until: number; raft: boolean }
@@ -62,7 +67,7 @@ export type GameEvent =
   | { t: 'ballOut'; tick: number; x: number; y: number; z: number }
   | { t: 'ballReset'; tick: number }
   | { t: 'pumpFull'; tick: number; team: 0 | 1 }
-  | { t: 'loadout'; tick: number; id: number; weapon: string; mods: string[]; utils: string[] }
+  | { t: 'loadout'; tick: number; id: number; weapon: string; parts: Record<string, string>; utils: string[] }
   | { t: 'pickup'; tick: number; id: number; kind: 'soda' | 'pin'; x: number; y: number; z: number; active: boolean; by: number }
   /** A supply crate appeared high above (x, y, z) and sinks at `fall` m/s toward the ground at `groundY`. */
   | { t: 'loot'; tick: number; id: number; x: number; y: number; z: number; groundY: number; fall: number }

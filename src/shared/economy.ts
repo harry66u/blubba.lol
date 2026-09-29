@@ -2,11 +2,11 @@
  * Progression and cosmetics: levels, unlocks, coins, the store catalog, and ranked ratings.
  * Shared so the server (which is authoritative) and the client UI agree on every number.
  *
- * Rules from the spec: mods and utilities unlock by playing, never by paying; the store sells
- * cosmetics only, at listed prices, with no random rewards; purchases need an account.
+ * Rules from the spec: weapon parts (mods) and utilities unlock by playing, never by paying; the
+ * store sells cosmetics only, at listed prices, with no random rewards; purchases need an account.
  */
 import type { DailyView } from './daily';
-import { MOD_IDS, type ModId, UTILITY_IDS, type UtilityId } from './loadout';
+import { PART_IDS, type PartId, type SpecialPartId, UTILITY_IDS, type UtilityId } from './loadout';
 
 // --- Cosmetics -------------------------------------------------------------------------------
 
@@ -180,17 +180,29 @@ export function levelForXp(xp: number): { level: number; into: number; next: num
   return { level, into: rest, next: xpToNext(level) };
 }
 
-/** Mods and utilities unlock by level. Weapons are all available from the start. */
-export const UNLOCKS: { level: number; kind: 'mod' | 'utility'; id: ModId | UtilityId }[] = [
+/**
+ * Weapon parts and utilities unlock by level (every weapon, and the Standard option in every part
+ * slot, is available from the start). New players get a couple of parts to play with right away,
+ * then one or two more each level up to 8.
+ */
+export const UNLOCKS: { level: number; kind: 'part' | 'utility'; id: SpecialPartId | UtilityId }[] = [
   { level: 1, kind: 'utility', id: 'bouncePad' },
   { level: 1, kind: 'utility', id: 'airGrenade' },
-  { level: 2, kind: 'mod', id: 'wideNozzle' },
+  { level: 1, kind: 'part', id: 'stubbyBarrel' },
+  { level: 1, kind: 'part', id: 'miniTank' },
+  { level: 2, kind: 'part', id: 'wideNozzle' },
+  { level: 2, kind: 'part', id: 'sprintGrip' },
   { level: 3, kind: 'utility', id: 'inflatableWall' },
-  { level: 4, kind: 'mod', id: 'quickValve' },
+  { level: 3, kind: 'part', id: 'quickValve' },
+  { level: 4, kind: 'part', id: 'bigTank' },
+  { level: 4, kind: 'part', id: 'jetNozzle' },
   { level: 5, kind: 'utility', id: 'vacuumGrenade' },
-  { level: 6, kind: 'mod', id: 'bigTank' },
-  { level: 7, kind: 'mod', id: 'chargeValve' },
-  { level: 8, kind: 'mod', id: 'longBarrel' },
+  { level: 5, kind: 'part', id: 'chargeValve' },
+  { level: 6, kind: 'part', id: 'longBarrel' },
+  { level: 6, kind: 'part', id: 'anchorStock' },
+  { level: 7, kind: 'part', id: 'hairTrigger' },
+  { level: 7, kind: 'part', id: 'pumpNozzle' },
+  { level: 8, kind: 'part', id: 'kickStock' },
   { level: 9, kind: 'utility', id: 'airMine' },
   { level: 10, kind: 'utility', id: 'heliumBomb' },
   { level: 12, kind: 'utility', id: 'tornado' },
@@ -200,9 +212,10 @@ export function unlockLevel(id: string): number {
   return UNLOCKS.find((u) => u.id === id)?.level ?? 1;
 }
 
-export function unlockedAt(level: number): { mods: ModId[]; utils: UtilityId[] } {
+/** Everything usable at a level: 'standard' plus the unlocked parts, and the unlocked utilities. */
+export function unlockedAt(level: number): { parts: PartId[]; utils: UtilityId[] } {
   return {
-    mods: MOD_IDS.filter((m) => unlockLevel(m) <= level),
+    parts: PART_IDS.filter((m) => m === 'standard' || unlockLevel(m) <= level),
     utils: UTILITY_IDS.filter((u) => unlockLevel(u) <= level),
   };
 }

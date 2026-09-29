@@ -21,7 +21,7 @@ function today(now: number): string {
 }
 
 /** What a player can put in their loadout right now. */
-export function allowedLoadout(p: ProfileData): { mods: string[]; utils: string[] } {
+export function allowedLoadout(p: ProfileData): { parts: string[]; utils: string[] } {
   return unlockedAt(levelForXp(p.xp).level);
 }
 

@@ -74,14 +74,15 @@ describe('accounts in the game', () => {
   it('uses the account name, gates loadouts by level, and pays out at match end', async () => {
     const token = await register('Zoomer');
     const c = new Client();
-    await hello(c, { kind: 'create', settings: { bots: true } }, { token, name: 'ignored', loadout: { weapon: 'pumpRifle', mods: ['longBarrel'], utils: ['vacuumGrenade', 'bouncePad'] } });
+    await hello(c, { kind: 'create', settings: { bots: true } }, { token, name: 'ignored', loadout: { weapon: 'pumpRifle', mods: ['longBarrel', 'bigTank'], utils: ['vacuumGrenade', 'bouncePad'] } });
     const w = await c.waitFor('welcome');
     expect(w.name).toBe('Zoomer');
     const room = lobby.rooms.get(w.room.code)!;
     const me = room.sim.players.get(w.you)!;
     // Level 1: weapon is fine, locked mod and utility are dropped.
     expect(me.loadout.weapon).toBe('pumpRifle');
-    expect(me.loadout.mods).toEqual([]);
+    expect(me.loadout.parts.barrel).toBe('standard');
+    expect(me.loadout.parts.tank).toBe('standard');
     expect(me.loadout.utils).not.toContain('vacuumGrenade');
     const roster = await c.waitFor('roster');
     expect(roster.players.find((p) => p.id === w.you)?.level).toBe(1);

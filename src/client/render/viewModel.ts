@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import type { WeaponId } from '../../shared/loadout';
-import { type WeaponModel, buildWeaponModel } from './weapons';
+import type { PartsInput, WeaponId } from '../../shared/loadout';
+import { type WeaponModel, buildWeaponModel, weaponLookKey } from './weapons';
 import { applyFinish } from './looks';
 import { starTexture } from './effects';
 
@@ -10,6 +10,7 @@ export class ViewModel {
   private readonly gun = new THREE.Group();
   private model: WeaponModel;
   private weaponId: WeaponId = 'airCannon';
+  private lookKey = weaponLookKey('airCannon', null);
   private color: number;
   private finish = 'team';
   private recoil = 0;
@@ -54,17 +55,20 @@ export class ViewModel {
     return this.weaponId;
   }
 
-  setWeapon(id: WeaponId): void {
-    if (id === this.weaponId) return;
+  /** Shows a weapon built with the given parts (rebuilt only when either changes). */
+  setWeapon(id: WeaponId, parts: PartsInput = null): void {
+    const key = weaponLookKey(id, parts);
+    if (key === this.lookKey) return;
+    this.lookKey = key;
     this.weaponId = id;
     this.gun.remove(this.model.root);
     this.model.dispose();
-    this.model = buildWeaponModel(id, this.color);
+    this.model = buildWeaponModel(id, this.color, parts);
     applyFinish(this.model, this.finish, this.color);
     this.gun.add(this.model.root);
     this.model.muzzle.add(this.muzzle);
     this.markLayer();
-    const scale: Record<WeaponId, number> = { airCannon: 0.38, leafBlower: 0.3, airHorn: 0.36, pumpRifle: 0.36 };
+    const scale: Record<WeaponId, number> = { airCannon: 0.38, leafBlower: 0.3, airHorn: 0.36, pumpRifle: 0.36, bubbleShotgun: 0.37, balloonMortar: 0.36, popGun: 0.4 };
     this.root.scale.setScalar(scale[id]);
     this.root.position.set(id === 'leafBlower' ? 0.19 : 0.21, id === 'leafBlower' ? -0.2 : -0.19, -0.34);
   }

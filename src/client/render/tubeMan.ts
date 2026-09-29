@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { buildFacePhoto, disposeFacePhoto } from './facePhoto';
 import { inflationScale } from '../../shared/player';
-import type { WeaponId } from '../../shared/loadout';
+import type { PartsInput, WeaponId } from '../../shared/loadout';
 import { FlexTube, noise1 } from './flexTube';
-import { type WeaponModel, buildWeaponModel } from './weapons';
+import { type WeaponModel, buildWeaponModel, weaponLookKey } from './weapons';
 import { animateHat, applyFinish, buildFaceExtras, buildHat, disposeGroup } from './looks';
 
 /** Cosmetic keys (see shared/economy.ts). */
@@ -226,6 +226,7 @@ export class TubeMan {
   private readonly gunMount = new THREE.Group();
   private gun: WeaponModel | null = null;
   private gunId: WeaponId | null = null;
+  private gunKey = '';
   private readonly pin: THREE.Group;
   private readonly crown: THREE.Group;
   private look: Look = { ...DEFAULT_LOOK };
@@ -394,8 +395,10 @@ export class TubeMan {
     return this.gunId;
   }
 
-  setWeapon(id: WeaponId | null): void {
-    if (id === this.gunId) return;
+  setWeapon(id: WeaponId | null, parts: PartsInput = null): void {
+    const key = id ? weaponLookKey(id, parts) : '';
+    if (key === this.gunKey) return;
+    this.gunKey = key;
     if (this.gun) {
       this.gunMount.remove(this.gun.root);
       this.gun.dispose();
@@ -403,7 +406,7 @@ export class TubeMan {
     }
     this.gunId = id;
     if (id) {
-      this.gun = buildWeaponModel(id, this.color.getHex());
+      this.gun = buildWeaponModel(id, this.color.getHex(), parts);
       applyFinish(this.gun, this.look.finish, this.color.getHex());
       this.gun.root.scale.setScalar(0.9);
       this.gunMount.add(this.gun.root);

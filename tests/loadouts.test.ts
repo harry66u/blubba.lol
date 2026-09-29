@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BALANCE } from '../src/shared/balance';
 import { GameSim, PROJ_WALL, type SimPlayer } from '../src/shared/game/sim';
-import { type Loadout, computeWeaponStats, sanitizeLoadout } from '../src/shared/loadout';
+import { type Loadout, STANDARD_PARTS, computeWeaponStats, sanitizeLoadout } from '../src/shared/loadout';
 import { DEALERSHIP } from '../src/shared/maps/dealership';
 import { MODE_DEAD } from '../src/shared/player';
 import { Driver, run } from './helpers';
@@ -30,25 +30,26 @@ function charged(sim: GameSim, d: Driver, ticks = 70) {
 }
 
 describe('loadouts', () => {
-  it('mods are trade-offs, and conflicting mods cannot be combined', () => {
-    const base = computeWeaponStats('airCannon', []);
-    const tank = computeWeaponStats('airCannon', ['bigTank']);
+  it('parts are trade-offs, and old two-mod loadouts still load', () => {
+    const base = computeWeaponStats('airCannon', {});
+    const tank = computeWeaponStats('airCannon', { tank: 'bigTank' });
     expect(tank.ammo).toBeGreaterThan(base.ammo);
     expect(tank.reloadTime).toBeGreaterThan(base.reloadTime);
-    const cv = computeWeaponStats('airCannon', ['chargeValve']);
+    const cv = computeWeaponStats('airCannon', { valve: 'chargeValve' });
     expect(cv.knockback).toBeGreaterThan(base.knockback);
     expect(cv.fireCooldown).toBeGreaterThan(base.fireCooldown);
-    const qv = computeWeaponStats('airCannon', ['quickValve']);
+    const qv = computeWeaponStats('airCannon', { valve: 'quickValve' });
     expect(qv.fireCooldown).toBeLessThan(base.fireCooldown);
     expect(qv.knockback).toBeLessThan(base.knockback);
-    const wide = computeWeaponStats('airCannon', ['wideNozzle']);
+    const wide = computeWeaponStats('airCannon', { nozzle: 'wideNozzle' });
     expect(wide.blastRadius).toBeGreaterThan(base.blastRadius);
-    expect(wide.projLifetime).toBeLessThan(base.projLifetime);
-    const lb = computeWeaponStats('airCannon', ['longBarrel']);
-    expect(lb.projLifetime).toBeGreaterThan(base.projLifetime);
+    expect(wide.knockback).toBeLessThan(base.knockback);
+    const lb = computeWeaponStats('airCannon', { barrel: 'longBarrel' });
+    expect(lb.projLifetime * lb.projSpeed).toBeGreaterThan(base.projLifetime * base.projSpeed);
     expect(lb.blastRadius).toBeLessThan(base.blastRadius);
-    expect(sanitizeLoadout({ weapon: 'airHorn', mods: ['chargeValve', 'quickValve', 'bigTank'] }).mods).toEqual(['chargeValve', 'bigTank']);
-    expect(sanitizeLoadout({ weapon: 'bogus', mods: ['x'], utils: ['airGrenade', 'airGrenade'] })).toEqual({ weapon: 'airCannon', mods: [], utils: ['airGrenade', 'bouncePad'] });
+    // Old saved loadouts: each mod moves into its slot (the first of two clashing ones wins).
+    expect(sanitizeLoadout({ weapon: 'airHorn', mods: ['chargeValve', 'quickValve', 'bigTank'] }).parts).toEqual({ barrel: 'standard', tank: 'bigTank', valve: 'chargeValve', nozzle: 'standard', grip: 'standard' });
+    expect(sanitizeLoadout({ weapon: 'bogus', mods: ['x'], utils: ['airGrenade', 'airGrenade'] })).toEqual({ weapon: 'airCannon', parts: STANDARD_PARTS, utils: ['airGrenade', 'bouncePad'] });
   });
 
   it('Leaf Blower pushes whoever is in the stream', () => {
@@ -224,11 +225,12 @@ describe('loadouts', () => {
     const p = ps[0];
     run(sim, ds, 2);
     sim.startMatch();
-    sim.setLoadout(p.id, { weapon: 'pumpRifle', mods: [], utils: ['bouncePad', 'airGrenade'] });
+    sim.setLoadout(p.id, { weapon: 'pumpRifle', parts: { ...STANDARD_PARTS, tank: 'bigTank' }, utils: ['bouncePad', 'airGrenade'] });
     expect(p.loadout.weapon).toBe('airCannon');
     sim.knockout(p);
     run(sim, ds, Math.ceil(BALANCE.match.respawnDelay * 60) + 5);
     expect(p.loadout.weapon).toBe('pumpRifle');
-    expect(p.state.ammo).toBe(BALANCE.weapons.pumpRifle.ammo);
+    expect(p.state.ammo).toBe(computeWeaponStats('pumpRifle', { tank: 'bigTank' }).ammo);
+    expect(p.state.ammo).toBeGreaterThan(BALANCE.weapons.pumpRifle.ammo);
   });
 });

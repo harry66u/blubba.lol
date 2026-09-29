@@ -1,6 +1,8 @@
 import { BALANCE } from '../balance';
 import { BTN_FIRE, type InputFrame, emptyInput } from '../input';
 import { MODE_DEAD, MODE_HANG, MODE_HELD, eyeHeight, playerHeight } from '../player';
+import { type WeaponStats, weaponRange } from '../loadout';
+import { lobPitch, shotDir } from '../shots';
 import type { GameSim, SimPlayer } from './sim';
 
 export const BOT_NAMES = [
@@ -36,6 +38,47 @@ function wrapAngle(a: number): number {
   while (a > Math.PI) a -= Math.PI * 2;
   while (a < -Math.PI) a += Math.PI * 2;
   return a;
+}
+
+/** Where a bot likes to stand for its weapon (r: 0..1 random). */
+function preferredDistance(w: WeaponStats, r: number): number {
+  if (w.kind === 'cone') return 2.5 + r * 2.5;
+  if (w.kind === 'stream') return 4 + r * 3;
+  if (w.kind === 'hitscan') return 14 + r * 12;
+  if (w.kind === 'spread') return 3 + r * 4;
+  if (w.projGravity > 0) return Math.max(w.blastRadius + 4, 10) + r * 8;
+  if (w.auto) return 7 + r * 7;
+  return 6 + r * 9;
+}
+
+const tmpShot = { x: 0, y: 0, z: 0 };
+
+/** Seconds for a shot to cover `dist` meters horizontally. */
+function flightTime(w: WeaponStats, dist: number): number {
+  if (w.projGravity > 0) {
+    const d = shotDir(w, 1, 0.3, 0, tmpShot);
+    return dist / Math.max(1, w.projSpeed * d.x);
+  }
+  return dist / Math.max(1, w.projSpeed);
+}
+
+/** Look pitch to hit a point `dy` above the eye and `dist` away (lobbed shots arc). */
+function aimPitch(w: WeaponStats, dy: number, dist: number): number {
+  if (w.kind === 'projectile' && w.projGravity > 0) {
+    const p = lobPitch(w.projSpeed, w.projGravity, w.projLoft, dist, dy);
+    if (p !== null) return p;
+    return Math.PI / 4 - Math.asin(Math.min(1, w.projLoft * Math.SQRT1_2));
+  }
+  return Math.atan2(dy, dist);
+}
+
+/** How long to charge the next shot (r: 0..1 random). */
+function chargeGoalFor(w: WeaponStats, dist: number, skill: number, r: number): number {
+  // The shotgun's ring only tightens with charge: tap up close, charge from further out.
+  if (w.kind === 'spread') return Math.max(0.05, Math.min(1, (dist - 3) / 6 + (r - 0.5) * 0.3));
+  if (w.projGravity > 0) return 0.6 + r * 0.4;
+  if (w.kind === 'hitscan') return 0.7 + r * 0.3;
+  return 0.3 + skill * 0.3 + r * 0.4;
 }
 
 /**
@@ -197,17 +240,18 @@ export class BotBrain {
       this.targetId = this.pickTarget(sim, me);
       this.retargetAt = sim.time + 1.5 + rnd() * 2;
       if (this.targetId !== prev) this.nextShotAt = Math.max(this.nextShotAt, sim.time + 0.9 - this.skill * 0.6 + rnd() * 0.4);
-      const kind = me.weapon.kind;
-      this.desiredDist =
-        kind === 'cone' ? 2.5 + rnd() * 2.5 : kind === 'stream' ? 4 + rnd() * 3 : kind === 'hitscan' ? 14 + rnd() * 12 : 6 + rnd() * 9;
-      this.aimFeet = rnd() < 0.35;
+      this.desiredDist = preferredDistance(me.weapon, rnd());
+      // Lobbed splash shots land best at the feet.
+      this.aimFeet = me.weapon.projGravity > 0 || rnd() < 0.35;
     }
     const target = sim.players.get(this.targetId);
     const obj = this.objective(sim, me, target) ?? this.lootObjective(sim, me);
 
     // --- Aim. ---
     const turnRate = (2.5 + this.skill * 6) * sim.dt;
-    const noiseAmp = (1 - this.skill) * 0.22 + 0.02;
+    // Precise weapons: bots steady their aim while they charge, like people lining up a shot.
+    const settle = (me.weapon.kind === 'hitscan' || me.weapon.kind === 'spread') && s.charging ? 1 - 0.6 * s.charge : 1;
+    const noiseAmp = ((1 - this.skill) * 0.22 + 0.02) * settle;
     this.noiseYaw += (rnd() - 0.5) * 0.04;
     this.noisePitch += (rnd() - 0.5) * 0.03;
     this.noiseYaw = Math.max(-noiseAmp, Math.min(noiseAmp, this.noiseYaw));
@@ -222,14 +266,14 @@ export class BotBrain {
       const dz = obj.aim.z - s.pz;
       dist = Math.hypot(dx, dz);
       wantYaw = Math.atan2(-dx, -dz) + this.noiseYaw * 0.5;
-      wantPitch = Math.atan2(dy, dist) + this.noisePitch * 0.5;
+      wantPitch = aimPitch(me.weapon, dy, dist) + this.noisePitch * 0.5;
     } else if (target) {
       const t = target.state;
       const ex = s.px;
       const ey = s.py + eyeHeight(s);
       const ez = s.pz;
       dist = Math.hypot(t.px - ex, t.pz - ez);
-      const lead = me.weapon.kind === 'projectile' ? (dist / me.weapon.projSpeed) * (this.skill * this.skill) : 0;
+      const lead = me.weapon.kind === 'projectile' ? flightTime(me.weapon, dist) * (this.skill * this.skill) : 0;
       const tx = t.px + t.vx * lead;
       const tz = t.pz + t.vz * lead;
       const ty = t.py + (this.aimFeet ? 0.15 : playerHeight(t) * 0.5) + Math.min(0, t.vy) * lead * 0.3;
@@ -237,7 +281,7 @@ export class BotBrain {
       const dy = ty - ey;
       const dz = tz - ez;
       wantYaw = Math.atan2(-dx, -dz) + this.noiseYaw;
-      wantPitch = Math.atan2(dy, Math.hypot(dx, dz)) + this.noisePitch;
+      wantPitch = aimPitch(me.weapon, dy, Math.hypot(dx, dz)) + this.noisePitch;
     }
     const dyaw = wrapAngle(wantYaw - this.aimYaw);
     this.aimYaw = wrapAngle(this.aimYaw + Math.max(-turnRate, Math.min(turnRate, dyaw)));
@@ -270,6 +314,12 @@ export class BotBrain {
       if (dist > this.desiredDist + 3) f.moveZ = 1;
       else if (dist < this.desiredDist - 3) f.moveZ = -1;
       f.moveX = this.strafeSign * 0.8;
+      // Short-range weapons close the gap with a dash now and then.
+      const k = me.weapon.kind;
+      if ((k === 'cone' || k === 'spread' || k === 'stream') && dist > this.desiredDist + 5 && dist < 22 && s.onGround && s.dashCharges > 1 && rnd() < 0.012 * this.skill) {
+        f.moveX = 0;
+        this.press('dash');
+      }
     } else {
       f.moveZ = 0.5;
     }
@@ -365,19 +415,26 @@ export class BotBrain {
     }
 
     // --- Shoot: hold to charge, release when charged and on target. ---
-    const range = me.weapon.kind === 'projectile' ? me.weapon.projSpeed * me.weapon.projLifetime : me.weapon.range;
-    const hasTarget = obj?.aim ? obj.shoot && dist < Math.min(40, range + 1) : !!target && dist < Math.min(40, range + 1);
+    const w = me.weapon;
+    const range = weaponRange(w);
+    // Don't lob a splash shot at someone standing right next to us.
+    const tooClose = w.projGravity > 0 && !obj?.aim && dist < w.blastRadius * 0.9;
+    const hasTarget = !tooClose && (obj?.aim ? obj.shoot && dist < Math.min(40, range + 1) : !!target && dist < Math.min(40, range + 1));
     if (!hasTarget) {
       f.buttons = 0;
-    } else if (me.weapon.kind === 'stream') {
+    } else if (w.kind === 'stream') {
       f.buttons = aimError < 0.25 && s.ammo > 0 && s.reloadTimer <= 0 ? BTN_FIRE : 0;
+    } else if (w.auto) {
+      // Spray while roughly on target, in bursts.
+      const onTarget = aimError < 0.12 + (1 - this.skill) * 0.12;
+      f.buttons = onTarget && s.ammo >= 1 && s.reloadTimer <= 0 && sim.time >= this.nextShotAt ? BTN_FIRE : 0;
     } else if (s.charging) {
-      const onTarget = aimError < (me.weapon.kind === 'hitscan' ? 0.03 : 0.08) + (1 - this.skill) * 0.1;
+      const onTarget = aimError < (w.kind === 'hitscan' ? 0.03 : w.kind === 'spread' ? 0.06 : 0.08) + (1 - this.skill) * 0.1;
       if (s.charge >= this.chargeGoal && onTarget) {
         f.buttons = 0;
-        this.chargeGoal = 0.3 + this.skill * 0.3 + rnd() * 0.4;
+        this.chargeGoal = chargeGoalFor(w, dist, this.skill, rnd());
         this.nextShotAt = sim.time + (1 - this.skill) * 1.1 + rnd() * 0.6;
-        if (rnd() < 0.3) this.aimFeet = !this.aimFeet;
+        if (rnd() < 0.3 && w.projGravity <= 0) this.aimFeet = !this.aimFeet;
       } else {
         f.buttons = BTN_FIRE;
       }

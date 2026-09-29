@@ -621,6 +621,175 @@ export class Audio {
     this.noise(f, t, 0.1);
   }
 
+  /** Bubble Shotgun: a wet "blorp" and a quick ripple of bubble pops. */
+  bubbleBlast(power: number, pos: [number, number, number] | null): void {
+    const out = this.out(pos, 0.6 + power * 0.3);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const body = ctx.createOscillator();
+    body.type = 'sine';
+    body.frequency.setValueAtTime(260 + power * 60, t);
+    body.frequency.exponentialRampToValueAtTime(70, t + 0.15);
+    const bg = ctx.createGain();
+    this.env(bg, t, 0.003, 0.9, 0.17);
+    body.connect(bg).connect(out);
+    body.start(t);
+    body.stop(t + 0.22);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(1800, t);
+    lp.frequency.exponentialRampToValueAtTime(250, t + 0.2);
+    const ng = ctx.createGain();
+    this.env(ng, t, 0.004, 0.5 + power * 0.3, 0.2);
+    lp.connect(ng).connect(out);
+    this.noise(lp, t, 0.25);
+    // Bubble pops: short upward chirps.
+    for (let i = 0; i < 5; i++) {
+      const s = t + 0.03 + i * 0.022 + Math.random() * 0.02;
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      const f0 = 700 + Math.random() * 900;
+      o.frequency.setValueAtTime(f0, s);
+      o.frequency.exponentialRampToValueAtTime(f0 * 2.2, s + 0.03);
+      const g = ctx.createGain();
+      this.env(g, s, 0.002, 0.28, 0.035);
+      o.connect(g).connect(out);
+      o.start(s);
+      o.stop(s + 0.06);
+    }
+  }
+
+  /** Balloon Mortar launch: a hollow "thoonk" and a rubbery stretch. */
+  mortarLaunch(power: number, pos: [number, number, number] | null): void {
+    const out = this.out(pos, 0.75 + power * 0.25);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(150, t);
+    o.frequency.exponentialRampToValueAtTime(55, t + 0.25);
+    const g = ctx.createGain();
+    this.env(g, t, 0.004, 1, 0.3);
+    o.connect(g).connect(out);
+    o.start(t);
+    o.stop(t + 0.35);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 3;
+    bp.frequency.setValueAtTime(500, t);
+    bp.frequency.exponentialRampToValueAtTime(160, t + 0.18);
+    const ng = ctx.createGain();
+    this.env(ng, t, 0.003, 0.7, 0.2);
+    bp.connect(ng).connect(out);
+    this.noise(bp, t, 0.25);
+    const sq = ctx.createOscillator();
+    sq.type = 'sawtooth';
+    sq.frequency.setValueAtTime(320, t + 0.02);
+    sq.frequency.exponentialRampToValueAtTime(620, t + 0.14);
+    const sl = ctx.createBiquadFilter();
+    sl.frequency.value = 1400;
+    sl.Q.value = 6;
+    const sg = ctx.createGain();
+    this.env(sg, t + 0.02, 0.01, 0.12, 0.12);
+    sq.connect(sl).connect(sg).connect(out);
+    sq.start(t + 0.02);
+    sq.stop(t + 0.2);
+  }
+
+  /** Water balloon bursting: a splashy noise burst and droplets. */
+  splash(power: number, pos: [number, number, number] | null): void {
+    if (!this.throttle('splash', 40)) return;
+    const out = this.out(pos, 0.8 + power * 0.3);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const pop = ctx.createBiquadFilter();
+    pop.type = 'highpass';
+    pop.frequency.value = 1500;
+    const pg = ctx.createGain();
+    this.env(pg, t, 0.001, 0.8, 0.04);
+    pop.connect(pg).connect(out);
+    this.noise(pop, t, 0.06);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 0.9;
+    bp.frequency.setValueAtTime(2600, t);
+    bp.frequency.exponentialRampToValueAtTime(400, t + 0.45);
+    const ng = ctx.createGain();
+    this.env(ng, t + 0.01, 0.01, 1, 0.45);
+    bp.connect(ng).connect(out);
+    this.noise(bp, t, 0.5);
+    const sub = ctx.createOscillator();
+    sub.frequency.setValueAtTime(110, t);
+    sub.frequency.exponentialRampToValueAtTime(45, t + 0.2);
+    const sg = ctx.createGain();
+    this.env(sg, t, 0.003, 0.8, 0.22);
+    sub.connect(sg).connect(out);
+    sub.start(t);
+    sub.stop(t + 0.3);
+    for (let i = 0; i < 4; i++) {
+      const s = t + 0.08 + Math.random() * 0.25;
+      const d = ctx.createOscillator();
+      d.type = 'sine';
+      const f0 = 900 + Math.random() * 1200;
+      d.frequency.setValueAtTime(f0, s);
+      d.frequency.exponentialRampToValueAtTime(f0 * 1.6, s + 0.04);
+      const dg = ctx.createGain();
+      this.env(dg, s, 0.002, 0.15, 0.04);
+      d.connect(dg).connect(out);
+      d.start(s);
+      d.stop(s + 0.06);
+    }
+  }
+
+  /** Pop Gun shot: a cork "pok". */
+  popShot(pos: [number, number, number] | null): void {
+    if (!this.throttle(pos ? 'popShotR' : 'popShot', 45)) return;
+    const out = this.out(pos, 0.42);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    const f0 = 900 + Math.random() * 180;
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.exponentialRampToValueAtTime(f0 * 0.45, t + 0.05);
+    const g = ctx.createGain();
+    this.env(g, t, 0.001, 0.7, 0.06);
+    o.connect(g).connect(out);
+    o.start(t);
+    o.stop(t + 0.08);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 2400;
+    bp.Q.value = 1.5;
+    const ng = ctx.createGain();
+    this.env(ng, t, 0.001, 0.5, 0.025);
+    bp.connect(ng).connect(out);
+    this.noise(bp, t, 0.04);
+  }
+
+  /** A cork landing on someone: a light rubbery tick. */
+  corkTap(inflation: number, pos: [number, number, number] | null): void {
+    if (!this.throttle('corkTap', 60)) return;
+    const out = this.out(pos, 0.35);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'triangle';
+    const f0 = 500 + inflation * 700;
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.exponentialRampToValueAtTime(f0 * 1.4, t + 0.04);
+    const g = ctx.createGain();
+    this.env(g, t, 0.001, 0.5, 0.05);
+    o.connect(g).connect(out);
+    o.start(t);
+    o.stop(t + 0.07);
+  }
+
   private blowerNodes: { src: AudioBufferSourceNode; gain: GainNode; filter: BiquadFilterNode } | null = null;
 
   /** Continuous leaf-blower roar for your own blower (0 = off). */

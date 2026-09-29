@@ -1,7 +1,7 @@
 import { MODE_INFO, type ModeId } from '../../shared/game/modes';
 import { type ProgressReport, UNLOCKS, tierFor } from '../../shared/economy';
 import { DAILY, type DailyChallengeView, type DailyView } from '../../shared/daily';
-import { MOD_INFO, type ModId, UTILITY_INFO, type UtilityId } from '../../shared/loadout';
+import { PART_INFO, type SpecialPartId, UTILITY_INFO, type UtilityId } from '../../shared/loadout';
 import { checkName } from '../../shared/names';
 import type { AccountClient, LeaderboardRow } from '../net/account';
 import { add, clear, el } from './dom';
@@ -329,7 +329,7 @@ export function buildProfile(account: AccountClient, onClose: () => void, onAcco
 }
 
 function unlockName(id: string): string {
-  return MOD_INFO[id as ModId]?.name ?? UTILITY_INFO[id as UtilityId]?.name ?? id;
+  return PART_INFO[id as SpecialPartId]?.name ?? UTILITY_INFO[id as UtilityId]?.name ?? id;
 }
 
 /** XP / coins / unlocks / rating earned this match, for the results screen. */

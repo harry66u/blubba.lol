@@ -1,7 +1,8 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { DEFAULT_COSMETICS, ITEMS, eloUpdate, levelForXp, matchReward, sanitizeCosmetics, unlockedAt } from '../src/shared/economy';
+import { DEFAULT_COSMETICS, ITEMS, UNLOCKS, eloUpdate, levelForXp, matchReward, sanitizeCosmetics, unlockedAt } from '../src/shared/economy';
+import { PART_IDS } from '../src/shared/loadout';
 import { Api } from '../src/server/api';
 import { awardMatch } from '../src/server/progress';
 import { Store, accountKey, guestKey } from '../src/server/store';
@@ -32,10 +33,16 @@ describe('economy rules', () => {
     expect(levelForXp(250)).toMatchObject({ level: 3, into: 0 });
   });
 
-  it('unlocks mods and utilities by level, never weapons', () => {
-    expect(unlockedAt(1)).toEqual({ mods: [], utils: ['bouncePad', 'airGrenade'] });
-    expect(unlockedAt(8).mods.length).toBe(5);
+  it('unlocks weapon parts and utilities by level, never weapons', () => {
+    // New players get Standard everywhere plus a couple of parts to try right away.
+    expect(unlockedAt(1)).toEqual({ parts: ['standard', 'stubbyBarrel', 'miniTank'], utils: ['bouncePad', 'airGrenade'] });
+    expect(unlockedAt(2).parts).toContain('wideNozzle');
+    // Every level up to 8 unlocks something, and by 8 everything is open.
+    for (let lv = 2; lv <= 8; lv++) expect(UNLOCKS.some((u) => u.level === lv)).toBe(true);
+    expect(unlockedAt(7).parts).not.toContain('kickStock');
+    expect(unlockedAt(8).parts.length).toBe(PART_IDS.length);
     expect(unlockedAt(8).utils.length).toBe(4);
+    expect(UNLOCKS.every((u) => (u.kind === 'part' ? (PART_IDS as readonly string[]).includes(u.id) : true))).toBe(true);
   });
 
   it('only lets you wear items you own', () => {

@@ -342,7 +342,7 @@ export class Hud {
     this.utilEls[1].cool.style.height = `${Math.round((1 - s.u2Ready) * 100)}%`;
     const power = [
       s.turbo > 0 ? `⚡ TURBO ${Math.ceil(s.turbo)}s` : '',
-      s.mega > 0 ? `💥 MEGA ×${s.mega}` : '',
+      s.mega > 0 ? `💥 MEGA ×${Math.ceil(s.mega)}` : '',
       (s.feather ?? 0) > 0 ? `🪶 FEATHER ${Math.ceil(s.feather!)}s` : '',
       (s.spring ?? 0) > 0 ? `👟 SPRING ×${s.spring}` : '',
       (s.helium ?? 0) > 0 ? `🎈 FLOATING ${Math.ceil(s.helium!)}s` : '',

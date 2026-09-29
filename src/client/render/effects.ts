@@ -157,9 +157,32 @@ interface Balloon {
   t: number;
 }
 
+/** How a weapon shot looks: air blob (cannon), water balloon (mortar) or cork (pop gun). */
+export type ShotStyle = 'air' | 'balloon' | 'cork';
+
+/** Shot style for a weapon index (WEAPON_IDS order). */
+export function shotStyleFor(weaponIndex: number | undefined): ShotStyle {
+  // 5 = balloonMortar, 6 = popGun (see shared/loadout.ts WEAPON_IDS).
+  return weaponIndex === 5 ? 'balloon' : weaponIndex === 6 ? 'cork' : 'air';
+}
+
+interface Bubble {
+  mesh: THREE.Mesh;
+  fx: number;
+  fy: number;
+  fz: number;
+  tx: number;
+  ty: number;
+  tz: number;
+  t: number;
+  dur: number;
+  size: number;
+}
+
 export interface Projectile3D {
   id: number;
   mesh: THREE.Mesh;
+  style: ShotStyle;
   x: number;
   y: number;
   z: number;
@@ -238,6 +261,19 @@ export class Effects {
     new THREE.SphereGeometry(0.34, 14, 10),
   ];
   private readonly ringGeo = new THREE.RingGeometry(0.8, 1, 40);
+  private readonly balloonGeo = new THREE.SphereGeometry(1, 18, 14);
+  private readonly balloonMats = [0x3ab8ff, 0xff5fd2, 0x8ee000, 0xffd60a].map(
+    (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.12, metalness: 0.05, emissive: c, emissiveIntensity: 0.25, transparent: true, opacity: 0.92 }),
+  );
+  private readonly corkGeo = new THREE.CylinderGeometry(0.75, 1, 1.6, 10).rotateX(Math.PI / 2);
+  private readonly corkMat = new THREE.MeshStandardMaterial({ color: 0xe0a860, roughness: 0.6, emissive: 0x6a3a10, emissiveIntensity: 0.25 });
+  private readonly bubbleGeo = new THREE.SphereGeometry(1, 14, 10);
+  private readonly bubbleMat = new THREE.MeshStandardMaterial({ color: 0xeaf8ff, emissive: 0xc49bff, emissiveIntensity: 0.35, roughness: 0.05, metalness: 0.4, transparent: true, opacity: 0.6, depthWrite: false });
+  private readonly bubbles: Bubble[] = [];
+  /** Balloon Mortar landing preview: a dotted arc and a ring where it lands. */
+  private readonly arcDots: THREE.InstancedMesh;
+  private readonly arcRing: THREE.Mesh;
+  private readonly arcM = new THREE.Matrix4();
   private time = 0;
   /** Camera position, so particles right in front of the lens can fade out. */
   camPos: THREE.Vector3 | null = null;
@@ -255,6 +291,14 @@ export class Effects {
       transparent: true,
       depthWrite: false,
     });
+    this.arcDots = new THREE.InstancedMesh(new THREE.SphereGeometry(0.07, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75, depthWrite: false }), 40);
+    this.arcDots.frustumCulled = false;
+    this.arcDots.count = 0;
+    this.arcDots.renderOrder = 3;
+    this.arcRing = new THREE.Mesh(this.ringGeo, new THREE.MeshBasicMaterial({ color: 0x3ab8ff, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
+    this.arcRing.rotation.x = -Math.PI / 2;
+    this.arcRing.visible = false;
+    this.root.add(this.arcDots, this.arcRing);
     for (let i = 0; i < 12; i++) {
       const mesh = new THREE.Mesh(
         this.ringGeo,
@@ -528,13 +572,22 @@ export class Effects {
 
   // --- Projectiles ------------------------------------------------------------------------
 
-  addProjectile(id: number, x: number, y: number, z: number, vx: number, vy: number, vz: number, r: number, muzzle?: THREE.Vector3, kind = 0): Projectile3D {
-    const mesh = kind > 0 ? new THREE.Mesh(this.utilGeos[kind]!, this.utilMats[kind]!) : new THREE.Mesh(this.airGeo, this.airMat);
-    if (kind === 0) mesh.scale.setScalar(r);
-    mesh.castShadow = kind > 0;
+  addProjectile(id: number, x: number, y: number, z: number, vx: number, vy: number, vz: number, r: number, muzzle?: THREE.Vector3, kind = 0, style: ShotStyle = 'air'): Projectile3D {
+    let mesh: THREE.Mesh;
+    if (kind > 0) mesh = new THREE.Mesh(this.utilGeos[kind]!, this.utilMats[kind]!);
+    else if (style === 'balloon') {
+      mesh = new THREE.Mesh(this.balloonGeo, this.balloonMats[Math.abs(id) % this.balloonMats.length]);
+      const knot = new THREE.Mesh(this.corkGeo, mesh.material);
+      knot.scale.set(0.16, 0.16, 0.14);
+      knot.position.z = 1.05;
+      mesh.add(knot);
+    } else if (style === 'cork') mesh = new THREE.Mesh(this.corkGeo, this.corkMat);
+    else mesh = new THREE.Mesh(this.airGeo, this.airMat);
+    if (kind === 0) mesh.scale.setScalar(style === 'cork' ? r * 0.55 : r);
+    mesh.castShadow = kind > 0 || style === 'balloon';
     mesh.renderOrder = 2;
     this.root.add(mesh);
-    const p: Projectile3D = { id, mesh, x, y, z, vx, vy, vz, r, ox: 0, oy: 0, oz: 0, trail: 0, lx: x, ly: y, lz: z };
+    const p: Projectile3D = { id, mesh, style: kind > 0 ? 'air' : style, x, y, z, vx, vy, vz, r, ox: 0, oy: 0, oz: 0, trail: 0, lx: x, ly: y, lz: z };
     if (muzzle) {
       p.ox = muzzle.x - x;
       p.oy = muzzle.y - y;
@@ -565,6 +618,28 @@ export class Effects {
     const my = y + p.oy;
     const mz = z + p.oz;
     p.mesh.position.set(mx, my, mz);
+    if (p.style === 'balloon' || p.style === 'cork') {
+      // Nose along the flight; balloons wobble like they're full of water.
+      const sp = Math.hypot(p.vx, p.vy, p.vz);
+      if (sp > 0.5) p.mesh.quaternion.setFromUnitVectors(Z_AXIS, tmpDirV.set(-p.vx / sp, -p.vy / sp, -p.vz / sp));
+      const moved = Math.hypot(mx - p.lx, my - p.ly, mz - p.lz);
+      p.trail += moved;
+      if (p.style === 'balloon') {
+        const w = Math.sin(this.time * 18 + p.id) * 0.1;
+        p.mesh.scale.set(p.r * (1 + w), p.r * (1 - w), p.r * 1.15);
+        if (p.trail > 1.2) {
+          p.trail = 0;
+          this.confetti.spawn({ x: mx, y: my, z: mz, vx: (Math.random() - 0.5) * 2, vy: -1, vz: (Math.random() - 0.5) * 2, size: 0.5, grow: 0, max: 0.5, drag: 1, gravity: 10, spin: 6 }, 0x9fe0ff);
+        }
+      } else if (p.trail > 2.5) {
+        p.trail = 0;
+        this.puffs.spawn({ x: mx, y: my, z: mz, size: 0.07, grow: 0.8, max: 0.2, drag: 5 }, 0xfff1d6);
+      }
+      p.lx = mx;
+      p.ly = my;
+      p.lz = mz;
+      return;
+    }
     if (p.mesh.material !== this.airMat) {
       p.mesh.rotation.y += dt * 8;
       p.mesh.rotation.x += dt * 5;
@@ -589,6 +664,96 @@ export class Effects {
     p.lx = mx;
     p.ly = my;
     p.lz = mz;
+  }
+
+  /**
+   * Bubble Shotgun volley: a bubble flies from the muzzle to the end of each pellet's path and
+   * pops there. `ends` holds 3 numbers per pellet.
+   */
+  bubbleVolley(x: number, y: number, z: number, ends: number[], power: number): void {
+    for (let i = 0; i < ends.length; i += 3) {
+      const tx = ends[i];
+      const ty = ends[i + 1];
+      const tz = ends[i + 2];
+      const d = Math.hypot(tx - x, ty - y, tz - z);
+      let b = this.bubbles.find((q) => !q.mesh.visible);
+      if (!b) {
+        if (this.bubbles.length >= 48) continue;
+        const mesh = new THREE.Mesh(this.bubbleGeo, this.bubbleMat);
+        mesh.renderOrder = 3;
+        this.root.add(mesh);
+        b = { mesh, fx: 0, fy: 0, fz: 0, tx: 0, ty: 0, tz: 0, t: 0, dur: 1, size: 0.2 };
+        this.bubbles.push(b);
+      }
+      b.fx = x;
+      b.fy = y;
+      b.fz = z;
+      b.tx = tx;
+      b.ty = ty;
+      b.tz = tz;
+      b.t = 0;
+      b.dur = Math.max(0.05, d / 60);
+      b.size = 0.14 + power * 0.08 + ((i / 3) % 2) * 0.03;
+      b.mesh.visible = true;
+      b.mesh.position.set(x, y, z);
+      b.mesh.scale.setScalar(0.01);
+    }
+    this.flash(x, y, z, 0.9 + power, 0xe6d4ff, 0.08);
+  }
+
+  /** Balloon Mortar impact: a splash of water, a flat ring and droplets. */
+  splash(x: number, y: number, z: number, radius: number, power: number, camPos: THREE.Vector3): void {
+    const dist = camPos.distanceTo(tmpDirV.set(x, y, z));
+    const near = Math.max(0.25, Math.min(1, (dist - 1.5) / 6));
+    this.shockwave(x, y + 0.1, z, radius * (0.9 + power * 0.3), 0.45, 0x3ab8ff, true);
+    this.shockwave(x, y, z, radius * 0.7, 0.3, 0xffffff, false, camPos);
+    this.flash(x, y, z, 2 + power * 2, 0x9fe0ff, 0.12);
+    const n = Math.round((28 + power * 20) * near);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 3 + Math.random() * (5 + radius);
+      this.confetti.spawn(
+        { x, y: y + 0.2, z, vx: Math.cos(a) * sp, vy: 4 + Math.random() * 7, vz: Math.sin(a) * sp, size: 0.7 + Math.random() * 0.6, grow: 0, max: 0.8 + Math.random() * 0.5, drag: 1.2, gravity: 16, spin: 8 },
+        i % 3 === 0 ? 0xffffff : i % 3 === 1 ? 0x3ab8ff : 0x9fe0ff,
+      );
+    }
+    for (let i = 0; i < Math.round(10 * near); i++) {
+      const a = Math.random() * Math.PI * 2;
+      this.puffs.spawn({ x, y: y + 0.3, z, vx: Math.cos(a) * 5, vy: 1 + Math.random() * 2, vz: Math.sin(a) * 5, size: 0.35, grow: 1.5, max: 0.6, drag: 3 }, 0xcfeeff);
+    }
+  }
+
+  /** A Pop Gun cork bouncing off something. */
+  corkPop(x: number, y: number, z: number, hit = false): void {
+    this.flash(x, y, z, hit ? 0.9 : 0.5, hit ? 0xffffff : 0xfff1d6, 0.05);
+    for (let i = 0; i < (hit ? 4 : 2); i++) {
+      this.puffs.spawn({ x, y, z, vx: (Math.random() - 0.5) * 4, vy: Math.random() * 3, vz: (Math.random() - 0.5) * 4, size: 0.1, grow: 1, max: 0.3, drag: 4 }, 0xfff1d6);
+    }
+  }
+
+  /**
+   * Shows where a lobbed shot will go: `pts` holds 3 numbers per point along the arc, `land` the
+   * landing spot (or null). Pass null to hide it.
+   */
+  setAimArc(pts: number[] | null, land: THREE.Vector3 | null, radius = 1): void {
+    if (!pts) {
+      this.arcDots.count = 0;
+      this.arcRing.visible = false;
+      return;
+    }
+    let n = 0;
+    for (let i = 0; i < pts.length && n < 40; i += 3) {
+      this.arcM.makeTranslation(pts[i], pts[i + 1], pts[i + 2]);
+      this.arcDots.setMatrixAt(n++, this.arcM);
+    }
+    this.arcDots.count = n;
+    this.arcDots.instanceMatrix.needsUpdate = true;
+    this.arcRing.visible = !!land;
+    if (land) {
+      this.arcRing.position.set(land.x, land.y + 0.06, land.z);
+      const s = radius * (0.95 + Math.sin(this.time * 6) * 0.05);
+      this.arcRing.scale.set(s, s, s);
+    }
   }
 
   /** Grapple line between two moving points; each getter returns null once its end is gone. */
@@ -787,6 +952,19 @@ export class Effects {
       r.mesh.position.copy(a);
       r.mesh.lookAt(b);
       r.mesh.scale.set(1, 1, Math.max(0.01, len));
+    }
+    for (const b of this.bubbles) {
+      if (!b.mesh.visible) continue;
+      b.t += dt;
+      const t = Math.min(1, b.t / b.dur);
+      b.mesh.position.set(b.fx + (b.tx - b.fx) * t, b.fy + (b.ty - b.fy) * t + Math.sin(t * Math.PI) * 0.15, b.fz + (b.tz - b.fz) * t);
+      b.mesh.scale.setScalar(b.size * Math.min(1, 0.3 + t * 3));
+      if (b.t >= b.dur) {
+        b.mesh.visible = false;
+        for (let i = 0; i < 3; i++) {
+          this.puffs.spawn({ x: b.tx, y: b.ty, z: b.tz, vx: (Math.random() - 0.5) * 3, vy: (Math.random() - 0.5) * 3, vz: (Math.random() - 0.5) * 3, size: 0.08, grow: 1.5, max: 0.25, drag: 5 }, 0xe6d4ff);
+        }
+      }
     }
     this.airMat.uniforms.time.value = this.time;
     this.puffs.update(dt, this.camPos);
