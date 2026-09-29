@@ -31,7 +31,7 @@ export const BODY_SHAPES: Record<string, BodyShape> = {
   bighead: { radius: 0.94, length: 0.95, head: 1.38, arm: 1 },
   bor: { radius: 1.24, length: 0.86, head: 1, arm: 2 },
   abag: { radius: 0.96, length: 1.03, head: 1, arm: 1 },
-  sol: { radius: 1.02, length: 1, head: 1, arm: 1.05 },
+  sol: { radius: 1.22, length: 0.97, head: 1, arm: 1.15 },
   kesty: { radius: 1.08, length: 1, head: 1.02, arm: 1.12 },
 };
 

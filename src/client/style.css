@@ -5946,3 +5946,57 @@ body.mouse-play .touch-controls {
     padding: 10px 2px;
   }
 }
+
+/* Menu: the Bots switch for quick play (off: only real players). */
+.bots-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0 8px;
+}
+.bots-row .label {
+  margin: 0;
+}
+.bots-row .bots-state {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.bots-switch {
+  position: relative;
+  flex: none;
+  width: 50px;
+  height: 28px;
+  padding: 0;
+  border: 3px solid var(--ink);
+  border-radius: var(--r-pill);
+  background: #dcd8ee;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.bots-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: white;
+  border: 2px solid var(--ink);
+  transition: transform 0.15s var(--ease-pop);
+}
+.bots-switch.on {
+  background: var(--green);
+}
+.bots-switch.on::after {
+  transform: translateX(22px);
+}
+.bots-switch:focus-visible {
+  box-shadow: var(--focus);
+}
+@media (max-height: 500px) and (min-width: 600px) {
+  .bots-row {
+    margin: 0;
+  }
+}

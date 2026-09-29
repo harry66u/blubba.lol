@@ -546,7 +546,7 @@ export const BALANCE = {
     /** Big Blow: the next trigger pull fires one giant air blast at full power, with any weapon. */
     bigBlow: { projSpeed: 58, radius: 1.35, lifetime: 0.95, blastRadius: 5.4, knockback: 1.9, inflation: 0.24, fireCooldown: 0.5 },
     /** Juice: jacked for a while. Heavier (knockback divides by mass), faster, harder-hitting shots and throws. */
-    juice: { duration: 8, massMult: 2, powerMult: 1.3, speedMult: 1.15 },
+    juice: { duration: 14, massMult: 2, powerMult: 1.3, speedMult: 1.15 },
     /**
      * The Chase: lock on to the nearest enemy (in front if anyone is) and hunt them. Faster, dashes
      * recharge instantly, shots curve toward the target and grabbing them throws extra hard.

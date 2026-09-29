@@ -25,8 +25,8 @@ export interface MenuCallbacks {
   /** The map picked for quick play (null: any map). */
   onMapChange: (map: string | null) => void;
   onCreate: (name: string) => void;
-  /** An open room: public, no bots, no code needed. */
-  onOpen: (name: string, mode: ModeId) => void;
+  /** The Bots switch for quick play (off: only real players). */
+  onBotsChange: (on: boolean) => void;
   onJoinCode: (name: string, code: string) => void;
   onSettings: () => void;
   onHowTo: () => void;
@@ -211,6 +211,7 @@ export function buildMainMenu(
   side: HTMLElement | null = null,
   initialMap: string | null = null,
   active: number | null = null,
+  botsOn = false,
 ): HTMLElement {
   const err = el('div', { class: 'error-text' });
   const nameInput = nameField(accountName ?? name, cb.onNameChange, err);
@@ -248,6 +249,26 @@ export function buildMainMenu(
       },
     },
   });
+  // Quick play is real players only, unless you switch bots on.
+  const botsLabel = el('span', { class: 'bots-state' });
+  const botsBtn = el('button', {
+    class: 'bots-switch',
+    attrs: { role: 'switch', 'aria-label': 'Bots', title: 'Off: play only with real people who are online. On: bots fill the empty spots.' },
+    on: {
+      click: () => {
+        botsOn = !botsOn;
+        cb.onBotsChange(botsOn);
+        drawBots();
+      },
+    },
+  });
+  const drawBots = () => {
+    botsBtn.setAttribute('aria-checked', String(botsOn));
+    botsBtn.classList.toggle('on', botsOn);
+    botsLabel.textContent = botsOn ? 'Bots fill the empty spots' : 'Only real players';
+  };
+  drawBots();
+  const botsRow = el('div', { class: 'bots-row' }, el('span', { class: 'label', text: 'Bots' }), botsBtn, botsLabel);
   const info = (m: PlayMode) => (m === 'ranked' ? { name: 'Ranked', blurb: 'Rated 1v1 against someone near your skill. Needs a free account.' } : MODE_INFO[m]);
   const pick = (m: PlayMode) => {
     mode = m;
@@ -257,6 +278,8 @@ export function buildMainMenu(
     }
     blurb.textContent = info(m).blurb;
     maps.setMode(m);
+    // Ranked never has bots.
+    botsRow.classList.toggle('hidden', m === 'ranked');
   };
   for (const m of [...MODE_IDS, 'ranked'] as PlayMode[]) {
     const b = el(
@@ -321,17 +344,6 @@ export function buildMainMenu(
       },
     },
   });
-  const open = el('button', {
-    class: 'btn green',
-    text: 'OPEN ROOM',
-    attrs: { title: 'A public room with no bots: anyone can hop in without a code. Uses the mode and map picked above.' },
-    on: {
-      click: () => {
-        const n = accountName ?? validName(nameInput, err);
-        if (n) cb.onOpen(n, mode === 'ranked' ? 'knockout' : mode);
-      },
-    },
-  });
   const card = el(
     'div',
     { class: 'panel menu-card interactive' },
@@ -340,8 +352,9 @@ export function buildMainMenu(
     picker,
     blurb,
     maps.el,
+    botsRow,
     play,
-    el('div', { class: 'row split three' }, open, create, challenge),
+    el('div', { class: 'row split' }, create, challenge),
     el('div', { class: 'row code-row' }, el('div', { class: 'grow code-label', text: 'Got a code?' }), codeInput, joinBtn),
     err,
   );
@@ -537,7 +550,7 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
   } else {
     panel.append(
       el('div', { class: 'room-banner', text: `Public match · ${MODE_INFO[room?.settings.mode ?? 'knockout'].name} · ${MAPS[room?.mapId ?? 'dealership']?.name ?? ''}` }),
-      el('div', { class: 'small-note', style: 'text-align:center', text: 'Bots fill public matches. Want no bots? Pick OPEN ROOM on the menu (anyone can join), or make a PRIVATE ROOM and switch them off.' }),
+      el('div', { class: 'small-note', style: 'text-align:center', text: 'Bots only join public matches if you switch Bots on in the menu. Private rooms: the host decides.' }),
     );
   }
   panel.append(

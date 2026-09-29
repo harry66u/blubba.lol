@@ -42,7 +42,7 @@ const SPECS: Record<HumanKey, Spec> = {
   bor: { scale: 1.85, legLen: 0.74, legR: 0.1, torsoH: 0.64, waistR: 0.17, chestR: 0.29, armR: 0.085, upper: 0.29, fore: 0.26, headR: 0.15, skin: 0xd49b82, hair: 0x3b2618 },
   // Tall, lean runner.
   abag: { scale: 2.05, legLen: 0.96, legR: 0.075, torsoH: 0.62, waistR: 0.14, chestR: 0.19, armR: 0.052, upper: 0.32, fore: 0.29, headR: 0.15, skin: 0xbc876c, hair: 0x2a1c14 },
-  sol: { scale: 1.95, legLen: 0.9, legR: 0.08, torsoH: 0.62, waistR: 0.16, chestR: 0.21, armR: 0.058, upper: 0.31, fore: 0.28, headR: 0.155, skin: 0xecba9d, hair: 0x5a3a22 },
+  sol: { scale: 1.95, legLen: 0.9, legR: 0.1, torsoH: 0.62, waistR: 0.23, chestR: 0.27, armR: 0.072, upper: 0.31, fore: 0.28, headR: 0.155, skin: 0xecba9d, hair: 0x5a3a22 },
   // A robot with a face.
   kesty: { scale: 2.0, legLen: 0.92, legR: 0.085, torsoH: 0.64, waistR: 0.16, chestR: 0.23, armR: 0.065, upper: 0.31, fore: 0.28, headR: 0.155, skin: 0xc2886f, hair: 0x4a2e1c },
 };

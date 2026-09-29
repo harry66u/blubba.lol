@@ -20,7 +20,7 @@ export const DEFAULT_ULT: UltId = 'juice';
  * outfit and props (render/characters.ts), and their own face if they lent it (Store.claimCharacter).
  */
 export const ULT_CHARACTER: Partial<Record<UltId, { body: string; name: string; seconds: number; color: string }>> = {
-  juice: { body: 'bor', name: 'BOR', seconds: 8, color: '#ff8a1f' },
+  juice: { body: 'bor', name: 'BOR', seconds: 14, color: '#ff8a1f' },
   chase: { body: 'abag', name: 'ABAG', seconds: 7, color: '#ff5fd2' },
   cropDuster: { body: 'sol', name: 'SOL', seconds: 7, color: '#8ee000' },
   robot: { body: 'kesty', name: 'KESTY', seconds: 7, color: '#ff3b5c' },
@@ -57,7 +57,7 @@ export const ULT_INFO: Record<UltId, UltInfo> = {
     name: 'BOR',
     icon: '💉',
     by: 'Juice',
-    blurb: 'Jab the giant syringe (it is full of air) and get JACKED for 8 s: heavier, faster, and your shots hit 30% harder.',
+    blurb: 'Jab the giant syringe (it is full of air) and get JACKED for 14 s: heavier, faster, and your shots hit 30% harder.',
     tagline: 'JUICED: heavier, faster, harder hits',
     color: '#ff8a1f',
   },

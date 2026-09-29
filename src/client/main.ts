@@ -170,8 +170,28 @@ function rememberMap(m: string | null): void {
 }
 
 /** Quick play for a mode on the picked map. */
+/** Quick play: the picked mode and map, with bots only if you switched them on. */
 function quickJoin(mode: ModeId): Extract<JoinRequest, { kind: 'quick' }> {
-  return lastMap ? { kind: 'quick', mode, map: lastMap } : { kind: 'quick', mode };
+  return { kind: 'quick', mode, ...(lastMap ? { map: lastMap } : {}), open: !botsOn };
+}
+
+const BOTS_KEY = 'bubba.bots.v1';
+/** The menu's Bots switch (off by default: only real players). */
+let botsOn = (() => {
+  try {
+    return window.localStorage.getItem(BOTS_KEY) === '1';
+  } catch {
+    return false;
+  }
+})();
+
+function rememberBots(on: boolean): void {
+  botsOn = on;
+  try {
+    window.localStorage.setItem(BOTS_KEY, on ? '1' : '0');
+  } catch {
+    // Not remembered; fine.
+  }
 }
 
 function setPath(path: string): void {
@@ -206,12 +226,12 @@ function renderMenu(notice?: MenuNotice | string): void {
       onModeChange: rememberMode,
       onMapChange: rememberMap,
       onCreate: (name) => startJoin(name, { kind: 'create' }),
-      onOpen: (name, mode) => startJoin(name, { ...quickJoin(mode), open: true }),
+      onBotsChange: rememberBots,
       onJoinCode: (name, code) => startJoin(name, { kind: 'code', code }),
       onSettings: () => setOverlay('settings'),
       onHowTo: () => setOverlay('howto'),
       onNameChange: rememberName,
-    }, notice, lastMode, account.account?.name ?? null, buildDailyCard(account), lastMap, account.active),
+    }, notice, lastMode, account.account?.name ?? null, buildDailyCard(account), lastMap, account.active, botsOn),
     buildAccountChip(account, () => openAccount('signup'), () => setOverlay('profile')),
   );
 }
