@@ -3,6 +3,8 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { DecorDef, MapDef, SolidDef, SolidKind } from '../../shared/maps/types';
 import type { World } from '../../shared/world';
+import type { Quality } from './renderer';
+import { SkyLife } from './skyLife';
 import { TubeMan, defaultPose, type TubeManPose } from './tubeMan';
 
 const KIND_COLORS: Record<SolidKind, number> = {
@@ -200,11 +202,14 @@ export class MapView {
   private readonly giants: { man: TubeMan; pose: TubeManPose; team: 0 | 1; fill: number; shown: number }[] = [];
   private teamColors: number[] = [0xff3b5c, 0x2ec5ff];
   private fanBlades: THREE.Object3D | null = null;
+  private readonly sky: SkyLife;
   private time = 0;
 
   constructor(
     readonly map: MapDef,
     readonly world: World,
+    /** Current graphics quality (Low shows a lighter sky). */
+    private readonly quality: () => Quality = () => 'medium',
   ) {
     this.buildSolids();
     this.buildDecor();
@@ -212,6 +217,9 @@ export class MapView {
     this.buildModeProps();
     this.buildClouds();
     this.root.add(this.clouds);
+    // Balloons, a blimp, birds and floating islands far around the map.
+    this.sky = new SkyLife(map);
+    this.root.add(this.sky.root);
   }
 
   private buildSolids(): void {
@@ -866,6 +874,7 @@ export class MapView {
       for (const c of w.cars) c.rotation.z = -w.wheel.rotation.z;
     }
     this.clouds.rotation.y += dt * 0.004;
+    this.sky.update(dt, this.quality() === 'low');
   }
 
   /** Tints the decks icy (0..1) during the ice rink event. */
@@ -923,6 +932,7 @@ export class MapView {
     });
     for (const t of this.tubeMen) t.man.dispose();
     for (const g of this.giants) g.man.dispose();
+    this.sky.dispose();
   }
 }
 
