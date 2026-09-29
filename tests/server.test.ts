@@ -5,6 +5,8 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { emptyInput } from '../src/shared/input';
 import { MSG_SNAPSHOT, PROTOCOL_VERSION, type ServerMessage, type Snapshot, decodeSnapshot, encodeInputs } from '../src/shared/protocol';
 import { Lobby } from '../src/server/lobby';
+import { Room } from '../src/server/room';
+import { KNOCKOUT_MAPS } from '../src/shared/maps';
 
 let port = 0;
 const lobby = new Lobby();
@@ -187,6 +189,28 @@ describe('server', () => {
     b.ws.close();
   });
 
+  it('quick play on a picked map shares a room on that map, or opens one', async () => {
+    const join = async (guestId: string, map?: string, mode = 'knockout') => {
+      const c = new TestClient();
+      await c.open();
+      c.send({ type: 'hello', v: PROTOCOL_VERSION, name: 'Picker', guestId, join: { kind: 'quick', mode, map } });
+      return { c, w: await c.waitFor('welcome') };
+    };
+    const a = await join('m1', 'candy');
+    expect(a.w.room.mapId).toBe('candy');
+    const b = await join('m2', 'candy');
+    expect(b.w.room.code).toBe(a.w.room.code);
+    const c = await join('m3', 'moonBase');
+    expect(c.w.room.mapId).toBe('moonBase');
+    expect(c.w.room.code).not.toBe(a.w.room.code);
+    // Nonsense picks mean any map; modes with their own arena ignore the pick.
+    const d = await join('m4', 'ballArena');
+    expect(KNOCKOUT_MAPS).toContain(d.w.room.mapId);
+    const e = await join('m5', 'candy', 'ball');
+    expect(e.w.room.mapId).toBe('ballArena');
+    for (const x of [a, b, c, d, e]) x.c.ws.close();
+  });
+
   it('challenge links make a private 1v1 that the first visitor joins', async () => {
     const a = new TestClient();
     await a.open();
@@ -212,5 +236,30 @@ describe('server', () => {
     expect((await c.waitFor('error')).code).toBe('full');
     a.ws.close();
     b.ws.close();
+  });
+});
+
+describe('map rotation', () => {
+  const fakeWs = () => ({ readyState: 1, OPEN: 1, bufferedAmount: 0, send() {}, close() {} }) as unknown as WebSocket;
+  const endResults = (room: Room) => {
+    room.sim.phase = 'results';
+    room.sim.phaseEndsAt = room.sim.time;
+    room.tick();
+  };
+
+  it('public rooms rotate through every knockout map, but stay on a map someone picked while they are in', () => {
+    const room = new Room('ROTAT', false, { mode: 'knockout', mapId: 'candy' });
+    const picker = room.join(fakeWs(), 'Picker', 'p1', undefined, undefined, 'candy')!;
+    room.join(fakeWs(), 'Anyone', 'p2');
+    endResults(room);
+    expect(room.settings.mapId).toBe('candy');
+    room.leave(picker.playerId);
+    const seen = [room.settings.mapId];
+    for (let i = 0; i < KNOCKOUT_MAPS.length; i++) {
+      endResults(room);
+      seen.push(room.settings.mapId);
+    }
+    expect(seen[1]).toBe(KNOCKOUT_MAPS[(KNOCKOUT_MAPS.indexOf('candy') + 1) % KNOCKOUT_MAPS.length]);
+    expect(new Set(seen)).toEqual(new Set(KNOCKOUT_MAPS));
   });
 });

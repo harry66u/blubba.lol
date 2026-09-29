@@ -18,7 +18,8 @@ export const MSG_SNAPSHOT = 2;
 // --- JSON messages ------------------------------------------------------------------------
 
 export type JoinRequest =
-  | { kind: 'quick'; mode?: ModeId }
+  /** `map`: a knockout map to play on (a public room already on it, or a new one); none means any map. */
+  | { kind: 'quick'; mode?: ModeId; map?: string }
   /** Private 1v1 room whose code is shared as a challenge link. */
   | { kind: 'challenge' }
   /** Ranked 1v1 matchmaking (needs an account). */

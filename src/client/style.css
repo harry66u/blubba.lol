@@ -5733,3 +5733,122 @@ body.touch .ult-splash .tag {
   border-radius: var(--r-sm);
   padding: 4px 8px;
 }
+/* --- Map picker (main menu) -------------------------------------------------------------------
+   A row of small tiles under the mode picker: "any map" and each knockout map, painted in that
+   map's sky colors with its icon. The picked map's name shows above the row. Modes with their
+   own arena (and ranked) grey the row out. */
+.map-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.map-picker .map-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.map-picker .map-head .label {
+  margin: 0;
+}
+.map-picker .map-name {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.map-tiles {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+.map-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 5 / 4;
+  min-height: 34px;
+  padding: 0;
+  border-radius: 12px;
+  border: 3px solid var(--line);
+  background: linear-gradient(180deg, var(--sky-top, var(--wash)) 0%, var(--sky-mid, var(--wash)) 100%);
+  box-shadow: 0 3px 0 var(--line);
+  cursor: pointer;
+  transition: transform 0.14s var(--ease-pop), border-color 0.12s, box-shadow 0.12s, opacity 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.map-tile .ico {
+  font-size: 20px;
+  line-height: 1;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.25));
+}
+.map-tile:hover:not(:disabled) {
+  border-color: var(--ink);
+  transform: translateY(-1px);
+}
+.map-tile:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 var(--line);
+}
+.map-tile.on {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--yellow), var(--lip-sm);
+  transform: translateY(-2px);
+}
+.map-tile.on .ico {
+  animation: pop-in 0.4s var(--ease-pop);
+}
+.map-picker.fixed .map-tile {
+  opacity: 0.4;
+  cursor: default;
+}
+@media (max-width: 560px) {
+  .map-tiles {
+    gap: 4px;
+  }
+  .map-tile {
+    border-radius: 10px;
+    min-height: 30px;
+  }
+  .map-tile .ico {
+    font-size: 17px;
+  }
+}
+/* Phones held sideways: one compact line (label and tiles; the tiles' titles name the maps) at the
+   bottom of the left column, under the mode blurb, so everything stays above the fold. */
+@media (max-height: 500px) and (min-width: 600px) {
+  .main-menu .menu-card > .map-picker {
+    grid-column: 1;
+    grid-row: 4;
+    align-self: end;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+  .main-menu .map-picker .map-name {
+    display: none;
+  }
+  .main-menu .map-picker .map-tiles {
+    flex: 1;
+    gap: 4px;
+  }
+  /* Short enough to share the blurb's row without covering it. */
+  .main-menu .map-tile {
+    aspect-ratio: auto;
+    min-height: 22px;
+    border-width: 2px;
+    border-radius: 8px;
+    box-shadow: none;
+  }
+  .main-menu .map-tile.on {
+    box-shadow: 0 0 0 2px var(--yellow);
+    transform: none;
+  }
+  .main-menu .map-tile .ico {
+    font-size: 13px;
+  }
+}
+/* --- End map picker --------------------------------------------------------------------------- */

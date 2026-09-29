@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import type { DecorDef, MapDef, SolidDef, SolidKind } from '../../shared/maps/types';
+import type { DecorDef, MapDef, SolidDef, SolidKind, SurfaceLook } from '../../shared/maps/types';
 import type { World } from '../../shared/world';
+import { PropKit, buildProp } from './props';
 import type { Quality } from './renderer';
 import { SkyLife } from './skyLife';
 import { TubeMan, defaultPose, type TubeManPose } from './tubeMan';
@@ -18,6 +19,8 @@ const KIND_COLORS: Record<SolidKind, number> = {
   bouncy: 0xff9fd0,
   goal: 0xf4f7ff,
   pillar: 0xc9c3b8,
+  candy: 0xff6f9c,
+  metal: 0xb8c0d0,
   hidden: 0xffffff,
 };
 
@@ -26,10 +29,43 @@ function hash(n: number): number {
   return s - Math.floor(s);
 }
 
-type DeckStyle = 'parking' | 'field' | 'quilt' | 'plain' | 'planks';
+function uvScale(geo: THREE.BufferGeometry, su: number, sv: number): THREE.BufferGeometry {
+  const uv = geo.attributes.uv as THREE.BufferAttribute;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * su, uv.getY(i) * sv);
+  return geo;
+}
 
-/** Canvas texture for a deck top: painted parking lines (or a pitch, quilting, or planks) and hazard edges. */
-function deckTexture(w: number, d: number, color: number, style: DeckStyle): THREE.CanvasTexture {
+type DeckStyle = SurfaceLook | 'field' | 'quilt';
+
+/** Edge stripes per surface (easy-to-read drops), or none. Everything else gets hazard stripes. */
+const EDGES: Partial<Record<DeckStyle, [string, string] | null>> = {
+  quilt: null,
+  wafer: null,
+  candyStripe: null,
+  frosting: ['#ffffff', '#ff4d7e'],
+  cookie: ['#fff1dc', '#7a4524'],
+  chocolate: ['#ffe9c7', '#3d1f0f'],
+  skate: ['#ff4fa3', '#2b2d42'],
+};
+
+/** Irregular blob (chocolate chips) centered at (x, y) in pixels. */
+function blob(g: CanvasRenderingContext2D, x: number, y: number, r: number, seed: number): void {
+  g.beginPath();
+  for (let k = 0; k < 7; k++) {
+    const a = (k / 7) * Math.PI * 2;
+    const rr = r * (0.7 + 0.5 * hash(seed + k * 1.3));
+    if (k === 0) g.moveTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    else g.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+  }
+  g.closePath();
+  g.fill();
+}
+
+/**
+ * Canvas texture for a deck top: painted parking lines (or a pitch, quilting, planks, frosting,
+ * cookie, concrete, moon dust...) and, with `edge`, stripes around the edge.
+ */
+function deckTexture(w: number, d: number, color: number, style: DeckStyle, edge = true): THREE.CanvasTexture {
   const ppm = 24; // pixels per meter
   const cw = Math.min(2048, Math.round(w * ppm));
   const ch = Math.min(2048, Math.round(d * ppm));
@@ -100,6 +136,178 @@ function deckTexture(w: number, d: number, color: number, style: DeckStyle): THR
       g.fillRect(0, z * sz, cw, 0.08 * sz);
       for (let x = hash(row * 1.9 + d) * 5; x < w; x += 3 + hash(row * 7.1 + x) * 4) g.fillRect(x * sx, z * sz, 0.08 * sx, board * sz);
     }
+  } else if (style === 'frosting') {
+    // Swooshes of piped frosting and a scatter of sprinkles.
+    g.strokeStyle = 'rgba(255,255,255,0.2)';
+    g.lineWidth = 0.3 * sx;
+    for (let i = 0; i < (w * d) / 5; i++) {
+      g.beginPath();
+      g.arc(hash(i * 2.3) * cw, hash(i * 5.9) * ch, (0.5 + hash(i * 1.1) * 1.2) * sx, hash(i) * 6, hash(i) * 6 + 2.4);
+      g.stroke();
+    }
+    const colors = ['#ff3b5c', '#ffd60a', '#2ec5ff', '#8ee000', '#ffffff', '#b06bff'];
+    for (let i = 0; i < w * d * 2.5; i++) {
+      g.save();
+      g.translate(hash(i * 3.7 + 1) * cw, hash(i * 9.1 + 2) * ch);
+      g.rotate(hash(i * 4.3) * Math.PI);
+      g.fillStyle = colors[i % colors.length];
+      g.fillRect(-0.17 * sx, -0.05 * sx, 0.34 * sx, 0.1 * sx);
+      g.restore();
+    }
+  } else if (style === 'cookie') {
+    // Baked patches, cracks and chocolate chips.
+    for (let i = 0; i < (w * d) / 3; i++) {
+      g.fillStyle = hash(i * 1.9) > 0.5 ? 'rgba(120,60,20,0.08)' : 'rgba(255,230,180,0.1)';
+      g.beginPath();
+      g.arc(hash(i * 3.3) * cw, hash(i * 7.1) * ch, (0.4 + hash(i * 2.1) * 1.2) * sx, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.strokeStyle = 'rgba(110,55,20,0.35)';
+    g.lineWidth = 0.08 * sx;
+    for (let i = 0; i < (w * d) / 40; i++) {
+      let x = hash(i * 8.3) * cw;
+      let y = hash(i * 6.2) * ch;
+      g.beginPath();
+      g.moveTo(x, y);
+      for (let k = 0; k < 4; k++) {
+        x += (hash(i * 3 + k) - 0.5) * 1.6 * sx;
+        y += (hash(i * 5 + k) - 0.5) * 1.6 * sx;
+        g.lineTo(x, y);
+      }
+      g.stroke();
+    }
+    for (let i = 0; i < (w * d) / 4; i++) {
+      g.fillStyle = hash(i * 2.9) > 0.3 ? '#4a2412' : '#6b3a1f';
+      blob(g, hash(i * 4.7 + 3) * cw, hash(i * 2.1 + 5) * ch, (0.22 + hash(i * 3.9) * 0.2) * sx, i * 11.3);
+    }
+  } else if (style === 'wafer') {
+    // Diagonal crosshatch.
+    g.lineWidth = 0.1 * sx;
+    for (const [dx, a] of [
+      [0, 'rgba(140,85,25,0.45)'],
+      [0.08, 'rgba(255,245,210,0.35)'],
+    ] as [number, string][]) {
+      g.strokeStyle = a;
+      for (let k = -d; k < w + d; k += 0.6) {
+        g.beginPath();
+        g.moveTo((k + dx) * sx, 0);
+        g.lineTo((k + dx + d) * sx, ch);
+        g.moveTo((k + dx) * sx, ch);
+        g.lineTo((k + dx + d) * sx, 0);
+        g.stroke();
+      }
+    }
+  } else if (style === 'chocolate') {
+    // Chocolate bar squares with a bevel: light top-left edges, dark bottom-right ones.
+    const cell = 1.5;
+    const b = 0.12;
+    for (let x = 0; x < w; x += cell) {
+      for (let z = 0; z < d; z += cell) {
+        g.fillStyle = 'rgba(255,220,190,0.14)';
+        g.fillRect(x * sx, z * sz, cell * sx, b * sz);
+        g.fillRect(x * sx, z * sz, b * sx, cell * sz);
+        g.fillStyle = 'rgba(0,0,0,0.3)';
+        g.fillRect(x * sx, (z + cell - b) * sz, cell * sx, b * sz);
+        g.fillRect((x + cell - b) * sx, z * sz, b * sx, cell * sz);
+      }
+    }
+  } else if (style === 'candyStripe') {
+    g.fillStyle = '#ff4d6d';
+    for (let k = -d; k < w + d; k += 0.9) {
+      g.beginPath();
+      g.moveTo(k * sx, 0);
+      g.lineTo((k + 0.45) * sx, 0);
+      g.lineTo((k + 0.45 + d) * sx, ch);
+      g.lineTo((k + d) * sx, ch);
+      g.closePath();
+      g.fill();
+    }
+  } else if (style === 'skate') {
+    // Big painted shapes, skid marks and expansion joints.
+    const paints = ['rgba(46,197,255,0.28)', 'rgba(255,79,163,0.26)', 'rgba(255,214,10,0.3)', 'rgba(142,224,0,0.26)'];
+    for (let i = 0; i < Math.max(3, (w * d) / 90); i++) {
+      g.fillStyle = paints[i % paints.length];
+      const x = hash(i * 7.7 + w) * cw;
+      const y = hash(i * 3.1 + d) * ch;
+      const r = (1.5 + hash(i * 5.5) * 2.5) * sx;
+      g.beginPath();
+      if (i % 3 === 0) {
+        for (let k = 0; k < 10; k++) {
+          const a = (k / 10) * Math.PI * 2 - Math.PI / 2;
+          const rr = k % 2 ? r * 0.45 : r;
+          g.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+        }
+      } else g.arc(x, y, r, 0, Math.PI * 2);
+      g.closePath();
+      g.fill();
+    }
+    g.strokeStyle = 'rgba(30,30,40,0.12)';
+    g.lineWidth = 0.12 * sx;
+    for (let i = 0; i < (w * d) / 60; i++) {
+      g.beginPath();
+      g.arc(hash(i * 2.2) * cw, hash(i * 9.9) * ch, (2 + hash(i) * 4) * sx, hash(i * 3) * 6, hash(i * 3) * 6 + 0.9);
+      g.stroke();
+    }
+    g.fillStyle = 'rgba(40,45,60,0.35)';
+    for (let x = 4; x < w; x += 4) g.fillRect(x * sx, 0, 0.06 * sx, ch);
+    for (let z = 4; z < d; z += 4) g.fillRect(0, z * sz, cw, 0.06 * sz);
+  } else if (style === 'moon') {
+    // Moon dust: pebbles, craters (lit from the top left) and a trail of boot prints.
+    for (let i = 0; i < (w * d) / 1.2; i++) {
+      g.fillStyle = hash(i * 1.3) > 0.5 ? 'rgba(255,255,255,0.08)' : 'rgba(30,30,50,0.1)';
+      g.beginPath();
+      g.arc(hash(i * 6.1) * cw, hash(i * 2.7) * ch, (0.05 + hash(i * 8.3) * 0.2) * sx, 0, Math.PI * 2);
+      g.fill();
+    }
+    for (let i = 0; i < Math.max(4, (w * d) / 45); i++) {
+      const x = hash(i * 3.9 + 1) * cw;
+      const y = hash(i * 5.3 + 2) * ch;
+      const r = (0.4 + hash(i * 2.9) * 1.4) * sx;
+      g.fillStyle = 'rgba(60,60,85,0.16)';
+      g.beginPath();
+      g.arc(x, y, r, 0, Math.PI * 2);
+      g.fill();
+      g.lineWidth = r * 0.18;
+      g.strokeStyle = 'rgba(255,255,255,0.3)';
+      g.beginPath();
+      g.arc(x, y, r, Math.PI * 0.1, Math.PI * 1.1);
+      g.stroke();
+      g.strokeStyle = 'rgba(40,40,60,0.25)';
+      g.beginPath();
+      g.arc(x, y, r, Math.PI * 1.1, Math.PI * 2.1);
+      g.stroke();
+    }
+    g.fillStyle = 'rgba(50,50,70,0.22)';
+    for (let i = 0; i < 28; i++) {
+      const t = i / 28;
+      const x = (0.15 + 0.7 * t) * cw;
+      const y = (0.5 + 0.3 * Math.sin(t * 5)) * ch + (i % 2 ? 0.25 : -0.25) * sz;
+      g.beginPath();
+      g.ellipse(x, y, 0.16 * sx, 0.09 * sz, 0, 0, Math.PI * 2);
+      g.fill();
+    }
+  } else if (style === 'metal') {
+    // Deck plates with seams, rivets and a faint tread pattern.
+    g.fillStyle = 'rgba(255,255,255,0.05)';
+    for (let x = 0; x < w; x += 0.5) for (let z = 0; z < d; z += 0.5) g.fillRect((x + ((z * 2) % 2) * 0.25) * sx, z * sz, 0.18 * sx, 0.05 * sz);
+    g.fillStyle = 'rgba(30,35,50,0.4)';
+    for (let x = 2; x < w; x += 2) g.fillRect(x * sx, 0, 0.05 * sx, ch);
+    for (let z = 2; z < d; z += 2) g.fillRect(0, z * sz, cw, 0.05 * sz);
+    g.fillStyle = 'rgba(255,255,255,0.35)';
+    for (let x = 0; x < w; x += 2) {
+      for (let z = 0; z < d; z += 2) {
+        for (const [ox, oz] of [
+          [0.2, 0.2],
+          [1.8, 0.2],
+          [0.2, 1.8],
+          [1.8, 1.8],
+        ]) {
+          g.beginPath();
+          g.arc((x + ox) * sx, (z + oz) * sz, 0.05 * sx, 0, Math.PI * 2);
+          g.fill();
+        }
+      }
+    }
   } else if (style === 'parking') {
     g.strokeStyle = 'rgba(255,255,255,0.85)';
     g.lineWidth = 0.14 * sx;
@@ -132,25 +340,27 @@ function deckTexture(w: number, d: number, color: number, style: DeckStyle): THR
       g.fill();
     }
   }
-  // Bright hazard stripes around the edge so drops are easy to read.
-  if (style === 'quilt') {
+  // Bright stripes around the edge so drops are easy to read.
+  const colors = style in EDGES ? EDGES[style] : ['#ffd23f', '#2b2d42'];
+  if (!edge || !colors) {
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
     return tex;
   }
-  const edge = 0.55;
+  const band = 0.55;
   const stripe = 1.0;
   for (const side of [0, 1, 2, 3]) {
     const horizontal = side < 2;
     const len = horizontal ? w : d;
     for (let s = 0; s < len; s += stripe) {
-      g.fillStyle = Math.floor(s / stripe) % 2 === 0 ? '#ffd23f' : '#2b2d42';
+      g.fillStyle = colors[Math.floor(s / stripe) % 2];
       if (horizontal) {
-        const y = side === 0 ? 0 : (d - edge) * sz;
-        g.fillRect(s * sx, y, stripe * sx + 1, edge * sz);
+        const y = side === 0 ? 0 : (d - band) * sz;
+        g.fillRect(s * sx, y, stripe * sx + 1, band * sz);
       } else {
-        const x = side === 2 ? 0 : (w - edge) * sx;
-        g.fillRect(x, s * sz, edge * sx, stripe * sz + 1);
+        const x = side === 2 ? 0 : (w - band) * sx;
+        g.fillRect(x, s * sz, band * sx, stripe * sz + 1);
       }
     }
   }
@@ -180,6 +390,28 @@ function textTexture(text: string, bg: string, fg: string, w = 512, h = 128): TH
   return tex;
 }
 
+/** Merges geometries (already placed) into one, normalizing their attributes so any mix can merge. */
+function mergeAll(geos: THREE.BufferGeometry[]): THREE.BufferGeometry | null {
+  const nonIndexed = geos.map((g) => (g.index ? g.toNonIndexed() : g));
+  for (const g of nonIndexed) {
+    if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+    if (!g.attributes.normal) g.computeVertexNormals();
+    for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(name)) g.deleteAttribute(name);
+    g.clearGroups();
+  }
+  return mergeGeometries(nonIndexed, false);
+}
+
+/** What hangs under the floating decks: the cone's color and the body between it and the top slab. */
+const UNDERSIDES = {
+  rock: { under: 0x9b8fb8, body: 0x8a7aa8, waffle: false },
+  waffle: { under: 0xffffff, body: 0xf3d39c, waffle: true },
+  moon: { under: 0x8c8ea3, body: 0x797b90, waffle: false },
+};
+
+/** Deck bodies that should look like what's on top (a cookie is cookie all the way through). */
+const BODY_FOR_LOOK: Partial<Record<SurfaceLook, number>> = { cookie: 0xc98a4f, chocolate: 0x5a2e17, metal: 0x6d7488 };
+
 interface MoverMesh {
   solidId: number;
   mesh: THREE.Object3D;
@@ -208,6 +440,9 @@ interface WarnView {
   lines: THREE.Mesh[];
 }
 
+/** Props that animate themselves or get updated every frame; every other prop is merged by material. */
+const LIVE_DECOR = new Set<DecorDef['type']>(['tubeMan', 'balloons', 'flag', 'ferrisWheel', 'net', 'space']);
+
 /** Builds and animates the visible map from a MapDef. */
 export class MapView {
   readonly root = new THREE.Group();
@@ -220,6 +455,10 @@ export class MapView {
   private readonly solidMeshes = new Map<number, THREE.Object3D>();
   private readonly deckTops: THREE.MeshStandardMaterial[] = [];
   private fan: THREE.Group | null = null;
+  /** Shared materials and animations of the props. */
+  private readonly kit = new PropKit();
+  /** Static props waiting to be merged, by the object they belong to and their material. */
+  private readonly batches = new Map<THREE.Object3D, Map<THREE.Material, THREE.BufferGeometry[]>>();
   private readonly pumpPads: { ring: THREE.Mesh; core: THREE.Mesh; team: 0 | 1; plunger: THREE.Object3D }[] = [];
   private readonly giants: { man: TubeMan; pose: TubeManPose; team: 0 | 1; fill: number; shown: number }[] = [];
   private teamColors: number[] = [0xff3b5c, 0x2ec5ff];
@@ -262,8 +501,8 @@ export class MapView {
       }
       e.geos.push(geo);
     };
-    const underMat = new THREE.MeshStandardMaterial({ color: 0x9b8fb8, roughness: 0.9, flatShading: true });
-    const dirtMat = new THREE.MeshStandardMaterial({ color: 0x8a7aa8, roughness: 0.95 });
+    const U = UNDERSIDES[this.map.underside ?? 'rock'];
+    const underMat = new THREE.MeshStandardMaterial({ color: U.under, roughness: 0.9, flatShading: !U.waffle, map: U.waffle ? this.kit.waffle() : null });
     const mats = new Map<string, THREE.Material>();
     const matFor = (kind: SolidKind, color = KIND_COLORS[kind]) => {
       const key = `${kind}|${color}`;
@@ -271,9 +510,11 @@ export class MapView {
       if (!m) {
         if (kind === 'glass') {
           m = new THREE.MeshPhysicalMaterial({ color, roughness: 0.05, transmission: 0, transparent: true, opacity: 0.55, metalness: 0.1 });
-        } else if (kind === 'bouncy') {
-          // Glossy vinyl.
-          m = new THREE.MeshStandardMaterial({ color, roughness: 0.28, metalness: 0.02 });
+        } else if (kind === 'bouncy' || kind === 'candy') {
+          // Glossy vinyl, or hard candy.
+          m = new THREE.MeshStandardMaterial({ color, roughness: kind === 'candy' ? 0.22 : 0.28, metalness: 0.02 });
+        } else if (kind === 'metal') {
+          m = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.55 });
         } else {
           m = new THREE.MeshStandardMaterial({ color, roughness: kind === 'crate' ? 0.8 : 0.7 });
         }
@@ -281,10 +522,16 @@ export class MapView {
       }
       return m;
     };
-    const style: DeckStyle = this.map.ball ? 'field' : this.map.pumps ? 'plain' : this.map.deck === 'planks' ? 'planks' : 'parking';
+    const bodyMat = (look: SurfaceLook) => {
+      const color = BODY_FOR_LOOK[look] ?? U.body;
+      return this.kit.mat(color, 0.95);
+    };
+    const style: DeckStyle = this.map.ball ? 'field' : this.map.pumps ? 'plain' : (this.map.deck ?? 'parking');
 
     this.map.solids.forEach((def, id) => {
-      if (def.kind === 'hidden') return;
+      // Collision-only pieces are drawn by props; the ones that sink or move still get an (empty)
+      // holder so their props can go along with them.
+      if (def.kind === 'hidden' && !def.mover && !((def.collapse ?? 0) > 0)) return;
       const w = def.max[0] - def.min[0];
       const h = def.max[1] - def.min[1];
       const d = def.max[2] - def.min[2];
@@ -313,9 +560,12 @@ export class MapView {
           top.receiveShadow = true;
           group.add(top);
         }
+      } else if (def.kind === 'hidden') {
+        // Nothing to draw.
       } else if (isDeck) {
         // Top slab with painted texture, then a chunky floating-rock underside.
-        const topMat = new THREE.MeshStandardMaterial({ map: deckTexture(w, d, color, def.kind === 'lot' ? style : 'plain'), roughness: 0.85 });
+        const look = def.look ?? (def.kind === 'lot' ? style : 'plain');
+        const topMat = new THREE.MeshStandardMaterial({ map: deckTexture(w, d, color, look), roughness: 0.85 });
         this.deckTops.push(topMat);
         const slab = new THREE.Mesh(new RoundedBoxGeometry(w, 0.6, d, 2, 0.12), matFor(def.kind, color));
         slab.position.set(cx, def.max[1] - 0.3, cz);
@@ -328,7 +578,7 @@ export class MapView {
         group.add(slab, top);
         const bodyH = h - 0.6;
         if (bodyH > 0.05) {
-          const body = new THREE.Mesh(new RoundedBoxGeometry(w * 0.98, bodyH, d * 0.98, 2, 0.2), dirtMat);
+          const body = new THREE.Mesh(new RoundedBoxGeometry(w * 0.98, bodyH, d * 0.98, 2, 0.2), bodyMat(look as SurfaceLook));
           body.position.set(cx, def.min[1] + bodyH / 2, cz);
           body.receiveShadow = true;
           group.add(body);
@@ -346,17 +596,60 @@ export class MapView {
           }
         }
         cone.computeVertexNormals();
+        if (U.waffle) uvScale(cone, Math.round((w + d) / 4), 4);
         const depth = Math.min(22, Math.max(5, Math.max(w, d) * 0.45));
         const under = new THREE.Mesh(cone, underMat);
         under.scale.set(w * 0.98, depth, d * 0.98);
         under.position.set(cx, def.min[1] - depth / 2 + 0.05, cz);
         group.add(under);
+      } else if (def.look === 'frosting') {
+        // A frosted cake layer: sponge, a frosting cap with sprinkles on top, and drips down the sides.
+        const cap = 0.3;
+        const sponge = new THREE.Mesh(new RoundedBoxGeometry(w, h - cap + 0.05, d, 2, radius), this.kit.mat(0xf2cf94, 0.8));
+        sponge.position.set(cx, def.min[1] + (h - cap + 0.05) / 2, cz);
+        const icing = matFor('building', color);
+        const lid = new THREE.Mesh(new RoundedBoxGeometry(w + 0.16, cap, d + 0.16, 2, 0.12), icing);
+        lid.position.set(cx, def.max[1] - cap / 2, cz);
+        const top = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ map: deckTexture(w, d, color, 'frosting', false), roughness: 0.6 }));
+        top.rotation.x = -Math.PI / 2;
+        top.position.set(cx, def.max[1] + 0.004, cz);
+        const drips: THREE.BufferGeometry[] = [];
+        let k = id * 7;
+        for (const [x0, z0, x1, z1] of [
+          [def.min[0], def.min[2] - 0.08, def.max[0], def.min[2] - 0.08],
+          [def.min[0], def.max[2] + 0.08, def.max[0], def.max[2] + 0.08],
+          [def.min[0] - 0.08, def.min[2], def.min[0] - 0.08, def.max[2]],
+          [def.max[0] + 0.08, def.min[2], def.max[0] + 0.08, def.max[2]],
+        ]) {
+          const len = Math.hypot(x1 - x0, z1 - z0);
+          for (let t = 0.3; t < len - 0.2; t += 0.55) {
+            const r = 0.1 + 0.07 * hash(k++);
+            const l = 0.1 + 0.45 * hash(k++);
+            const f = t / len;
+            drips.push(new THREE.CapsuleGeometry(r, l, 3, 8).translate(x0 + (x1 - x0) * f, def.max[1] - cap - l / 2, z0 + (z1 - z0) * f));
+          }
+        }
+        group.add(sponge, lid, top);
+        const dripGeo = drips.length ? mergeAll(drips) : null;
+        if (dripGeo) group.add(new THREE.Mesh(dripGeo, icing));
+        group.traverse((o) => {
+          o.castShadow = o !== top;
+          o.receiveShadow = true;
+        });
       } else {
         const mesh = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 2, radius), matFor(def.kind, color));
         mesh.position.set(cx, cy, cz);
         mesh.castShadow = def.kind !== 'glass';
         mesh.receiveShadow = true;
         group.add(mesh);
+        if (def.look) {
+          // A painted top (wafer, chocolate, candy stripes, deck plates...).
+          const top = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.1, d - 0.1), new THREE.MeshStandardMaterial({ map: deckTexture(w, d, color, def.look, false), roughness: 0.6 }));
+          top.rotation.x = -Math.PI / 2;
+          top.position.set(cx, def.max[1] + 0.004, cz);
+          top.receiveShadow = true;
+          group.add(top);
+        }
         if (def.kind === 'glass') {
           // Window frames so the showroom reads as a building.
           const frameMat = new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.5 });
@@ -371,9 +664,9 @@ export class MapView {
           }
         }
         if (def.kind === 'platform') {
-          // Orange stripes on the flatbed/elevator edges.
+          // Orange stripes on the flatbed/elevator edges (unless it has a painted top).
           const stripeMat = new THREE.MeshStandardMaterial({ color: 0xff8a1f, roughness: 0.5 });
-          for (const zz of [def.min[2] + 0.1, def.max[2] - 0.1]) {
+          for (const zz of def.look ? [] : [def.min[2] + 0.1, def.max[2] - 0.1]) {
             const s = new THREE.Mesh(new THREE.BoxGeometry(w * 0.96, 0.12, 0.2), stripeMat);
             s.position.set(cx, def.max[1] + 0.01, zz);
             group.add(s);
@@ -431,14 +724,7 @@ export class MapView {
     });
 
     for (const [key, { mat, geos }] of staticGeos) {
-      const nonIndexed = geos.map((g) => (g.index ? g.toNonIndexed() : g));
-      for (const g of nonIndexed) {
-        // Normalize attributes so everything can be merged.
-        if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
-        for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(name)) g.deleteAttribute(name);
-        g.clearGroups();
-      }
-      const merged = mergeGeometries(nonIndexed, false);
+      const merged = mergeAll(geos);
       if (!merged) continue;
       const mesh = new THREE.Mesh(merged, mat);
       mesh.castShadow = key.endsWith('true');
@@ -476,7 +762,8 @@ export class MapView {
   }
 
   private buildClouds(): void {
-    const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, emissive: 0xdde9ff, emissiveIntensity: 0.35, flatShading: false });
+    const cloud = this.map.theme.cloud;
+    const mat = new THREE.MeshStandardMaterial({ color: cloud, roughness: 1, emissive: cloud === 0xffffff ? 0xdde9ff : cloud, emissiveIntensity: 0.35, flatShading: false });
     const puff = new THREE.IcosahedronGeometry(1, 2);
     const geos: THREE.BufferGeometry[] = [];
     const m = new THREE.Matrix4();
@@ -508,35 +795,86 @@ export class MapView {
   private buildDecor(): void {
     for (const d of this.map.decor) {
       const obj = this.makeDecor(d);
-      // Cars keep their own collision boxes, so they stay put.
-      if (obj) this.addOnTop(obj, d.x, d.y, d.z, d.type !== 'car');
+      if (!obj) continue;
+      const parent = this.parentFor(d.x, d.y, d.z, d.ride);
+      if (LIVE_DECOR.has(d.type)) {
+        parent.updateWorldMatrix(true, false);
+        parent.attach(obj);
+      } else this.bake(obj, parent);
     }
+    this.flushBatches();
   }
 
   /**
-   * Adds a prop standing at (x, y, z). Props on a piece that sinks in the final 30 seconds go
-   * down with it instead of hanging in the air.
+   * What a prop standing at (x, y, z) belongs to: the piece it rides (`ride`), a piece under it
+   * that sinks in the final 30 seconds (so it goes down with it instead of hanging in the air), or
+   * the map itself.
    */
-  private addOnTop(obj: THREE.Object3D, x: number, y: number, z: number, ride = true): void {
-    const on = this.map.solids.findIndex(
-      (s) => (s.collapse ?? 0) >= 1 && !s.mover && Math.abs(s.max[1] - y) < 0.05 && x >= s.min[0] && x <= s.max[0] && z >= s.min[2] && z <= s.max[2],
-    );
-    const pivot = ride && on >= 0 ? this.solidMeshes.get(on) : undefined;
-    if (pivot) {
-      obj.position.x -= pivot.position.x;
-      obj.position.z -= pivot.position.z;
-      pivot.add(obj);
-    } else this.root.add(obj);
+  private parentFor(x: number, y: number, z: number, ride?: number): THREE.Object3D {
+    const on =
+      ride ??
+      this.map.solids.findIndex(
+        (s) => (s.collapse ?? 0) >= 1 && !s.mover && Math.abs(s.max[1] - y) < 0.05 && x >= s.min[0] && x <= s.max[0] && z >= s.min[2] && z <= s.max[2],
+      );
+    return (on >= 0 && this.solidMeshes.get(on)) || this.root;
+  }
+
+  /** Adds a live (animated) prop standing at (x, y, z). */
+  private addOnTop(obj: THREE.Object3D, x: number, y: number, z: number): void {
+    const parent = this.parentFor(x, y, z);
+    parent.updateWorldMatrix(true, false);
+    parent.attach(obj);
+  }
+
+  /**
+   * Queues a static prop's meshes to be merged with every other prop that uses the same material
+   * on the same parent (lines and points are kept as they are).
+   */
+  private bake(obj: THREE.Object3D, parent: THREE.Object3D): void {
+    obj.updateMatrixWorld(true);
+    parent.updateWorldMatrix(true, false);
+    const inv = parent.matrixWorld.clone().invert();
+    let byMat = this.batches.get(parent);
+    if (!byMat) {
+      byMat = new Map();
+      this.batches.set(parent, byMat);
+    }
+    const loose: THREE.Object3D[] = [];
+    obj.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) {
+        const mat = m.material as THREE.Material;
+        const list = byMat.get(mat) ?? [];
+        list.push(m.geometry.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld)));
+        byMat.set(mat, list);
+      } else if ((o as THREE.Line).isLine || (o as THREE.Points).isPoints) loose.push(o);
+    });
+    for (const o of loose) parent.attach(o);
+  }
+
+  private flushBatches(): void {
+    for (const [parent, byMat] of this.batches) {
+      for (const [mat, geos] of byMat) {
+        const merged = mergeAll(geos);
+        if (!merged) continue;
+        const mesh = new THREE.Mesh(merged, mat);
+        mesh.castShadow = !mat.userData.noShadow;
+        mesh.receiveShadow = true;
+        parent.add(mesh);
+      }
+    }
+    this.batches.clear();
   }
 
   private makeDecor(d: DecorDef): THREE.Object3D | null {
+    const k = this.kit;
     switch (d.type) {
       case 'car':
-        return makeCar(d);
+        return makeCar(d, k);
       case 'tubeMan': {
         const man = new TubeMan(d.color ?? 0xff3b30, { seed: d.x * 3.1 + d.z });
         man.group.position.set(d.x, d.y, d.z);
-        man.group.scale.setScalar(1.6);
+        man.group.scale.setScalar(d.scale ?? 1.6);
         const pose = defaultPose();
         pose.yaw = Math.atan2(d.x, d.z);
         this.tubeMen.push({ man, pose });
@@ -550,7 +888,7 @@ export class MapView {
         );
         board.position.y = 1.4;
         board.castShadow = true;
-        const legMat = new THREE.MeshStandardMaterial({ color: 0x8a93a8, metalness: 0.5, roughness: 0.4 });
+        const legMat = k.mat(0x8a93a8, 0.4, { metal: 0.5 });
         for (const x of [-3.5, 3.5]) {
           const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1.2), legMat);
           leg.position.set(x, 0.5, 0);
@@ -561,20 +899,20 @@ export class MapView {
         return g;
       }
       case 'pole': {
-        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 4.4, 8), new THREE.MeshStandardMaterial({ color: 0xe8ecf5, metalness: 0.4, roughness: 0.4 }));
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 4.4, 8), k.mat(0xe8ecf5, 0.4, { metal: 0.4 }));
         pole.position.set(d.x, d.y + 2.2, d.z);
         pole.castShadow = true;
         return pole;
       }
       case 'bunting':
-        return makeBunting(d);
+        return makeBunting(d, k);
       case 'balloons':
         return this.makeBalloons(d);
       case 'cone': {
         const g = new THREE.Group();
-        const cone = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.75, 14), new THREE.MeshStandardMaterial({ color: 0xff7a1a, roughness: 0.5 }));
+        const cone = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.75, 14), k.mat(0xff7a1a, 0.5));
         cone.position.y = 0.4;
-        const band = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.2, 0.12, 14), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+        const band = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.2, 0.12, 14), k.mat(0xffffff, 1, { noShadow: true }));
         band.position.y = 0.45;
         cone.castShadow = true;
         g.add(cone, band);
@@ -583,7 +921,7 @@ export class MapView {
       }
       case 'tires': {
         const g = new THREE.Group();
-        const mat = new THREE.MeshStandardMaterial({ color: 0x2b2d3a, roughness: 0.8 });
+        const mat = k.mat(0x2b2d3a, 0.8);
         for (let i = 0; i < 3; i++) {
           const t = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.2, 10, 20), mat);
           t.rotation.x = Math.PI / 2;
@@ -632,12 +970,9 @@ export class MapView {
       }
       case 'umbrella': {
         const g = new THREE.Group();
-        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 3.4, 8), new THREE.MeshStandardMaterial({ color: 0xf4f1ea }));
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 3.4, 8), k.mat(0xf4f1ea, 1));
         pole.position.y = 1.7;
-        const canopy = new THREE.Mesh(
-          new THREE.ConeGeometry(2.4, 0.9, 12, 1, true),
-          new THREE.MeshStandardMaterial({ color: d.color ?? 0xff6fa8, side: THREE.DoubleSide, roughness: 0.5, flatShading: true }),
-        );
+        const canopy = new THREE.Mesh(new THREE.ConeGeometry(2.4, 0.9, 12, 1, true), k.mat(d.color ?? 0xff6fa8, 0.5, { side: THREE.DoubleSide, flat: true }));
         canopy.position.y = 3.5;
         canopy.castShadow = true;
         g.add(pole, canopy);
@@ -646,8 +981,14 @@ export class MapView {
       }
       case 'ferrisWheel':
         return this.makeFerrisWheel(d);
-      default:
-        return null;
+      default: {
+        const g = buildProp(k, d);
+        if (!g) return null;
+        g.position.set(d.x, d.y, d.z);
+        g.rotation.y = d.rotY ?? 0;
+        if (d.scale) g.scale.setScalar(d.scale);
+        return g;
+      }
     }
   }
 
@@ -917,6 +1258,7 @@ export class MapView {
       for (const c of w.cars) c.rotation.z = -w.wheel.rotation.z;
     }
     this.clouds.rotation.y += dt * 0.004;
+    this.kit.update(dt, time);
     this.sky.update(dt, this.quality() === 'low');
   }
 
@@ -1040,16 +1382,17 @@ export class MapView {
     for (const t of this.tubeMen) t.man.dispose();
     for (const g of this.giants) g.man.dispose();
     this.sky.dispose();
+    this.kit.dispose();
   }
 }
 
-function makeCar(d: DecorDef): THREE.Object3D {
+function makeCar(d: DecorDef, k: PropKit): THREE.Object3D {
   const g = new THREE.Group();
   const color = d.color ?? 0xd98c8c;
-  const paint = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.15 });
-  const glass = new THREE.MeshStandardMaterial({ color: 0x2c3550, roughness: 0.1, metalness: 0.3 });
-  const tire = new THREE.MeshStandardMaterial({ color: 0x23242e, roughness: 0.8 });
-  const hub = new THREE.MeshStandardMaterial({ color: 0xd0d6e4, metalness: 0.6, roughness: 0.3 });
+  const paint = k.mat(color, 0.35, { metal: 0.15 });
+  const glass = k.mat(0x2c3550, 0.1, { metal: 0.3 });
+  const tire = k.mat(0x23242e, 0.8);
+  const hub = k.mat(0xd0d6e4, 0.3, { metal: 0.6 });
   const body = new THREE.Mesh(new RoundedBoxGeometry(2.0, 0.75, 4.4, 3, 0.25), paint);
   body.position.y = 0.58;
   const cabin = new THREE.Mesh(new RoundedBoxGeometry(1.7, 0.62, 2.5, 3, 0.25), paint);
@@ -1076,7 +1419,7 @@ function makeCar(d: DecorDef): THREE.Object3D {
     g.add(w, h);
   }
   // Price tag on the windshield.
-  const tag = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.4), new THREE.MeshStandardMaterial({ map: textTexture('$$$', '#ffd60a', '#ff3b8a', 128, 64) }));
+  const tag = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.4), k.mat(0xffffff, 1, { map: k.text('$$$', '#ffd60a', '#ff3b8a', 128, 64), noShadow: true }));
   tag.position.set(0, 1.3, 1.02);
   tag.rotation.x = -0.35;
   g.add(tag);
@@ -1085,7 +1428,7 @@ function makeCar(d: DecorDef): THREE.Object3D {
   return g;
 }
 
-function makeBunting(d: DecorDef): THREE.Object3D {
+function makeBunting(d: DecorDef, k: PropKit): THREE.Object3D {
   const x2 = Number(d.data?.x2 ?? d.x);
   const y2 = Number(d.data?.y2 ?? d.y);
   const z2 = Number(d.data?.z2 ?? d.z);
@@ -1105,7 +1448,7 @@ function makeBunting(d: DecorDef): THREE.Object3D {
     p.y -= Math.sin(t * Math.PI) * 0.8;
     pts.push(p);
     if (i < count) {
-      const f = new THREE.Mesh(flagGeo, new THREE.MeshStandardMaterial({ color: colors[i % colors.length], side: THREE.DoubleSide, roughness: 0.6 }));
+      const f = new THREE.Mesh(flagGeo, k.mat(colors[i % colors.length], 0.6, { side: THREE.DoubleSide }));
       const t2 = (i + 0.5) / count;
       const p2 = a.clone().lerp(b, t2);
       p2.y -= Math.sin(t2 * Math.PI) * 0.8;

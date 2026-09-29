@@ -1,3 +1,4 @@
+import { balloonArch, foodTruck } from './props';
 import type { DecorDef, MapDef, SolidDef } from './types';
 
 /**
@@ -9,13 +10,14 @@ const solids: SolidDef[] = [];
 const decor: DecorDef[] = [];
 const box = (min: [number, number, number], max: [number, number, number], kind: SolidDef['kind'], extra: Partial<SolidDef> = {}) => solids.push({ min, max, kind, ...extra });
 
-function car(x: number, y: number, z: number, alongX: boolean, color: number) {
+/** A parked car; cars on the upper deck (`collapse` 1) go down with it. */
+function car(x: number, y: number, z: number, alongX: boolean, color: number, collapse?: number) {
   const hx = alongX ? 2.2 : 1.0;
   const hz = alongX ? 1.0 : 2.2;
-  box([x - hx, y, z - hz], [x + hx, y + 0.95, z + hz], 'hidden', { ledge: false });
+  box([x - hx, y, z - hz], [x + hx, y + 0.95, z + hz], 'hidden', { ledge: false, collapse });
   const cx = alongX ? 1.25 : 0.85;
   const cz = alongX ? 0.85 : 1.25;
-  box([x - cx, y + 0.95, z - cz], [x + cx, y + 1.55, z + cz], 'hidden', { ledge: false });
+  box([x - cx, y + 0.95, z - cz], [x + cx, y + 1.55, z + cz], 'hidden', { ledge: false, collapse });
   decor.push({ type: 'car', x, y, z, rotY: alongX ? Math.PI / 2 : 0, color });
 }
 
@@ -41,10 +43,14 @@ box([32, -1.5, -5], [40, 0.5, 5], 'island', { ledge: true, collapse: 3 });
 car(-18, 0, 8, false, 0xb99ad9);
 car(-12, 0, 8, false, 0x8cb3d9);
 car(2, 0, 12, true, 0xd9b38c);
-car(-4, 0, 3, false, 0x9dd98c);
-car(20, 0, 6, true, 0xd98c9d);
-car(-16, 5.5, -10, true, 0xd9d38c);
-car(0, 5.5, -12, false, 0x8cd9cf);
+car(-16, 5.5, -10, true, 0xd9d38c, 1);
+car(0, 5.5, -12, false, 0x8cd9cf, 1);
+// A rooftop party: a taco truck by the lift and a balloon arch at the foot of the stairs.
+foodTruck(solids, decor, 20, 0, 5.5, { alongX: true, flip: true, color: 0xd9f2ff, text: 'TACOS', snack: 'taco' });
+balloonArch(solids, decor, 14, 0, 10.8, 5);
+decor.push({ type: 'tires', x: -4, y: 0, z: 3.5 });
+decor.push({ type: 'cone', x: -2.5, y: 0, z: 4.5 });
+decor.push({ type: 'cone', x: -5.5, y: 0, z: 2.2 });
 
 decor.push({ type: 'sign', x: -6, y: 5.5, z: -5, data: { text: 'TOP FLOOR' } });
 decor.push({ type: 'tubeMan', x: -24.5, y: 0, z: 16.5, color: 0xff9500 });
@@ -58,6 +64,7 @@ decor.push({ type: 'balloons', x: 24, y: 0, z: -16, color: 0xffd60a });
 export const GARAGE: MapDef = {
   id: 'garage',
   name: 'Top Floor',
+  icon: '🅿️',
   solids,
   bouncePads: [
     { x: 0, y: 0, z: 2, half: 1.2, strength: 19, pushX: 0, pushZ: -8 },

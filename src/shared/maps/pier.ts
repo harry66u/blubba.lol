@@ -107,6 +107,7 @@ decor.push({ type: 'tires', x: -7.5, y: 0, z: 37.5 });
 export const PIER: MapDef = {
   id: 'pier',
   name: 'Sky Pier',
+  icon: '🎡',
   deck: 'planks',
   solids,
   bouncePads: [
