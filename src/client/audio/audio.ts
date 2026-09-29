@@ -1275,7 +1275,39 @@ export class Audio {
       case 'robot':
         this.robotVoice(pos, [0, 7, 3, 10, 12]);
         break;
+      case 'pride':
+        this.paradeFanfare(pos);
+        break;
     }
+  }
+
+  /** Bæn Is Gay: a four-on-the-floor kick under a bright disco arpeggio and a sparkle. */
+  private paradeFanfare(pos: [number, number, number] | null): void {
+    const out = this.out(pos, 0.45);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    for (let b = 0; b < 4; b++) this.thudAt(out, t + b * 0.2, 60, 0.7);
+    [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = i % 2 ? 'square' : 'triangle';
+      osc.frequency.value = f;
+      const lp = ctx.createBiquadFilter();
+      lp.frequency.value = 3500;
+      const g = ctx.createGain();
+      const t0 = t + i * 0.09;
+      this.env(g, t0, 0.005, 0.22, 0.28);
+      osc.connect(lp).connect(g).connect(out);
+      osc.start(t0);
+      osc.stop(t0 + 0.35);
+    });
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 6000;
+    const ng = ctx.createGain();
+    this.env(ng, t + 0.5, 0.02, 0.2, 0.5);
+    hp.connect(ng).connect(out);
+    this.noise(hp, t + 0.5, 0.55);
   }
 
   /** Big Blow loading up: a clunk, then a rising whirr. */

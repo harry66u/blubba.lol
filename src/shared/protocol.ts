@@ -9,7 +9,7 @@ import type { Tornado } from './game/loot';
 import type { Cosmetics, ProgressReport, ReportReason } from './economy';
 import { publicUlt } from './game/ults';
 
-export const PROTOCOL_VERSION = 11;
+export const PROTOCOL_VERSION = 12;
 
 // --- Binary message ids -------------------------------------------------------------------
 export const MSG_INPUTS = 1;

@@ -525,6 +525,9 @@ export class BotBrain {
         return near(7) >= 2 || (dist < 4.5 && s.onGround === 1);
       case 'robot':
         return dist < 35 && target.state.mode !== MODE_DEAD;
+      case 'pride':
+        // The burst wants company; then strut through them.
+        return near(7.5) >= 2 || (dist < 5 && s.onGround === 1);
     }
   }
 

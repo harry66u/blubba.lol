@@ -33,6 +33,8 @@ export const PLAYER_FIELDS = [
   'floatTimer', 'heliumTimer', 'springJumps',
   // Ultimate (game/ults.ts): the meter (0..1), which ult you carry, and whatever is running.
   'ult', 'ultKind', 'cUlt', 'ultArmed', 'juiceTimer', 'chaseTimer', 'chaseTarget', 'fartTimer', 'robotTimer', 'gasTimer',
+  // Bæn Is Gay: Pride Parade seconds left.
+  'prideTimer',
 ] as const;
 
 export type PlayerField = (typeof PLAYER_FIELDS)[number];
@@ -323,6 +325,7 @@ function stepUlt(p: PlayerState, ultP: boolean, dt: number, out: StepResult): vo
   const U = BALANCE.ults;
   if (p.juiceTimer > 0) p.juiceTimer = Math.max(0, p.juiceTimer - dt);
   if (p.robotTimer > 0) p.robotTimer = Math.max(0, p.robotTimer - dt);
+  if (p.prideTimer > 0) p.prideTimer = Math.max(0, p.prideTimer - dt);
   p.gasTimer = Math.max(0, p.gasTimer - dt);
   if (p.chaseTimer > 0) {
     p.chaseTimer = Math.max(0, p.chaseTimer - dt);
@@ -368,6 +371,9 @@ function stepUlt(p: PlayerState, ultP: boolean, dt: number, out: StepResult): vo
       break;
     case 'robot':
       p.robotTimer = U.robot.scanTime + U.robot.barrageTime;
+      break;
+    case 'pride':
+      p.prideTimer = U.pride.duration;
       break;
   }
 }

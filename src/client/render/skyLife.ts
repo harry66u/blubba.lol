@@ -217,6 +217,7 @@ const AD_BLIMPS: BlimpLook[] = [
   { title: 'SOL x AMIRI', sub: 'SMELL THE WIN', hull: '#1b1b20', letters: ['#f4f1ea'], subColor: '#9dff6f', outline: '#1b1b20', bands: '#5ee05e', trim: '#f4f1ea', fin: 0x1b1b20 },
   { title: 'KESTY', sub: 'ROBOTICS', hull: '#c9d2e8', letters: ['#2ec5ff'], subColor: '#1d1b3a', outline: '#1d1b3a', bands: '#2ec5ff', trim: '#ff3b5c', fin: 0x8a93a8 },
   { title: "ABAG'S", sub: 'CHASE CLUB', hull: '#2ec5ff', letters: ['#ffffff'], subColor: '#ffd60a', outline: '#1d1b3a', bands: '#ff3b8a', trim: '#ffd60a', fin: PINK },
+  { title: 'BÆN IS GAY', sub: 'PRIDE PARADE', hull: '#ffffff', letters: ['#e40303', '#ff8c00', '#e0c800', '#008026', '#24408e', '#732982'], subColor: '#732982', outline: '#1d1b3a', bands: '#ff5fd2', trim: '#24408e', fin: 0xb44dff },
 ];
 
 /** A blimp cruising a circle around the map, nose along its path. */

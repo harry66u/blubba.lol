@@ -15,10 +15,10 @@ import { type WeaponModel, buildWeaponModel, weaponLookKey } from './weapons';
  *
  * Local space: feet at the origin, facing +Z, about 1.9 tall before `spec.scale`.
  */
-export type HumanKey = 'bor' | 'abag' | 'sol' | 'kesty';
+export type HumanKey = 'bor' | 'abag' | 'sol' | 'kesty' | 'baen';
 
 export function isHumanKey(k: string): k is HumanKey {
-  return k === 'bor' || k === 'abag' || k === 'sol' || k === 'kesty';
+  return k === 'bor' || k === 'abag' || k === 'sol' || k === 'kesty' || k === 'baen';
 }
 
 interface Spec {
@@ -45,7 +45,12 @@ const SPECS: Record<HumanKey, Spec> = {
   sol: { scale: 1.95, legLen: 0.9, legR: 0.1, torsoH: 0.62, waistR: 0.23, chestR: 0.27, armR: 0.072, upper: 0.31, fore: 0.28, headR: 0.155, skin: 0xecba9d, hair: 0x5a3a22 },
   // A robot with a face.
   kesty: { scale: 2.0, legLen: 0.92, legR: 0.085, torsoH: 0.64, waistR: 0.16, chestR: 0.23, armR: 0.065, upper: 0.31, fore: 0.28, headR: 0.155, skin: 0xc2886f, hair: 0x4a2e1c },
+  // Dressed for the parade: rainbow from head to toe, waving his flag.
+  baen: { scale: 1.95, legLen: 0.9, legR: 0.085, torsoH: 0.62, waistR: 0.16, chestR: 0.22, armR: 0.064, upper: 0.31, fore: 0.28, headR: 0.152, skin: 0xd8a88c, hair: 0x4a3222 },
 };
+
+/** The pride flag's six stripes, top to bottom. */
+const RAINBOW = ['#e40303', '#ff8c00', '#ffed00', '#008026', '#24408e', '#732982'];
 
 // --- Painted textures ------------------------------------------------------------------------
 
@@ -139,6 +144,32 @@ function polo(): THREE.CanvasTexture {
     g.fillStyle = 'rgba(255,255,255,0.03)';
     g.fillRect(0, y, 512, 1);
   }
+  return tex(c);
+}
+
+/** BÆN's tee: rainbow stripes all the way round. */
+function rainbowTee(): THREE.CanvasTexture {
+  const [c, g] = canvas(256, 256);
+  const h = 256 / RAINBOW.length;
+  // The texture runs bottom to top up the torso: red at the shoulders like the flag.
+  RAINBOW.forEach((col, i) => {
+    g.fillStyle = col;
+    g.fillRect(0, i * h, 256, h + 1);
+  });
+  return tex(c);
+}
+
+/** White pants with a rainbow stripe down the outside of each leg. */
+function paradePants(): THREE.CanvasTexture {
+  const [c, g] = canvas(256, 256);
+  g.fillStyle = '#f7f5f0';
+  g.fillRect(0, 0, 256, 256);
+  RAINBOW.forEach((col, i) => {
+    g.fillStyle = col;
+    // The side of the leg (u = 0.25 and 0.75 face out).
+    g.fillRect(52 + i * 4, 0, 4, 256);
+    g.fillRect(180 + i * 4, 0, 4, 256);
+  });
   return tex(c);
 }
 
@@ -322,6 +353,8 @@ export class Human {
   private readonly arms: [Limb, Limb];
   private readonly legs: [Limb, Limb];
   private readonly gunMount = new THREE.Group();
+  /** BÆN's pride flag (it ripples). */
+  private flag: THREE.Mesh | null = null;
   private gun: WeaponModel | null = null;
   private gunKey = '';
   private nose: THREE.Object3D | null = null;
@@ -439,6 +472,8 @@ export class Human {
         return this.mat(0, 0.9, 0, this.tex(amiriCrew()));
       case 'kesty':
         return this.mat(0, 0.35, 0.75, this.tex(metal(true)));
+      case 'baen':
+        return this.mat(0, 0.7, 0, this.tex(rainbowTee()));
     }
   }
 
@@ -449,12 +484,13 @@ export class Human {
       return this.mat(0, 0.8, 0, t);
     }
     if (this.key === 'kesty') return this.mat(0, 0.35, 0.75, this.tex(metal(false)));
+    if (this.key === 'baen') return shirt;
     return shirt.map ? this.mat(0, 0.9, 0, this.tex(solid(this.key === 'abag' ? '#1f2a44' : '#121212'))) : shirt;
   }
 
-  /** Forearms: rolled sleeves (BOR) and short sleeves (ABAG) show skin. */
+  /** Forearms: rolled sleeves (BOR) and short sleeves (ABAG, BÆN) show skin. */
   private lowerMat(skin: Mat, sleeve: Mat): Mat {
-    return this.key === 'bor' || this.key === 'abag' ? skin : sleeve;
+    return this.key === 'bor' || this.key === 'abag' || this.key === 'baen' ? skin : sleeve;
   }
 
   private pantsMat(left: boolean): Mat {
@@ -467,6 +503,8 @@ export class Human {
         return this.mat(0, 0.9, 0, this.tex(amiriPants(left)));
       case 'kesty':
         return this.mat(0, 0.35, 0.75, this.tex(metal(false)));
+      case 'baen':
+        return this.mat(0, 0.8, 0, this.tex(paradePants()));
     }
   }
 
@@ -566,6 +604,18 @@ export class Human {
     const r = s.headR;
     const hairMat = this.mat(s.hair, 0.9);
     if (this.key === 'kesty') return;
+    if (this.key === 'baen') {
+      // Short, neat, swept up a little at the front.
+      const cap = this.mesh(new THREE.SphereGeometry(r * 1.06, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.4), hairMat);
+      cap.scale.set(0.97, 1.08, 1.04);
+      cap.rotation.x = -0.28;
+      this.head.add(cap);
+      const quiff = this.mesh(new THREE.SphereGeometry(r * 0.35, 12, 8), hairMat);
+      quiff.scale.set(1.6, 0.7, 0.9);
+      quiff.position.set(0, r * 0.82, r * 0.5);
+      this.head.add(quiff);
+      return;
+    }
     if (this.key === 'sol') {
       // Shaggy: a cap over the top and back, and a fringe over the forehead.
       const cap = this.mesh(new THREE.SphereGeometry(r * 1.07, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.42), hairMat);
@@ -703,6 +753,25 @@ export class Human {
 
   private buildProps(skin: Mat): void {
     void skin;
+    if (this.key === 'baen') {
+      // A pride flag on a stick, waved in his left hand.
+      const flag = new THREE.Group();
+      const stick = this.mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.5, 6), this.mat(0xf4f1ea, 0.6));
+      stick.position.y = 0.2;
+      const [fc, fg] = canvas(96, 64);
+      RAINBOW.forEach((col, i) => {
+        fg.fillStyle = col;
+        fg.fillRect(0, (i * 64) / RAINBOW.length, 96, 64 / RAINBOW.length + 1);
+      });
+      const cloth = this.mesh(new THREE.PlaneGeometry(0.3, 0.2, 6, 1), new THREE.MeshStandardMaterial({ map: this.tex(tex(fc)), side: THREE.DoubleSide, roughness: 0.8 }));
+      this.mats.push(cloth.material as THREE.Material);
+      cloth.position.set(0.15, 0.35, 0);
+      flag.add(stick, cloth);
+      flag.position.y = -this.spec.fore - 0.02;
+      this.arms[1].mid.add(flag);
+      this.flag = cloth;
+      return;
+    }
     if (this.key !== 'bor') return;
     // BOR's giant syringe (full of air), in his left hand.
     const g = new THREE.Group();
@@ -859,6 +928,10 @@ export class Human {
         // Pumping arm while chasing.
         AL.root.rotation.set(-sw * 1.1, 0, 0.1);
         AL.mid.rotation.set(-1.4, 0, 0);
+      } else if (this.key === 'baen') {
+        // Flag held high and waving, parade style.
+        AL.root.rotation.set(-2.5 + Math.sin(t * 5) * 0.25, 0, 0.35 + Math.sin(t * 5) * 0.2);
+        AL.mid.rotation.set(-0.3, 0, 0);
       } else {
         // The free arm swings (BOR's holds the syringe).
         AL.root.rotation.set(-sw * 0.6 * walk - (this.key === 'bor' ? 0.2 : 0.05), 0, 0.14);
@@ -869,6 +942,15 @@ export class Human {
     this.gunMount.visible = !flexing && this.bend < 0.3;
     if (this.gun) this.gun.setCharge(p.charge, p.time, p.charge > 0 || p.streaming);
 
+    if (this.flag) {
+      // Ripple the flag.
+      const pos = (this.flag.geometry as THREE.BufferGeometry).attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        pos.setZ(i, Math.sin(p.time * 9 - x * 18) * 0.025 * ((x + 0.15) / 0.3));
+      }
+      pos.needsUpdate = true;
+    }
     // Juice: bigger arms.
     const pump = p.jacked ? 1.3 : 1;
     for (const b of this.biceps) b.scale.set(pump, 1.3 * pump, 1.05 * pump);

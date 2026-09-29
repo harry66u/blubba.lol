@@ -400,6 +400,49 @@ describe('Crop Duster', () => {
   });
 });
 
+describe('Bæn Is Gay (Pride Parade)', () => {
+  it('bursts everyone nearby into the air, speeds BÆN up, and the rainbow road bounces enemies', () => {
+    const { sim, ps, ds } = setup([{ ult: 'pride' }, {}, {}]);
+    const [a, b, c] = ps;
+    place(ds[0], 0, 6);
+    place(ds[1], 0, 3.5);
+    place(ds[2], -12, 6);
+    const normalWalk = walkSpeed(sim, ds, ds[0]);
+    place(ds[0], 0, 6);
+    place(ds[1], 0, 3.5);
+    const ev = popUlt(sim, ds, ds[0]);
+    expect(a.state.prideTimer).toBeGreaterThan(BALANCE.ults.pride.duration - 0.2);
+    expect(ev.some((e) => e.t === 'ult' && e.kind === 'pride')).toBe(true);
+    // The burst hit B (close) but not C (far away).
+    expect(hitsOn(ev, b, a).length).toBeGreaterThan(0);
+    expect(hitsOn(ev, c, a).length).toBe(0);
+    // (After the hit-stop freeze.)
+    run(sim, ds, 12);
+    expect(b.state.py).toBeGreaterThan(0.3);
+    // Faster while parading.
+    const paradeWalk = walkSpeed(sim, ds, ds[0]);
+    expect(paradeWalk / normalWalk).toBeCloseTo(BALANCE.ults.pride.speedMult, 1);
+
+    // BÆN walks a road; C steps onto it and gets bounced (once per cooldown).
+    place(ds[0], 10, 0, 0);
+    ds[0].frame.moveZ = 1;
+    run(sim, ds, 40);
+    ds[0].frame.moveZ = 0;
+    expect(sim.ults.road.length).toBeGreaterThan(5);
+    // A piece from this last walk (B is still somewhere on the older ones).
+    const piece = sim.ults.road[sim.ults.road.length - 3];
+    expect(c.state.mode).not.toBe(MODE_DEAD);
+    place(ds[2], piece.x, piece.z);
+    c.state.py = piece.y;
+    const onRoad = runCollect(sim, ds, 14);
+    expect(hitsOn(onRoad, c, a).length).toBe(1);
+    expect(c.state.py).toBeGreaterThan(piece.y + 0.3);
+    // The road fades away after a few seconds.
+    run(sim, ds, Math.round((BALANCE.ults.pride.roadLife + BALANCE.ults.pride.duration) * 60));
+    expect(sim.ults.road.length).toBe(0);
+  });
+});
+
 describe('Robot Mode', () => {
   it('locks on to up to 3 enemies in view and fires 6 homing mini-rockets at them', () => {
     const R = BALANCE.ults.robot;
@@ -478,8 +521,8 @@ describe('bots and ults', () => {
 });
 
 describe('ult loadout, unlocks and wire format', () => {
-  it('deals one of the four character ults at random each spawn, all free', () => {
-    expect(PLAYABLE_ULTS).toEqual(['juice', 'chase', 'cropDuster', 'robot']);
+  it('deals one of the five character ults at random each spawn, all free', () => {
+    expect(PLAYABLE_ULTS).toEqual(['juice', 'chase', 'cropDuster', 'robot', 'pride']);
     expect(unlockedAt(1).ults).toEqual([...ULT_IDS]);
     expect(sanitizeLoadout({}).ult).toBe('juice');
     const sim = new GameSim({ map: DEALERSHIP, durationSec: 999 });

@@ -12,6 +12,15 @@ export interface GasCloud {
   until: number;
 }
 
+/** A piece of a Pride Parade's rainbow road: bounces enemies who step on it until `until`. */
+export interface RoadPiece {
+  x: number;
+  y: number;
+  z: number;
+  owner: number;
+  until: number;
+}
+
 /** Robot Mode in progress: who it locked on to and how many rockets are out. */
 interface Barrage {
   targets: number[];
@@ -30,6 +39,11 @@ function clamp(v: number, lo: number, hi: number): number {
  */
 export class UltSystem {
   readonly clouds: GasCloud[] = [];
+  readonly road: RoadPiece[] = [];
+  /** When each parade last laid road (by player id). */
+  private readonly roadAt = new Map<number, number>();
+  /** `${owner}:${victim}` -> when that road may bounce that victim again. */
+  private readonly bounceAt = new Map<string, number>();
   private readonly barrages = new Map<number, Barrage>();
   private readonly resniffAt = new Map<number, number>();
   private readonly dir = { x: 0, y: 0, z: 0 };
@@ -39,6 +53,9 @@ export class UltSystem {
   /** New match: clouds and barrages are gone. */
   reset(): void {
     this.clouds.length = 0;
+    this.road.length = 0;
+    this.roadAt.clear();
+    this.bounceAt.clear();
     this.barrages.clear();
     this.resniffAt.clear();
   }
@@ -62,6 +79,8 @@ export class UltSystem {
     } else if (kind === 'robot') {
       targets = this.robotTargets(p, BALANCE.ults.robot.maxTargets);
       this.barrages.set(p.id, { targets, fired: 0, start: this.sim.time });
+    } else if (kind === 'pride') {
+      this.prideBurst(p);
     }
     this.sim.events.push({ t: 'ult', tick: this.sim.tick, id: p.id, kind, x: s.px, y: s.py, z: s.pz, targets });
   }
@@ -88,6 +107,7 @@ export class UltSystem {
     this.stepChases();
     this.stepBarrages();
     this.stepClouds();
+    this.stepRoad();
   }
 
   /** Lost your target (popped or gone)? Sniff out the next one. */
@@ -326,6 +346,81 @@ export class UltSystem {
     const until = sim.time + C.cloudTime;
     this.clouds.push({ x, y: cy, z, owner: p.id, until });
     sim.events.push({ t: 'fart', tick: sim.tick, id: p.id, x, y: cy, z, r: C.radius, until: Math.round(until / sim.dt) });
+  }
+
+  // --- Bæn Is Gay (Pride Parade) ---------------------------------------------------------------
+
+  /** The rainbow burst when the parade starts: everyone close gets launched up and away. */
+  private prideBurst(p: SimPlayer): void {
+    const P = BALANCE.ults.pride;
+    const sim = this.sim;
+    const s = p.state;
+    const x = s.px;
+    const y = s.py + 1;
+    const z = s.pz;
+    sim.pushBall(x, y, z, P.burstRadius, BALANCE.modes.ball.splashImpulse, p.id);
+    for (const o of sim.players.values()) {
+      if (o === p || !sim.isEnemy(p.id, o.id)) continue;
+      const t = o.state;
+      if (t.mode === MODE_DEAD) continue;
+      const r = playerRadius(t);
+      const d = Math.max(0, Math.hypot(t.px - x, t.py + 1 - y, t.pz - z) - r);
+      if (d > P.burstRadius) continue;
+      const falloff = 0.45 + 0.55 * (1 - d / P.burstRadius);
+      let dx = t.px - x;
+      let dz = t.pz - z;
+      const hl = Math.hypot(dx, dz);
+      if (hl < 1e-3) {
+        dx = Math.sin(s.yaw);
+        dz = Math.cos(s.yaw);
+      } else {
+        dx /= hl;
+        dz /= hl;
+      }
+      sim.applyHit(o, p.id, dx, 0.9, dz, P.burstKnockback * falloff, P.burstInflation * falloff, { direct: false, low: true, x: t.px - dx * r, y: t.py + 1, z: t.pz - dz * r, ult: true });
+    }
+  }
+
+  /** Parades lay road at their feet; enemies who step on it get bounced into the air. */
+  private stepRoad(): void {
+    const P = BALANCE.ults.pride;
+    const sim = this.sim;
+    for (const p of sim.players.values()) {
+      const s = p.state;
+      if (s.prideTimer <= 0 || s.mode === MODE_DEAD) continue;
+      if (sim.time - (this.roadAt.get(p.id) ?? -1) < P.roadEvery) continue;
+      // Only on (or just above) the floor: the road is painted on the ground.
+      const ground = sim.world.groundBelow(s.px, s.py + 0.3, s.pz, 1.5);
+      if (ground === null) continue;
+      this.roadAt.set(p.id, sim.time);
+      this.road.push({ x: s.px, y: ground, z: s.pz, owner: p.id, until: sim.time + P.roadLife });
+    }
+    if (this.road.length > 600) this.road.splice(0, this.road.length - 600);
+    for (let i = this.road.length - 1; i >= 0; i--) {
+      const piece = this.road[i];
+      if (sim.time >= piece.until) {
+        this.road.splice(i, 1);
+        continue;
+      }
+      const owner = sim.players.get(piece.owner);
+      for (const o of sim.players.values()) {
+        const t = o.state;
+        if (o.id === piece.owner || t.mode === MODE_DEAD || t.spawnProt > 0 || !sim.isEnemy(piece.owner, o.id)) continue;
+        if (t.py > piece.y + 1 || t.py < piece.y - 0.6) continue;
+        const dx = t.px - piece.x;
+        const dz = t.pz - piece.z;
+        const hd = Math.hypot(dx, dz);
+        if (hd > P.roadRadius + playerRadius(t)) continue;
+        const key = `${piece.owner}:${o.id}`;
+        if (sim.time < (this.bounceAt.get(key) ?? 0)) continue;
+        this.bounceAt.set(key, sim.time + P.bounceCool);
+        // Mostly straight up, nudged off the road.
+        const ux = hd > 1e-3 ? dx / hd : Math.sin(owner?.state.yaw ?? 0);
+        const uz = hd > 1e-3 ? dz / hd : Math.cos(owner?.state.yaw ?? 0);
+        sim.applyHit(o, piece.owner, ux * 0.35, 1, uz * 0.35, P.bounce, P.bounceInflation, { direct: false, low: true, x: t.px, y: piece.y, z: t.pz, ult: true });
+      }
+    }
+    if (this.bounceAt.size > 2000) this.bounceAt.clear();
   }
 
   // --- Robot Mode ----------------------------------------------------------------------------

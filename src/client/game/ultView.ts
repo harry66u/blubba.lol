@@ -60,6 +60,30 @@ export interface UltHost {
   charFace(kind: UltId): string | null;
   /** Camera shake (0..1) and a field-of-view kick. */
   shake(amount: number, fov: number): void;
+  /** Height of the floor under a point (within a short drop), or null over a gap. */
+  groundAt(x: number, y: number, z: number): number | null;
+}
+
+/** The pride flag's six stripes. */
+const RAINBOW = [0xe40303, 0xff8c00, 0xffed00, 0x008026, 0x24408e, 0x732982];
+/** Most road pieces drawn at once. */
+const MAX_ROAD = 360;
+
+let roadTex: THREE.Texture | null = null;
+/** A strip of rainbow road: the six stripes across it, soft at the ends. */
+function roadTexture(): THREE.Texture {
+  if (roadTex) return roadTex;
+  const c = document.createElement('canvas');
+  c.width = 64;
+  c.height = 96;
+  const g = c.getContext('2d')!;
+  RAINBOW.forEach((col, i) => {
+    g.fillStyle = `#${col.toString(16).padStart(6, '0')}`;
+    g.fillRect((i * 64) / RAINBOW.length, 0, 64 / RAINBOW.length + 1, 96);
+  });
+  roadTex = new THREE.CanvasTexture(c);
+  roadTex.colorSpace = THREE.SRGBColorSpace;
+  return roadTex;
 }
 
 const tmp = new THREE.Vector3();
@@ -195,8 +219,20 @@ export class UltView {
   private readonly laserGeo = new THREE.CylinderGeometry(1, 1, 1, 6, 1, true).translate(0, 0.5, 0).rotateX(Math.PI / 2);
   private readonly laserMat = new THREE.MeshBasicMaterial({ color: 0xff2030, transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending });
 
+  /** Rainbow road pieces laid by Pride Parades (drawn here; the server has its own copy that bounces people). */
+  private readonly road: { x: number; y: number; z: number; a: number; born: number }[] = [];
+  private readonly roadLast = new Map<number, { t: number; x: number; z: number }>();
+  private readonly roadMesh: THREE.InstancedMesh;
+
   constructor(private readonly g: UltHost) {
     g.scene.add(this.root);
+    const roadGeo = new THREE.PlaneGeometry(1, 1);
+    roadGeo.rotateX(-Math.PI / 2);
+    this.roadMesh = new THREE.InstancedMesh(roadGeo, new THREE.MeshBasicMaterial({ map: roadTexture(), transparent: true, opacity: 0.92, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }), MAX_ROAD);
+    this.roadMesh.frustumCulled = false;
+    this.roadMesh.count = 0;
+    this.roadMesh.renderOrder = 1;
+    this.root.add(this.roadMesh);
     // Ult projectiles get their own looks.
     const bigMat = new THREE.MeshStandardMaterial({ color: 0x9fe8ff, emissive: 0x2ec5ff, emissiveIntensity: 1.1, transparent: true, opacity: 0.55, roughness: 0.1, depthWrite: false });
     g.effects.registerProjectile(PROJ_BIG_BLOW, { geo: new THREE.SphereGeometry(1, 24, 16), mat: bigMat, scale: true, stretch: true, trail: [0xe8fbff, 0x9fe8ff, 0xffffff], trailSize: 0.45 });
@@ -215,6 +251,9 @@ export class UltView {
     this.locks.length = 0;
     this.clouds.length = 0;
     this.later.length = 0;
+    this.road.length = 0;
+    this.roadLast.clear();
+    this.roadMesh.count = 0;
     this.wasReady = false;
   }
 
@@ -294,7 +333,59 @@ export class UltView {
       case 'robot':
         this.startLock(e.id, e.targets);
         break;
+      case 'pride':
+        this.prideBurst(e.x, e.y, e.z);
+        this.popAt(e.id, 0.2, 'YAAAS!', '#ff5fd2', 1.2);
+        this.popAt(e.id, 0.9, 'LOVE WINS!', '#ffed00', 1.1);
+        break;
     }
+  }
+
+  /** The rainbow burst when a Pride Parade starts: six rings, one per stripe, and rainbow confetti. */
+  private prideBurst(x: number, y: number, z: number): void {
+    const fx = this.g.effects;
+    const R = BALANCE.ults.pride.burstRadius;
+    RAINBOW.forEach((col, i) => fx.shockwave(x, y + 0.12 + i * 0.02, z, (R * (1 - i * 0.1)) / 1.2, 0.55 + i * 0.05, col, true));
+    fx.confettiBurst(x, y + 1.2, z, this.g.lowQuality() ? 30 : 70, RAINBOW);
+  }
+
+  /** Lays road behind every Pride Parade and ages the pieces (they shrink away at the end). */
+  private updateRoad(players: UltPlayerView[]): void {
+    const P = BALANCE.ults.pride;
+    const now = this.time;
+    for (const p of players) {
+      if (publicUltKind(p.ult) !== 'pride') {
+        this.roadLast.delete(p.id);
+        continue;
+      }
+      const last = this.roadLast.get(p.id);
+      if (last && now - last.t < P.roadEvery) continue;
+      const ground = this.g.groundAt(p.x, p.y + 0.3, p.z);
+      if (ground === null) continue;
+      // Pieces point along the way you're going.
+      const a = last && Math.hypot(p.x - last.x, p.z - last.z) > 0.05 ? Math.atan2(p.x - last.x, p.z - last.z) : (this.road[this.road.length - 1]?.a ?? 0);
+      this.roadLast.set(p.id, { t: now, x: p.x, z: p.z });
+      this.road.push({ x: p.x, y: ground + 0.03, z: p.z, a, born: now });
+      if (this.road.length > MAX_ROAD) this.road.shift();
+    }
+    while (this.road.length && now - this.road[0].born > P.roadLife) this.road.shift();
+    const m = this.roadMesh;
+    const q = new THREE.Quaternion();
+    const pos = new THREE.Vector3();
+    const sc = new THREE.Vector3();
+    const up = new THREE.Vector3(0, 1, 0);
+    const mat = new THREE.Matrix4();
+    this.road.forEach((r, i) => {
+      const age = now - r.born;
+      const k = Math.min(1, age / 0.12) * Math.min(1, (P.roadLife - age) / 0.6);
+      q.setFromAxisAngle(up, r.a);
+      pos.set(r.x, r.y, r.z);
+      sc.set(P.roadRadius * 1.6 * k, 1, 0.95);
+      mat.compose(pos, q, sc);
+      m.setMatrixAt(i, mat);
+    });
+    m.count = this.road.length;
+    m.instanceMatrix.needsUpdate = true;
   }
 
   /** Your own ult: the banner, a light tint, sound and kick. */
@@ -549,6 +640,7 @@ export class UltView {
     this.updateNoses(players);
     this.updateLocks(players);
     this.updateClouds(dt);
+    this.updateRoad(players);
     this.auras(dt, players);
     this.updateHud(players);
   }
@@ -622,6 +714,7 @@ export class UltView {
       if (kind === 'bigBlow' && Math.random() < dt * 14 * k) fx.confetto({ x: p.x + r(), y: p.y + Math.random() * (p.head - p.y), z: p.z + r(), vy: 1.2, size: 0.7, grow: 0, max: 0.8, drag: 1, spin: 5 }, [0x2ec5ff, 0x9fe8ff, 0xffffff][Math.floor(Math.random() * 3)]);
       if (kind === 'juice' && Math.random() < dt * 6 * k) fx.confetto({ x: p.x + r(), y: p.head - 0.3, z: p.z + r(), vy: 2, size: 0.5, grow: 0, max: 0.7, drag: 1, gravity: 6, spin: 4 }, 0xbff0ff);
       if (kind === 'robot' && Math.random() < dt * 8 * k) fx.puff({ x: p.x + r() * 0.5, y: p.head, z: p.z + r() * 0.5, vy: 1.5, size: 0.12, grow: 1, max: 0.5, drag: 2 }, 0xff2030);
+      if (kind === 'pride' && Math.random() < dt * 7 * k) fx.confetto({ x: p.x + r(), y: p.head - 0.2, z: p.z + r(), vy: 1.5, size: 0.5, grow: 0, max: 0.7, drag: 1, gravity: 3, spin: 5 }, RAINBOW[Math.floor(Math.random() * RAINBOW.length)]);
       if (p.ult & ULT_BIT_GASSED && Math.random() < dt * 10 * k) fx.puff({ x: p.x + r(), y: p.y + 0.5 + Math.random() * (p.head - p.y), z: p.z + r(), vy: 1, size: 0.3, grow: 1.5, max: 0.9, drag: 1.5 }, 0x9ccc4a);
     }
   }
@@ -658,6 +751,9 @@ export class UltView {
           break;
         case 'robot':
           status = this.time < this.robotScanUntil ? '🤖 TARGET ACQUIRED' : '🤖 EXECUTING';
+          break;
+        case 'pride':
+          status = `🌈 PRIDE PARADE ${Math.ceil(p.prideTimer)}s`;
           break;
         default:
           if (chaser) {

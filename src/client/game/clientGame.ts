@@ -392,6 +392,7 @@ export class ClientGame {
       jab: (id) => (id === this.youId ? this.selfMan?.jab() : this.remotes.get(id)?.man.jab()),
       keyOf: () => this.key('ult'),
       charFace: (kind) => this.charFaceUrl(kind),
+      groundAt: (x, y, z) => this.world.groundBelow(x, y, z, 1.5),
       shake: (amount, fov) => {
         this.trauma = Math.min(1, this.trauma + amount);
         this.fovKick += fov;

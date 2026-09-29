@@ -2,15 +2,15 @@ import { BALANCE } from '../balance';
 import type { PlayerState } from '../player';
 
 /**
- * Ultimate abilities ("ults"): a meter that fills as you play, then one big move. The four in play
- * are the signature moves of the regulars (BOR, ABAG, SOL and KESTY). They're all free: every spawn
+ * Ultimate abilities ("ults"): a meter that fills as you play, then one big move. The five in play
+ * are the signature moves of the regulars (BOR, ABAG, SOL, KESTY and BÆN). They're all free: every spawn
  * deals you one at random (PLAYABLE_ULTS). Big Blow is kept for the debug tools only.
  *
  * This file holds what both sides share: the list, the public snapshot bits, and the effects on
  * movement that client prediction has to reproduce exactly. The server side is game/ultSim.ts.
  * Numbers live in BALANCE.ults.
  */
-export const ULT_IDS = ['bigBlow', 'juice', 'chase', 'cropDuster', 'robot'] as const;
+export const ULT_IDS = ['bigBlow', 'juice', 'chase', 'cropDuster', 'robot', 'pride'] as const;
 export type UltId = (typeof ULT_IDS)[number];
 
 export const DEFAULT_ULT: UltId = 'juice';
@@ -24,10 +24,11 @@ export const ULT_CHARACTER: Partial<Record<UltId, { body: string; name: string; 
   chase: { body: 'abag', name: 'ABAG', seconds: 7, color: '#ff5fd2' },
   cropDuster: { body: 'sol', name: 'SOL', seconds: 7, color: '#8ee000' },
   robot: { body: 'kesty', name: 'KESTY', seconds: 7, color: '#ff3b5c' },
+  pride: { body: 'baen', name: 'BÆN', seconds: 8, color: '#b44dff' },
 };
 
 /** The ults dealt out in matches, one at random each time you spawn. */
-export const PLAYABLE_ULTS: readonly UltId[] = ['juice', 'chase', 'cropDuster', 'robot'];
+export const PLAYABLE_ULTS: readonly UltId[] = ['juice', 'chase', 'cropDuster', 'robot', 'pride'];
 
 export function randomUlt(): UltId {
   return PLAYABLE_ULTS[Math.floor(Math.random() * PLAYABLE_ULTS.length)];
@@ -85,6 +86,14 @@ export const ULT_INFO: Record<UltId, UltInfo> = {
     tagline: 'TARGET ACQUIRED. EXECUTING.',
     color: '#ff3b5c',
   },
+  pride: {
+    name: 'BÆN',
+    icon: '🌈',
+    by: 'Bæn Is Gay',
+    blurb: 'Turn into BÆN in full rainbow and lead a Pride Parade for 8 s: a rainbow burst launches everyone around you, you strut faster, and anyone who steps on your rainbow road gets bounced sky-high.',
+    tagline: 'PRIDE PARADE! Everybody off the road!',
+    color: '#b44dff',
+  },
 };
 
 export function ultIndex(id: UltId): number {
@@ -107,6 +116,7 @@ export function activeUlt(p: PlayerState): UltId | null {
   if (p.chaseTimer > 0) return 'chase';
   if (p.fartTimer > 0) return 'cropDuster';
   if (p.robotTimer > 0) return 'robot';
+  if (p.prideTimer > 0) return 'pride';
   return null;
 }
 
@@ -116,11 +126,12 @@ export function chargeUlt(p: PlayerState, amount: number): void {
   p.ult = Math.min(1, p.ult + amount);
 }
 
-/** Move speed multiplier: Juice and The Chase speed you up, a Crop Duster cloud slows you down. */
+/** Move speed multiplier: Juice, The Chase and a Pride Parade speed you up, a Crop Duster cloud slows you down. */
 export function ultSpeedMult(p: PlayerState): number {
   const U = BALANCE.ults;
   let m = 1;
   if (p.juiceTimer > 0) m *= U.juice.speedMult;
+  if (p.prideTimer > 0) m *= U.pride.speedMult;
   if (p.chaseTimer > 0) m *= U.chase.speedMult;
   if (p.gasTimer > 0) m *= U.cropDuster.cloudSlow;
   return m;

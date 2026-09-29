@@ -605,6 +605,26 @@ export const BALANCE = {
       knockback: 0.75,
       inflation: 0.08,
     },
+    /**
+     * Bæn Is Gay (Pride Parade): a rainbow burst launches everyone around you up and out, then for
+     * `duration` you strut faster, leaving a rainbow road; enemies who step on it get bounced up.
+     */
+    pride: {
+      duration: 8,
+      speedMult: 1.25,
+      burstRadius: 7.5,
+      burstKnockback: 1.15,
+      burstInflation: 0.1,
+      /** How often a piece of road is laid, and how long each piece lasts. */
+      roadEvery: 0.1,
+      roadLife: 3,
+      /** Reach of a piece of road (plus the victim's radius), and how hard it bounces them. */
+      roadRadius: 1.1,
+      bounce: 0.8,
+      bounceInflation: 0.04,
+      /** The same enemy can't be bounced by your road again sooner than this. */
+      bounceCool: 1.1,
+    },
   },
 
   crown: {
