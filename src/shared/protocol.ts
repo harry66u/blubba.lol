@@ -9,7 +9,7 @@ import type { Tornado } from './game/loot';
 import type { Cosmetics, ProgressReport, ReportReason } from './economy';
 import { publicUlt } from './game/ults';
 
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 11;
 
 // --- Binary message ids -------------------------------------------------------------------
 export const MSG_INPUTS = 1;
@@ -51,6 +51,8 @@ export type ClientMessage =
   | { type: 'loadout'; loadout: Loadout }
   | { type: 'ping'; t: number }
   | { type: 'name'; name: string }
+  /** PLAY AGAIN on the results screen. */
+  | { type: 'again' }
   | { type: 'host'; action: 'kick'; id: number }
   | { type: 'host'; action: 'settings'; settings: Partial<RoomSettings> }
   | { type: 'host'; action: 'restart' }
@@ -130,6 +132,8 @@ export type ServerMessage =
   /** XP, coins, unlocks (and rating) earned in the match that just ended. */
   | { type: 'progress'; report: ProgressReport }
   | { type: 'chat'; from: number; id: number }
+  /** Who has pressed PLAY AGAIN on the results so far. */
+  | { type: 'again'; ids: number[] }
   /** Your name was changed (e.g. after several players reported it). */
   | { type: 'renamed'; name: string; message: string }
   | { type: 'error'; code: 'full' | 'not_found' | 'version' | 'kicked' | 'bad_name' | 'server' | 'account_required' | 'already' | 'ranked_over'; message: string };

@@ -172,7 +172,8 @@ function label(
   g.scale(k, 1);
   if (opts.stroke) {
     g.lineJoin = 'round';
-    g.lineWidth = size * 0.18;
+    // Thin enough that the holes in letters like B stay open.
+    g.lineWidth = size * 0.1;
     g.strokeStyle = opts.stroke;
     g.strokeText(text, 0, 0);
   }

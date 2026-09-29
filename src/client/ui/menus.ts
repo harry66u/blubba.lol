@@ -762,26 +762,13 @@ export function buildReplayBanner(victim: string, by: string, distance: number, 
 }
 
 /** "Next match in 12..." under the results (ticked in place by main.ts). */
-export function resultsCountdownText(secondsLeft: number, ranked: boolean): string {
-  return ranked ? `Back to the menu in ${Math.ceil(secondsLeft)}...` : `Next match in ${Math.ceil(secondsLeft)}...`;
+export function resultsCountdownText(secondsLeft: number, ranked: boolean, lobby = false): string {
+  const s = Math.ceil(secondsLeft);
+  return ranked ? `Back to the menu in ${s}...` : lobby ? `Back to the lobby in ${s}...` : `Next match in ${s}...`;
 }
 
 function prefersReducedMotion(): boolean {
   return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-}
-
-/** Counts a number up from zero (the results screen's stats). */
-function countUp(target: HTMLElement, to: number, format: (v: number) => string, delayMs: number): void {
-  target.textContent = format(0);
-  const start = performance.now() + delayMs;
-  const dur = 900;
-  const step = (now: number) => {
-    if (!target.isConnected && now > start + 50) return;
-    const t = Math.min(1, Math.max(0, (now - start) / dur));
-    target.textContent = format(to * (1 - (1 - t) ** 3));
-    if (t < 1) requestAnimationFrame(step);
-  };
-  requestAnimationFrame(step);
 }
 
 function confetti(): HTMLElement {
@@ -801,17 +788,32 @@ function confetti(): HTMLElement {
   return wrap;
 }
 
-const AWARD_ICON: Record<string, string> = { longestLaunch: '🚀', mostKos: '💥', mostChain: '⛓️', bestCombo: '🎯', mostPopped: '🎈' };
-
 function ordinal(n: number): string {
   const s = ['th', 'st', 'nd', 'rd'];
   const v = n % 100;
   return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
 }
 
+/** The results screen's buttons: PLAY AGAIN (with who's ready) and back to the menu. */
+export interface ResultsActions {
+  /** null hides PLAY AGAIN (challenge links). */
+  again: { label: string; done: boolean; onClick: () => void } | null;
+  onMenu: () => void;
+}
+
+/** What the game was played to, in a few words (the results kicker). */
+function goalText(result: MatchResult): string {
+  if (result.rounds) return `First to ${result.rounds.target} rounds`;
+  if (result.mode === 'knockout') return `First to ${BALANCE.modes.knockout.target} KOs`;
+  if (result.mode === 'teamKnockout') return `First team to ${BALANCE.modes.teamKnockout.target} KOs`;
+  if (result.mode === 'duel') return `First to ${BALANCE.modes.duel.target} KOs`;
+  return 'Match over';
+}
+
 /**
- * The end-of-match screen. `intro` plays the entrance (podium rising, confetti, counters); main.ts
- * turns it off when redrawing the same results (e.g. when the rewards arrive).
+ * The end-of-match screen: who won, a small podium, your line, rewards and PLAY AGAIN. `intro`
+ * plays the entrance (podium rising, confetti); main.ts turns it off when redrawing the same
+ * results (e.g. when the rewards arrive or someone presses PLAY AGAIN).
  */
 export function buildResults(
   result: MatchResult,
@@ -819,8 +821,9 @@ export function buildResults(
   youId: number,
   secondsLeft: number,
   teams: TeamView | null = null,
-  progress: { report: ProgressReport | null; guest: boolean; onSignup: () => void; ranked: boolean } | null = null,
+  progress: { report: ProgressReport | null; guest: boolean; onSignup: () => void; ranked: boolean; lobby?: boolean } | null = null,
   intro = true,
+  actions: ResultsActions | null = null,
 ): HTMLElement {
   const animate = intro && !prefersReducedMotion();
   const top = result.standings.slice(0, 3);
@@ -834,8 +837,8 @@ export function buildResults(
     }
     const team = roster.get(s.id)?.team ?? -1;
     const color = hexColor(teams && team >= 0 ? teams.colors[team] : (PLAYER_COLORS[roster.get(s.id)?.color ?? 0]?.hex ?? 0xffffff));
-    // Sudden Death ranks by rounds won, so the podium shows those instead of points.
-    const line = result.rounds ? `${s.roundWins ?? 0} round${s.roundWins === 1 ? '' : 's'} won` : `${s.score} pts`;
+    // Sudden Death ranks by rounds won, so the podium shows those instead of knockouts.
+    const line = result.rounds ? `${s.roundWins ?? 0} round${s.roundWins === 1 ? '' : 's'}` : `${s.stats.kos} KO${s.stats.kos === 1 ? '' : 's'}`;
     const place = places[i];
     podium.append(
       el(
@@ -846,9 +849,8 @@ export function buildResults(
           { class: 'who' },
           place === 1 ? el('span', { class: 'crown', text: '👑', attrs: { 'aria-hidden': 'true' } }) : null,
           tubeMan(color, { className: place === 1 ? 'flail' : 'sway', mood: place === 1 ? 'happy' : 'wow' }),
-          el('div', { class: 'nm', text: s.name }),
+          el('div', { class: 'nm', text: s.id === youId ? 'You' : s.name }),
           el('div', { class: 'pts', text: line }),
-          s.id === youId ? el('span', { class: 'you-tag', text: 'YOU' }) : null,
         ),
         el('div', { class: 'block' }, el('span', { text: MEDALS[place - 1] })),
       ),
@@ -859,20 +861,12 @@ export function buildResults(
   const winner = result.standings[0];
   let won = winner?.id === youId;
   let title = won ? 'YOU WIN!' : `${winner?.name ?? 'Nobody'} wins!`;
-  let sub = me ? (won ? 'Nobody could keep you on the ground.' : `You finished ${ordinal(myPlace)} of ${result.standings.length}`) : '';
   let teamLine: HTMLElement | null = null;
-  if (result.rounds) {
-    // Sudden Death: first to N round wins; the score line.
-    const top = result.standings.filter((s) => (s.roundWins ?? 0) > 0).slice(0, 4);
-    const how = `First to ${result.rounds.target} rounds · ${result.rounds.played} played` + (top.length ? ` · ${top.map((s) => `${s.id === youId ? 'You' : s.name} ${s.roundWins}`).join(' · ')}` : '');
-    teamLine = el('div', { class: 'team-result', style: 'text-align:center', text: how });
-  }
   const tr = result.teams;
   if (tr && teams) {
     const w = tr.winner;
     won = w >= 0 && w === teams.youTeam;
     title = w < 0 ? "IT'S A DRAW!" : won ? 'YOUR TEAM WINS!' : `${teams.names[w]} TEAM WINS!`;
-    sub = w < 0 ? 'Evenly matched!' : won ? 'Teamwork makes the tube men fly.' : 'So close. Get them next time!';
     const fmt = (v: number) => (result.mode === 'pump' ? `${v}%` : String(v));
     teamLine = el(
       'div',
@@ -882,43 +876,32 @@ export function buildResults(
       el('span', { class: 'team', text: `${fmt(tr.scores[1])} ${teams.names[1]}`, style: { color: hexColor(teams.colors[1]) } }),
     );
   }
-  const stats = el('div', { class: 'stat-grid results-stats' });
-  const addStat = (icon: string, k: string, v: number, fmt: (v: number) => string, i: number) => {
-    const value = el('div', { class: 'v', text: fmt(v) });
-    if (animate) countUp(value, v, fmt, 700 + i * 120);
-    stats.append(el('div', { class: 'stat' }, el('div', { class: 'ico', text: icon, attrs: { 'aria-hidden': 'true' } }), el('div', {}, value, el('div', { class: 'k', text: k }))));
-  };
-  if (me && result.rounds) {
-    // Sudden Death: rounds you won.
-    addStat('🏁', 'Rounds you won', me.roundWins ?? 0, (v) => `${Math.round(v)} of ${result.rounds!.target}`, 0);
-  }
-  if (me) {
-    const whole = (v: number) => String(Math.round(v));
-    addStat('💥', 'Your knockouts', me.stats.kos, whole, 0);
-    addStat('🎈', 'Times popped', me.stats.deaths, whole, 1);
-    addStat('🚀', 'Your longest launch', me.stats.longestLaunch, (v) => `${v.toFixed(1)} m`, 2);
-    addStat('🎯', 'Hits landed', me.stats.hits, whole, 3);
-  }
-  const nameOf = (id: number) => result.standings.find((s) => s.id === id)?.name ?? '?';
-  const awardText: Record<string, (v: number) => string> = {
-    longestLaunch: (v) => `Longest launch · ${v.toFixed(1)} m`,
-    mostKos: (v) => `Most knockouts · ${v}`,
-    mostChain: (v) => `Most chain knockouts · ${v}`,
-    bestCombo: (v) => `Best air combo · ${v} hits`,
-    mostPopped: (v) => `Popped the most · ${v}`,
-  };
-  const awards = el('div', { class: 'awards' });
-  for (const a of result.awards ?? []) {
-    awards.append(
-      el(
+  // Your match in one line.
+  const mine = me
+    ? [
+        !tr && !won && myPlace > 0 ? `${ordinal(myPlace)} of ${result.standings.length}` : '',
+        result.rounds ? `🏁 ${me.roundWins ?? 0} round${me.roundWins === 1 ? '' : 's'}` : '',
+        `💥 ${me.stats.kos} KO${me.stats.kos === 1 ? '' : 's'}`,
+        `🎈 popped ${me.stats.deaths}×`,
+      ].filter(Boolean)
+    : [];
+  const myLine = mine.length ? el('div', { class: 'my-line' }, ...mine.map((t) => el('span', { text: t }))) : null;
+  const countdown = el('div', { class: 'countdown', attrs: { 'data-countdown': '' } }, resultsCountdownText(secondsLeft, !!progress?.ranked, !!progress?.lobby));
+  const buttons = actions
+    ? el(
         'div',
-        { class: `award${a.id === youId ? ' me' : ''}` },
-        el('div', { class: 'ico', text: AWARD_ICON[a.key] ?? '⭐', attrs: { 'aria-hidden': 'true' } }),
-        el('div', {}, el('div', { class: 'k', text: awardText[a.key]?.(a.value) ?? a.key }), el('div', { class: 'v', text: nameOf(a.id) })),
-      ),
-    );
-  }
-  const countdown = el('div', { class: 'countdown', attrs: { 'data-countdown': '' } }, resultsCountdownText(secondsLeft, !!progress?.ranked));
+        { class: 'results-buttons' },
+        actions.again
+          ? el('button', {
+              class: `btn big play-again${actions.again.done ? ' done' : ''}`,
+              text: actions.again.label,
+              attrs: actions.again.done ? { disabled: '' } : {},
+              on: { click: actions.again.onClick },
+            })
+          : null,
+        el('button', { class: 'btn ghost results-menu', text: 'MENU', on: { click: actions.onMenu } }),
+      )
+    : null;
   const cls = `overlay results${won ? ' won' : ''}${animate ? '' : ' settled'}`;
   return el(
     'div',
@@ -930,15 +913,14 @@ export function buildResults(
       el(
         'div',
         { class: 'results-head' },
-        el('div', { class: 'kicker', text: `${MODE_INFO[result.mode]?.name ?? ''} · Match over` }),
+        el('div', { class: 'kicker', text: `${MODE_INFO[result.mode]?.name ?? ''} · ${goalText(result)}` }),
         el('h2', { class: 'results-title', text: title }),
-        sub ? el('div', { class: 'results-sub', text: sub }) : null,
         teamLine,
       ),
       podium,
-      awards.childElementCount ? awards : null,
-      stats.childElementCount ? stats : null,
+      myLine,
       progress?.report ? buildProgressBox(progress.report, progress.guest, progress.onSignup) : null,
+      buttons,
       el('div', { class: 'results-foot' }, countdown),
     ),
   );

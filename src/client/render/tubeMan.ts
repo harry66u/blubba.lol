@@ -519,8 +519,8 @@ export class TubeMan {
     // Glossy vinyl: low roughness, strong environment reflections, a clear coat when the GPU can
     // afford it, and a rim light so the silhouette pops.
     const makeMat = (map: THREE.Texture | null): BodyMat => {
-      const matOpts = { color: colorHex, roughness: 0.2, metalness: 0.0, emissive: new THREE.Color(colorHex), emissiveIntensity: BASE_GLOW, envMapIntensity: 2.2, map };
-      const mat = opts.physical ? new THREE.MeshPhysicalMaterial({ ...matOpts, clearcoat: 0.9, clearcoatRoughness: 0.08 }) : new THREE.MeshStandardMaterial(matOpts);
+      const matOpts = { color: colorHex, roughness: 0.3, metalness: 0.0, emissive: new THREE.Color(colorHex), emissiveIntensity: BASE_GLOW, envMapIntensity: 1.5, map };
+      const mat = opts.physical ? new THREE.MeshPhysicalMaterial({ ...matOpts, clearcoat: 0.45, clearcoatRoughness: 0.3 }) : new THREE.MeshStandardMaterial(matOpts);
       addRim(mat);
       return mat;
     };

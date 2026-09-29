@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BALANCE } from '../src/shared/balance';
 import { unlockedAt } from '../src/shared/economy';
 import type { GameEvent } from '../src/shared/game/events';
-import { GameSim, type SimPlayer } from '../src/shared/game/sim';
+import { GameSim, type SimPlayer, capsuleSphere } from '../src/shared/game/sim';
 import { PLAYABLE_ULTS, PROJ_BIG_BLOW, PROJ_ROCKET, ULT_BIT_READY, ULT_IDS, type UltId, publicUlt, publicUltKind, steerToward, ultIndex } from '../src/shared/game/ults';
 import { emptyInput } from '../src/shared/input';
 import { type Loadout, sanitizeLoadout } from '../src/shared/loadout';
@@ -230,7 +230,7 @@ describe('Big Blow in your face', () => {
 });
 
 describe('Juice', () => {
-  it('makes you heavier, faster and hit harder', () => {
+  it('makes you faster and hit harder, but you still take normal knockback', () => {
     const { sim, ps, ds } = setup([{ ult: 'juice' }, {}, {}]);
     const [a, b, c] = ps;
     place(ds[0], 0, 6);
@@ -241,13 +241,13 @@ describe('Juice', () => {
     expect(normalWalk).toBeGreaterThan(7);
     expect(juicedWalk / normalWalk).toBeCloseTo(BALANCE.ults.juice.speedMult, 1);
 
-    // The same hit launches a juiced player half as fast.
+    // Bigger body, same hits: the same hit launches a juiced player just as fast.
     const hitSpeed = (t: SimPlayer) => {
       t.state.inflation = 0.4;
       sim.applyHit(t, c.id, 1, 0, 0, 1, 0, { direct: true, low: false, x: 0, y: 1, z: 0 });
       return sim.drainEvents().find((e): e is Hit => e.t === 'hit' && e.target === t.id)!.speed;
     };
-    expect(hitSpeed(a) / hitSpeed(b)).toBeCloseTo(1 / BALANCE.ults.juice.massMult, 2);
+    expect(hitSpeed(a) / hitSpeed(b)).toBeCloseTo(1, 2);
 
     // And his shots hit harder.
     const shotSpeed = (juiced: boolean) => {
@@ -267,6 +267,25 @@ describe('Juice', () => {
     const ratio = shotSpeed(true) / shotSpeed(false);
     expect(ratio).toBeGreaterThan(1.2);
     expect(ratio).toBeLessThan(1.5);
+  });
+});
+
+describe('turning into the character', () => {
+  it('grows your hitbox for as long as you are the character, then shrinks it back', () => {
+    const { sim, ps, ds } = setup([{ ult: 'robot' }, {}]);
+    const [a] = ps;
+    place(ds[0], 0, 6);
+    expect(sim.hitR(a)).toBe(1);
+    popUlt(sim, ds, ds[0]);
+    expect(sim.hitR(a)).toBe(BALANCE.ults.transformHitbox.radius);
+    expect(sim.hitH(a)).toBe(BALANCE.ults.transformHitbox.height);
+    // A shot just past the normal body now lands on the bigger one.
+    const s = a.state;
+    const r = 0.42 * 1.2;
+    expect(capsuleSphere(s, s.px + r, s.py + 1, s.pz, 0.05)).toBeNull();
+    expect(capsuleSphere(s, s.px + r, s.py + 1, s.pz, 0.05, sim.hitR(a), sim.hitH(a))).not.toBeNull();
+    sim.time = a.bigUntil + 0.01;
+    expect(sim.hitR(a)).toBe(1);
   });
 });
 

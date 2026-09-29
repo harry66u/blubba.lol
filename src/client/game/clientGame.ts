@@ -324,6 +324,9 @@ export class ClientGame {
   onProgress: ((report: ProgressReport) => void) | null = null;
   onRenamed: ((name: string, message: string) => void) | null = null;
   lastProgress: ProgressReport | null = null;
+  /** Who pressed PLAY AGAIN on the current results. */
+  againIds = new Set<number>();
+  onAgainChange?: () => void;
   /** Players whose quick chat you've hidden (this session). */
   readonly muted = new Set<number>();
   showChat = true;
@@ -650,6 +653,10 @@ export class ClientGame {
       case 'progress':
         this.lastProgress = msg.report;
         this.onProgress?.(msg.report);
+        break;
+      case 'again':
+        this.againIds = new Set(msg.ids);
+        this.onAgainChange?.();
         break;
       case 'renamed':
         this.onRenamed?.(msg.name, msg.message);
@@ -1255,10 +1262,10 @@ export class ClientGame {
         const prev = this.crownId;
         this.crownId = e.id;
         if (e.id === you) {
-          this.hud.callout('YOU HAVE THE CROWN!', `You're worth ${BALANCE.crown.multiplier}x points now. Stay on!`, 2.2, '#ffc933');
+          this.hud.callout('YOU HAVE THE CROWN!', 'Everyone is coming for you. Stay on!', 2.2, '#ffc933');
           this.announcer.say('New champion!', 2);
         } else if (e.id >= 0) {
-          this.hud.toast(`👑 ${this.nameOf(e.id)} has the crown! Knock them off for ${BALANCE.crown.multiplier}x points.`, 3000);
+          this.hud.toast(`👑 ${this.nameOf(e.id)} has the crown! Knock them off!`, 3000);
         } else if (prev === you) {
           this.hud.toast('You lost the crown!', 2000);
         }
@@ -1308,8 +1315,8 @@ export class ClientGame {
           this.hud.callout('FINAL 30 SECONDS!', 'Still standing at the buzzer? Most knockouts wins.', 3, '#ff3b5c');
           this.announcer.say('Final thirty seconds!', 4);
         } else {
-          this.hud.callout('FINAL 30 SECONDS!', 'The map is collapsing! Knockouts count DOUBLE!', 3, '#ff3b5c');
-          this.announcer.say('Final thirty seconds! Knockouts count double!', 4);
+          this.hud.callout('FINAL 30 SECONDS!', 'The map is collapsing!', 3, '#ff3b5c');
+          this.announcer.say('Final thirty seconds! The map is collapsing!', 4);
         }
         a.siren();
         this.trauma = Math.min(1, this.trauma + 0.3);
@@ -2089,7 +2096,8 @@ export class ClientGame {
       tmp.py = c.py;
       tmp.pz = c.pz;
       tmp.inflation = c.inflation;
-      const t = rayCapsule(ox, oy, oz, dx, dy, dz, tmp, playerRadius(tmp) + extra);
+      const big = this.transformOf(rv.id) ? BALANCE.ults.transformHitbox : null;
+      const t = rayCapsule(ox, oy, oz, dx, dy, dz, tmp, playerRadius(tmp) * (big?.radius ?? 1) + extra, big?.height ?? 1);
       if (t !== null && t < best) best = t;
     }
     return new THREE.Vector3(ox + dx * best, oy + dy * best, oz + dz * best);
@@ -2723,7 +2731,8 @@ export class ClientGame {
       tmp.py = c.py;
       tmp.pz = c.pz;
       tmp.inflation = c.inflation;
-      const t = rayCapsule(ox, oy, oz, dx, dy, dz, tmp, playerRadius(tmp));
+      const big = this.transformOf(rv.id) ? BALANCE.ults.transformHitbox : null;
+      const t = rayCapsule(ox, oy, oz, dx, dy, dz, tmp, playerRadius(tmp) * (big?.radius ?? 1), big?.height ?? 1);
       if (t !== null && t < max && (best === null || t < best)) best = t;
     }
     return best;
@@ -2950,11 +2959,11 @@ export class ClientGame {
       const rival = [...this.roster.values()].find((r) => r.id !== me.id);
       sub = rival ? `You ${me.kos} – ${rival.kos} ${rival.name}${rival.bot ? ' (warm-up bot)' : ''} · first to ${BALANCE.modes.duel.target}` : 'Waiting for a rival...';
     } else if (me && this.teamMode) {
-      sub = `${MODE_INFO[this.mode].name} · you: ${me.kos} KO${me.kos === 1 ? '' : 's'}`;
+      sub = this.mode === 'teamKnockout' ? `First team to ${BALANCE.modes.teamKnockout.target} KOs · you: ${me.kos}` : `${MODE_INFO[this.mode].name} · you: ${me.kos} KO${me.kos === 1 ? '' : 's'}`;
     } else if (me) {
       const sorted = [...this.roster.values()].sort((a, b) => b.score - a.score);
       const rank = sorted.findIndex((r) => r.id === me.id) + 1;
-      sub = `#${rank} of ${sorted.length} · ${me.score} KO${me.score === 1 ? '' : 's'}`;
+      sub = `#${rank} of ${sorted.length} · ${me.score} of ${BALANCE.modes.knockout.target} KOs to win`;
     }
     const timeLeft = this.match.phase === 'waiting' ? 0 : Math.max(0, (this.match.endsAtTick - this.clock.tickAt(performance.now())) * DT);
     this.hud.update(

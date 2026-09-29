@@ -92,6 +92,8 @@ export class Room {
   /** Ticks in a row that threw (the lobby closes the room after a few). */
   tickFailures = 0;
   private readonly nameReports = new Map<number, Set<string>>();
+  /** Players who pressed PLAY AGAIN on the results (cleared when the next match starts). */
+  private readonly againVotes = new Set<number>();
 
   constructor(
     readonly code: string,
@@ -126,6 +128,7 @@ export class Room {
     // Private rooms wait in the lobby for the host's START (challenges and ranked start by themselves).
     sim.autoStart = !this.isPrivate || this.challenge || this.ranked;
     sim.onPhaseChange = () => {
+      if (sim.phase !== 'results') this.againVotes.clear();
       this.broadcastJson(this.matchMessage());
       this.rosterDirty = true;
       if (sim.phase === 'results' && sim === this.sim) this.awardMatch();
@@ -209,6 +212,7 @@ export class Room {
     const conn = this.conns.get(playerId);
     if (!conn) return;
     this.conns.delete(playerId);
+    this.againVotes.delete(playerId);
     // Ranked: leaving mid-match forfeits (the sim ends the match and the other player wins).
     this.sim.removePlayer(playerId);
     if (this.hostId === playerId) {
@@ -219,6 +223,42 @@ export class Room {
     if (this.conns.size === 0) this.emptySince = Date.now();
     this.rosterDirty = true;
     this.balanceBots();
+    // Whoever is left may all be waiting on PLAY AGAIN already.
+    this.checkAgain();
+  }
+
+  /**
+   * PLAY AGAIN on the results screen. The host of a private room starts the next match right
+   * away; anywhere else the wait ends as soon as every player in the room has pressed it.
+   */
+  private playAgain(playerId: number): void {
+    if (this.sim.phase !== 'results' || this.ranked || this.challenge) return;
+    if (this.isPrivate && playerId === this.hostId) {
+      this.startNextNow();
+      return;
+    }
+    this.againVotes.add(playerId);
+    this.broadcastJson({ type: 'again', ids: [...this.againVotes] });
+    this.checkAgain();
+  }
+
+  private checkAgain(): void {
+    if (this.sim.phase !== 'results' || this.ranked || this.challenge || this.conns.size === 0 || this.againVotes.size === 0) return;
+    for (const id of this.conns.keys()) if (!this.againVotes.has(id)) return;
+    this.startNextNow();
+  }
+
+  private startNextNow(): void {
+    const s = this.sim;
+    if (s.autoStart) {
+      // Cut the results short: the next tick moves on just as if the countdown ran out (new map included).
+      s.phaseEndsAt = Math.min(s.phaseEndsAt, s.time);
+    } else {
+      s.toLobby();
+      // Sudden Death settles its extra bots between matches (see tick).
+      if (s.suddenDeath) this.balanceBots();
+      if (s.canStart()) s.startMatch();
+    }
   }
 
   /** How many bots this room wants right now. */
@@ -336,6 +376,9 @@ export class Room {
         break;
       case 'chat':
         this.chat(conn, msg.id);
+        break;
+      case 'again':
+        this.playAgain(conn.playerId);
         break;
       case 'report':
         this.report(conn, msg.target, msg.reason);

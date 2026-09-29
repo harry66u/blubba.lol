@@ -115,6 +115,8 @@ export interface SimPlayer {
   chainTime: number;
   chainCool: Map<number, number>;
   koTimes: number[];
+  /** Sim time until which this player is turned into an ult character (bigger hitbox). */
+  bigUntil: number;
   /** Inflation before a max-pressure event (-1 when not in one). */
   savedInflation: number;
   /** Last time each target got a "blow" event from this player's leaf blower. */
@@ -452,6 +454,7 @@ export class GameSim {
       chainTime: -999,
       chainCool: new Map(),
       koTimes: [],
+      bigUntil: 0,
       savedInflation: -1,
       cos: { ...(opts.cos ?? DEFAULT_COSMETICS) },
       outAt: Infinity,
@@ -898,7 +901,7 @@ export class GameSim {
         // Direct hits on players.
         for (const p of this.players.values()) {
           if (p.id === pr.owner || p.state.mode === MODE_DEAD || !this.isEnemy(pr.owner, p.id)) continue;
-          const hit = capsuleSphere(p.state, pr.x, pr.y, pr.z, pr.radius);
+          const hit = capsuleSphere(p.state, pr.x, pr.y, pr.z, pr.radius, this.hitR(p), this.hitH(p));
           if (hit) {
             if (pr.light) this.tapHit(pr, p, hit);
             else this.directHit(pr, p, hit);
@@ -1305,8 +1308,8 @@ export class GameSim {
     for (const o of this.players.values()) {
       if (o === p || o.state.mode === MODE_DEAD || !this.isEnemy(p.id, o.id)) continue;
       const t = o.state;
-      const r = playerRadius(t);
-      const h = playerHeight(t);
+      const r = playerRadius(t) * this.hitR(o);
+      const h = playerHeight(t) * this.hitH(o);
       const ay = Math.max(t.py + r, Math.min(t.py + h - r, ey));
       let vx = t.px - ex;
       let vy = ay - ey;
@@ -1352,7 +1355,7 @@ export class GameSim {
       scratch.py = past.py;
       scratch.pz = past.pz;
       scratch.inflation = past.inflation;
-      const t = rayCapsule(ex, ey, ez, dx, dy, dz, scratch, playerRadius(scratch) + w.rayRadius);
+      const t = rayCapsule(ex, ey, ez, dx, dy, dz, scratch, playerRadius(scratch) * this.hitR(o) + w.rayRadius, this.hitH(o));
       if (t !== null && t < bestT) {
         bestT = t;
         best = o;
@@ -1432,7 +1435,7 @@ export class GameSim {
       let bestT = wh ? wh.dist : w.range;
       let best: (typeof targets)[number] | null = null;
       for (const t of targets) {
-        const tt = rayCapsule(ex, ey, ez, px, py, pz, t.st, playerRadius(t.st) + w.rayRadius);
+        const tt = rayCapsule(ex, ey, ez, px, py, pz, t.st, playerRadius(t.st) * this.hitR(t.o) + w.rayRadius, this.hitH(t.o));
         if (tt !== null && tt < bestT) {
           bestT = tt;
           best = t;
@@ -1511,8 +1514,8 @@ export class GameSim {
       if (o === p || !this.isEnemy(p.id, o.id)) continue;
       const t = o.state;
       if (t.mode === MODE_DEAD || t.mode === MODE_HELD || t.spawnProt > 0) continue;
-      const r = playerRadius(t);
-      const h = playerHeight(t);
+      const r = playerRadius(t) * this.hitR(o);
+      const h = playerHeight(t) * this.hitH(o);
       const ay = Math.max(t.py + r, Math.min(t.py + h - r, ey));
       let vx = t.px - ex;
       let vy = ay - ey;
@@ -1638,7 +1641,7 @@ export class GameSim {
     if (grenade) {
       for (const p of this.players.values()) {
         if (p.id === pr.owner || p.state.mode === MODE_DEAD || !this.isEnemy(pr.owner, p.id)) continue;
-        if (capsuleSphere(p.state, pr.x, pr.y, pr.z, pr.radius)) {
+        if (capsuleSphere(p.state, pr.x, pr.y, pr.z, pr.radius, this.hitR(p), this.hitH(p))) {
           this.detonate(pr);
           return true;
         }
@@ -2510,7 +2513,7 @@ export class GameSim {
       if (o === p || !this.isEnemy(p.id, o.id)) continue;
       const t = o.state;
       if (t.mode === MODE_DEAD || t.mode === MODE_HELD || t.spawnProt > 0) continue;
-      const hit = rayCapsule(ex, ey, ez, d.x, d.y, d.z, t, playerRadius(t) + G.aimForgiveness);
+      const hit = rayCapsule(ex, ey, ez, d.x, d.y, d.z, t, playerRadius(t) * this.hitR(o) + G.aimForgiveness, this.hitH(o));
       if (hit !== null && hit < bestT) {
         bestT = hit;
         target = o;
@@ -2641,18 +2644,15 @@ export class GameSim {
       }
     }
     if (killer && killer !== p && this.phase === 'playing') {
+      // One knockout, one point: the crown, the final seconds and revenge are callouts, not
+      // bonus points, so the score is always just the knockout count.
       points = BALANCE.scoring.knockout;
       if (this.crownId === p.id) {
-        points *= BALANCE.crown.multiplier;
         tags.push('crown');
         killer.stats.crownKos++;
       }
-      if (this.isFinal()) {
-        points *= BALANCE.final.multiplier;
-        tags.push('final');
-      }
+      if (this.isFinal()) tags.push('final');
       if (killer.nemesis === p.id) {
-        points += BALANCE.revenge.bonus;
         tags.push('revenge');
         killer.nemesis = -1;
       }
@@ -2707,6 +2707,9 @@ export class GameSim {
     s.charge = 0;
     p.respawnAt = this.time + BALANCE.match.respawnDelay;
     if (this.mode === 'duel' && killer && killer.stats.kos >= BALANCE.modes.duel.target && this.phase === 'playing') this.pendingEnd = true;
+    // Knockout: first to the target; Team Knockout: first team to theirs.
+    if (this.mode === 'knockout' && killer && killer.score >= BALANCE.modes.knockout.target && this.phase === 'playing') this.pendingEnd = true;
+    if (this.mode === 'teamKnockout' && killer && killer.team >= 0 && this.teamScores[killer.team as 0 | 1] >= BALANCE.modes.teamKnockout.target && this.phase === 'playing') this.pendingEnd = true;
     p.lastAttacker = -1;
     p.launchBy = -1;
     p.chainBy = -1;
@@ -2926,8 +2929,19 @@ export class GameSim {
     }
   }
 
+  /** Hitbox radius multiplier: bigger while turned into an ult character. */
+  hitR(p: SimPlayer): number {
+    return this.time < p.bigUntil ? BALANCE.ults.transformHitbox.radius : 1;
+  }
+
+  /** Hitbox height multiplier: taller while turned into an ult character. */
+  hitH(p: SimPlayer): number {
+    return this.time < p.bigUntil ? BALANCE.ults.transformHitbox.height : 1;
+  }
+
   respawn(p: SimPlayer): void {
     const s = p.state;
+    p.bigUntil = 0;
     // The ult meter carries over from life to life.
     const keep = { cJump: s.cJump, cDash: s.cDash, cBrace: s.cBrace, cGrab: s.cGrab, cGrapple: s.cGrapple, cReload: s.cReload, cU1: s.cU1, cU2: s.cU2, cTaunt: s.cTaunt, cUlt: s.cUlt, ult: s.ult, yaw: s.yaw };
     const fresh = createPlayerState();
@@ -3192,9 +3206,9 @@ export interface CapsuleHit {
 }
 
 /** Sphere vs. the player's vertical capsule. Returns the impact point on the body surface. */
-export function capsuleSphere(s: PlayerState, x: number, y: number, z: number, r: number): CapsuleHit | null {
-  const pr = playerRadius(s);
-  const h = playerHeight(s);
+export function capsuleSphere(s: PlayerState, x: number, y: number, z: number, r: number, rScale = 1, hScale = 1): CapsuleHit | null {
+  const pr = playerRadius(s) * rScale;
+  const h = playerHeight(s) * hScale;
   const ay = Math.max(s.py + pr, Math.min(s.py + h - pr, y));
   const dx = x - s.px;
   const dy = y - ay;
@@ -3205,9 +3219,9 @@ export function capsuleSphere(s: PlayerState, x: number, y: number, z: number, r
   return { x: s.px + (dx / d) * pr, y: ay + (dy / d) * pr, z: s.pz + (dz / d) * pr };
 }
 
-/** Distance along a ray to a player's capsule (with the given radius), or null if it misses. */
-export function rayCapsule(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, s: PlayerState, r: number): number | null {
-  const h = playerHeight(s);
+/** Distance along a ray to a player's capsule (with the given radius, height scaled by hScale), or null if it misses. */
+export function rayCapsule(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, s: PlayerState, r: number, hScale = 1): number | null {
+  const h = playerHeight(s) * hScale;
   const y0 = s.py + r;
   const y1 = Math.max(y0, s.py + h - r);
   // Closest approach between the ray and the capsule's vertical axis: refine twice.

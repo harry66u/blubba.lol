@@ -57,8 +57,8 @@ export const ULT_INFO: Record<UltId, UltInfo> = {
     name: 'BOR',
     icon: '💉',
     by: 'Juice',
-    blurb: 'Jab the giant syringe (it is full of air) and get JACKED for 14 s: heavier, faster, and your shots hit 30% harder.',
-    tagline: 'JUICED: heavier, faster, harder hits',
+    blurb: 'Jab the giant syringe (it is full of air) and get JACKED for 14 s: faster, and your shots hit 30% harder.',
+    tagline: 'JUICED: faster, harder hits',
     color: '#ff8a1f',
   },
   chase: {
@@ -126,7 +126,7 @@ export function ultSpeedMult(p: PlayerState): number {
   return m;
 }
 
-/** Extra mass against knockback (Juice makes you much heavier). */
+/** Extra mass against knockback (1 for every ult now: a bigger body never takes less). */
 export function ultMassMult(p: PlayerState): number {
   return p.juiceTimer > 0 ? BALANCE.ults.juice.massMult : 1;
 }

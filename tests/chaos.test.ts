@@ -115,7 +115,8 @@ describe('chaos', () => {
     const before = c.score;
     ko(c, a);
     // Triple for the crown, plus a revenge bonus (a had just knocked c out).
-    expect(c.score - before).toBe(BALANCE.crown.multiplier + BALANCE.revenge.bonus);
+    // One knockout, one point: the crown and revenge are callouts, not bonus points.
+    expect(c.score - before).toBe(1);
     expect(sim.crownId).toBe(-1);
     // Counted for the "Pop the crown holder" daily challenge.
     expect(c.stats.crownKos).toBe(1);
@@ -136,7 +137,7 @@ describe('chaos', () => {
     ko(b, a);
     const before = a.score;
     ko(a, b);
-    expect(a.score - before).toBe(1 + BALANCE.revenge.bonus);
+    expect(a.score - before).toBe(1);
     expect(kos(events).pop()?.tags).toContain('revenge');
     // Two quick knockouts by the same player.
     ko(c, a, false);
@@ -156,7 +157,7 @@ describe('chaos', () => {
     b.lastAttacker = a.id;
     b.lastAttackTime = sim.time;
     sim.knockout(b);
-    expect(a.score).toBe(BALANCE.final.multiplier);
+    expect(a.score).toBe(1);
     run(sim, ds, 6 * 60);
     expect(island.maxY).toBeLessThan(topBefore - 10);
     run(sim, ds, 20 * 60);

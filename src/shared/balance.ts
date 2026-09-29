@@ -471,16 +471,16 @@ export const BALANCE = {
   },
 
   grapple: {
-    range: 24,
-    cooldown: 5,
-    missCooldown: 1.2,
+    range: 34,
+    cooldown: 3,
+    missCooldown: 0.7,
     /** Extra radius around bodies so trackpad players can land grapples. */
-    aimForgiveness: 0.5,
-    pullSpeed: 15,
-    pullUp: 5,
-    pullHitstun: 0.35,
-    zipSpeed: 26,
-    zipMaxTime: 0.8,
+    aimForgiveness: 0.7,
+    pullSpeed: 19,
+    pullUp: 5.5,
+    pullHitstun: 0.45,
+    zipSpeed: 33,
+    zipMaxTime: 0.9,
   },
 
   chaos: {
@@ -534,19 +534,24 @@ export const BALANCE = {
    */
   ults: {
     meter: {
-      /** Fill per second while alive (about 27 s on its own). */
-      perSecond: 1 / 27,
+      /** Fill per second while alive (about 40 s on its own). */
+      perSecond: 1 / 40,
       /** Fill per 100% of inflation you pump into enemies (shots, streams, throws, chains). */
-      perInflation: 2.5,
-      /** A knockout fills it (almost) right up. */
-      perKo: 1.08,
+      perInflation: 1.6,
+      /** A knockout fills half of it. */
+      perKo: 0.5,
       /** Fill per 100% of inflation you take: a little help when you're the one getting blasted. */
-      perInflationTaken: 0.9,
+      perInflationTaken: 0.55,
     },
     /** Big Blow: the next trigger pull fires one giant air blast at full power, with any weapon. */
     bigBlow: { projSpeed: 58, radius: 1.35, lifetime: 0.95, blastRadius: 5.4, knockback: 1.9, inflation: 0.24, fireCooldown: 0.5 },
-    /** Juice: jacked for a while. Heavier (knockback divides by mass), faster, harder-hitting shots and throws. */
-    juice: { duration: 14, massMult: 2, powerMult: 1.3, speedMult: 1.15 },
+    /** Juice: jacked for a while. Faster, harder-hitting shots and throws (you take normal knockback). */
+    juice: { duration: 14, massMult: 1, powerMult: 1.3, speedMult: 1.15 },
+    /**
+     * While you're turned into the character your hitbox grows with the bigger body (radius and
+     * height multipliers). Hits on you still do exactly what they'd do without the ult.
+     */
+    transformHitbox: { radius: 1.45, height: 1.7 },
     /**
      * The Chase: lock on to the nearest enemy (in front if anyone is) and hunt them. Faster, dashes
      * recharge instantly, shots curve toward the target and grabbing them throws extra hard.
@@ -638,6 +643,10 @@ export const BALANCE = {
     /** Public team rooms are topped up with bots to this many players (4v4). */
     teamFill: 8,
     duel: { target: 5, durationSec: 180 },
+    /** Knockout: first to this many knockouts wins (or the most when time runs out). */
+    knockout: { target: 10 },
+    /** Team Knockout: first team to this many knockouts wins. */
+    teamKnockout: { target: 20 },
     /** One life each, everyone at 100% inflation, last tube man standing wins. */
     suddenDeath: {
       /** Rounds: last one standing wins a round; the first to this many round wins takes the match. */

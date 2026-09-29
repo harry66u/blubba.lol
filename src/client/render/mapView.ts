@@ -514,12 +514,12 @@ export class MapView {
       let m = mats.get(key);
       if (!m) {
         if (kind === 'glass') {
-          m = new THREE.MeshPhysicalMaterial({ color, roughness: 0.05, transmission: 0, transparent: true, opacity: 0.55, metalness: 0.1 });
+          m = new THREE.MeshPhysicalMaterial({ color, roughness: 0.25, transmission: 0, transparent: true, opacity: 0.55, metalness: 0.05 });
         } else if (kind === 'bouncy' || kind === 'candy') {
           // Glossy vinyl, or hard candy.
-          m = new THREE.MeshStandardMaterial({ color, roughness: kind === 'candy' ? 0.22 : 0.28, metalness: 0.02 });
+          m = new THREE.MeshStandardMaterial({ color, roughness: kind === 'candy' ? 0.42 : 0.45, metalness: 0.02 });
         } else if (kind === 'metal') {
-          m = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.55 });
+          m = new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.45 });
         } else {
           m = new THREE.MeshStandardMaterial({ color, roughness: kind === 'crate' ? 0.8 : 0.7 });
         }
@@ -768,7 +768,7 @@ export class MapView {
 
   private buildClouds(): void {
     const cloud = this.map.theme.cloud;
-    const mat = new THREE.MeshStandardMaterial({ color: cloud, roughness: 1, emissive: cloud === 0xffffff ? 0xdde9ff : cloud, emissiveIntensity: 0.35, flatShading: false });
+    const mat = new THREE.MeshStandardMaterial({ color: cloud, roughness: 1, emissive: cloud === 0xffffff ? 0xdde9ff : cloud, emissiveIntensity: 0.18, flatShading: false });
     const puff = new THREE.IcosahedronGeometry(1, 2);
     const geos: THREE.BufferGeometry[] = [];
     const m = new THREE.Matrix4();

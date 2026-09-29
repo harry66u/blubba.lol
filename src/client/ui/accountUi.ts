@@ -366,16 +366,15 @@ function unlockName(id: string): string {
   return PART_INFO[id as SpecialPartId]?.name ?? UTILITY_INFO[id as UtilityId]?.name ?? (ult ? `${ult.icon} ${ult.name} (ult)` : id);
 }
 
-/** XP / coins / unlocks / rating earned this match, for the results screen. */
+/**
+ * XP / coins / unlocks / rating earned this match, for the results screen: the totals and your
+ * level bar up front, the breakdown and daily challenges folded away under "Details".
+ */
 export function buildProgressBox(r: ProgressReport, isGuest: boolean, onSignup: () => void): HTMLElement {
   const box = el('div', { class: 'progress-box' });
   if (!r.reward.xp && !r.rating) {
     box.append(el('div', { class: 'small-note', text: 'Play a bit more of a match to earn XP and coins.' }));
     return box;
-  }
-  const lines = el('div', { class: 'lines' });
-  for (const l of r.reward.lines) {
-    lines.append(el('div', { class: 'line' }, el('span', { text: l.label }), el('span', { class: 'amt', text: [l.xp ? `+${l.xp} XP` : '', l.coins ? `+${l.coins} 🪙` : ''].filter(Boolean).join('  ') })));
   }
   const p = r.profile;
   const pct = Math.round((p.xpInto / p.xpNext) * 100);
@@ -385,27 +384,39 @@ export function buildProgressBox(r: ProgressReport, isGuest: boolean, onSignup: 
   const fill = el('div', { style: { width: `${pct}%` } });
   fill.style.setProperty('--from', `${Math.min(from, pct)}%`);
   box.append(
-    el('div', { class: 'totals' }, el('span', { class: 'xp', text: `+${r.reward.xp} XP` }), el('span', { class: 'cn', text: `+${r.reward.coins} 🪙` })),
-    lines,
-    el('div', { class: 'level-row small' }, el('div', { class: `lv-badge${levelled ? ' up' : ''}`, text: String(p.level) }), el('div', { class: 'xp-bar grow fill-in' }, fill)),
+    el(
+      'div',
+      { class: 'totals' },
+      el('span', { class: 'xp', text: `+${r.reward.xp} XP` }),
+      el('span', { class: 'cn', text: `+${r.reward.coins} 🪙` }),
+      el('div', { class: `lv-badge${levelled ? ' up' : ''}`, text: String(p.level) }),
+      el('div', { class: 'xp-bar grow fill-in' }, fill),
+    ),
   );
   if (levelled) box.append(el('div', { class: 'levelup', text: `LEVEL UP! You're level ${r.levelAfter}.` }));
   for (const id of r.unlocked) box.append(el('div', { class: 'unlock', text: `🔓 Unlocked: ${unlockName(id)}` }));
-  const next = UNLOCKS.find((u) => u.level > p.level);
-  if (next && !r.unlocked.length) box.append(el('div', { class: 'small-note', text: `Next unlock at level ${next.level}: ${unlockName(next.id)}` }));
   if (r.rating) {
     const d = r.rating.after - r.rating.before;
     const tier = tierFor(r.rating.after);
     box.append(el('div', { class: `rating-change ${d >= 0 ? 'up' : 'down'}`, text: `Rating ${r.rating.before} → ${r.rating.after} (${d >= 0 ? '+' : ''}${d}) · ${tier.name}` }));
   }
+  const details = el('details', { class: 'reward-details' }, el('summary', { text: 'Details' }));
+  const lines = el('div', { class: 'lines' });
+  for (const l of r.reward.lines) {
+    lines.append(el('div', { class: 'line' }, el('span', { text: l.label }), el('span', { class: 'amt', text: [l.xp ? `+${l.xp} XP` : '', l.coins ? `+${l.coins} 🪙` : ''].filter(Boolean).join('  ') })));
+  }
+  details.append(lines);
+  const next = UNLOCKS.find((u) => u.level > p.level);
+  if (next && !r.unlocked.length) details.append(el('div', { class: 'small-note', text: `Next unlock at level ${next.level}: ${unlockName(next.id)}` }));
   // Only matches that counted moved the challenges along.
-  if (r.reward.xp) add(box, buildDailyMini(p.daily));
+  if (r.reward.xp) add(details, buildDailyMini(p.daily));
+  box.append(details);
   if (isGuest) {
     box.append(
       el(
         'div',
         { class: 'guest-cta' },
-        el('span', { text: 'Playing as a guest: progress is saved in this browser.' }),
+        el('span', { text: 'Guest progress only lives in this browser.' }),
         el('button', { class: 'btn small blue', text: 'Make an account', on: { click: onSignup } }),
       ),
     );

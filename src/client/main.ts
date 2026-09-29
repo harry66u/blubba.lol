@@ -34,6 +34,7 @@ import {
   buildPause,
   buildReplayBanner,
   buildResults,
+  type ResultsActions,
   buildRoomJoin,
   buildScoreboard,
   buildSettings,
@@ -543,8 +544,10 @@ function setOverlay(next: typeof overlay): void {
               guest: !account.account,
               onSignup: () => openAccount('signup'),
               ranked: !!game.room?.ranked,
+              lobby: backToLobby(),
             },
             !redraw,
+            resultsActions(),
           ),
         );
         const panel = overlayLayer.querySelector('.results .panel');
@@ -671,12 +674,52 @@ function copyInvite(): void {
   else prompt('Copy this link:', link);
 }
 
+/** Private rooms go back to the lobby after the results (challenges and ranked don't). */
+function backToLobby(): boolean {
+  const r = game.room;
+  return !!r?.isPrivate && !r.challenge && !r.ranked;
+}
+
+/** PLAY AGAIN (and who's ready) and MENU for the results screen. */
+function resultsActions(): ResultsActions {
+  const room = game.room;
+  let again: ResultsActions['again'] = null;
+  if (room?.ranked) {
+    again = {
+      label: 'QUEUE AGAIN',
+      done: false,
+      onClick: () => {
+        leaveMatch();
+        startJoin(identity.name, { kind: 'ranked' });
+      },
+    };
+  } else if (room && !room.challenge) {
+    const humans = [...game.roster.values()].filter((r) => !r.bot).length;
+    const mine = game.againIds.has(game.youId);
+    again = {
+      label: mine ? `READY ✓ ${game.againIds.size}/${Math.max(humans, game.againIds.size)}` : 'PLAY AGAIN',
+      done: mine,
+      onClick: () => {
+        audio.uiClick();
+        net.send({ type: 'again' });
+        game.againIds.add(game.youId);
+        if (overlay === 'results') setOverlay('results');
+      },
+    };
+  }
+  return { again, onMenu: leaveMatch };
+}
+
+game.onAgainChange = () => {
+  if (overlay === 'results') setOverlay('results');
+};
+
 /** Ticks "Next match in..." without redrawing the results (so their entrance plays once). */
 function tickResultsCountdown(): void {
   const countdown = overlayLayer.querySelector<HTMLElement>('.results [data-countdown]');
   if (!countdown) return;
   const secondsLeft = Math.max(0, (game.match.endsAtTick - game.clock.tickAt(performance.now())) / 60);
-  countdown.textContent = resultsCountdownText(secondsLeft, !!game.room?.ranked);
+  countdown.textContent = resultsCountdownText(secondsLeft, !!game.room?.ranked, backToLobby());
 }
 
 function renderScoreboard(): void {
@@ -855,6 +898,7 @@ net.handlers = {
 
 game.onMatchChange = (m) => {
   if (m.phase === 'playing') game.lastProgress = null;
+  if (m.phase !== 'results') game.againIds.clear();
   if (m.phase === 'results') {
     if (m.result?.replay && overlay !== 'replay') {
       game.startReplay(m.result.replay, () => {

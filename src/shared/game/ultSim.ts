@@ -1,7 +1,7 @@
 import { BALANCE } from '../balance';
 import { MODE_DEAD, type ShotSpec, type StepResult, eyeHeight, lookDir, playerHeight, playerRadius } from '../player';
 import type { GameSim, Projectile, SimPlayer } from './sim';
-import { PROJ_BIG_BLOW, PROJ_ROCKET, chargeUlt, steerToward, ultOf, ultPowerMult } from './ults';
+import { PROJ_BIG_BLOW, PROJ_ROCKET, ULT_CHARACTER, chargeUlt, steerToward, ultOf, ultPowerMult } from './ults';
 
 /** A Crop Duster's lingering gas: inflates and slows enemies standing in it. */
 export interface GasCloud {
@@ -52,6 +52,9 @@ export class UltSystem {
   private activate(p: SimPlayer): void {
     const s = p.state;
     const kind = ultOf(s);
+    // You turn into the character (a bigger body, so a bigger hitbox) for as long as it shows.
+    const character = ULT_CHARACTER[kind];
+    if (character) p.bigUntil = this.sim.time + character.seconds;
     let targets: number[] = [];
     if (kind === 'chase') {
       s.chaseTarget = this.sniff(p);

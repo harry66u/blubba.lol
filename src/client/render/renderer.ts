@@ -65,7 +65,7 @@ export class Renderer {
       stencil: false,
     });
     this.renderer.toneMapping = THREE.NeutralToneMapping;
-    this.renderer.toneMappingExposure = 0.95;
+    this.renderer.toneMappingExposure = 0.86;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
     this.camera = new THREE.PerspectiveCamera(this.baseFov, 1, 0.1, 900);
@@ -73,12 +73,12 @@ export class Renderer {
 
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    this.scene.environmentIntensity = 0.4;
+    this.scene.environmentIntensity = 0.28;
     pmrem.dispose();
 
     this.hemi = new THREE.HemisphereLight(0xcfe8ff, 0x8a7fa5, 1.0);
     this.scene.add(this.hemi);
-    this.sun = new THREE.DirectionalLight(0xfff1d6, 2.1);
+    this.sun = new THREE.DirectionalLight(0xfff1d6, 1.75);
     this.sun.position.set(30, 60, 25);
     this.sun.target.position.set(0, 0, 0);
     const sc = this.sun.shadow.camera;
@@ -149,8 +149,9 @@ export class Renderer {
         this.composer.addPass(this.ao);
       }
       if (p.bloom) {
-        // Low enough that bright, saturated colors (players, balloons) glow a little.
-        this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.4, 0.55, 0.8);
+        // Just a hint, and only on the very brightest things (signs, ult glows): no glare off
+        // clouds, white walls and shiny props.
+        this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.14, 0.35, 0.95);
         this.composer.addPass(this.bloom);
       }
       this.composer.addPass(new OutputPass());

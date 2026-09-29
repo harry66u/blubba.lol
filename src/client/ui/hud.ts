@@ -206,7 +206,8 @@ export class Hud {
     [this.braceWrap, this.braceFill] = ability('BRACE');
     [this.grabWrap, this.grabFill] = ability('GRAB');
     [this.grappleWrap, this.grappleFill] = ability('GRAPPLE');
-    const movement = el('div', { class: 'movement' }, el('div', { class: 'group' }, this.dashPips, el('div', {}, 'DASH', chip('dash'))), this.braceWrap, this.grabWrap, this.grappleWrap);
+    // Brace and grab still work from their keys; the HUD only shows dash and grapple to stay clean.
+    const movement = el('div', { class: 'movement' }, el('div', { class: 'group' }, this.dashPips, el('div', {}, 'DASH', chip('dash'))), this.grappleWrap);
     this.tipEl = el('div', { class: 'tip off' });
     this.hintEl = el('div', { class: 'hint hidden' });
     this.escapeMarker = el('div', { class: 'marker' });

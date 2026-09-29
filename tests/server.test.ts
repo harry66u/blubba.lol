@@ -268,6 +268,50 @@ describe('server', () => {
     friend.ws.close();
   });
 
+  it('PLAY AGAIN: the host restarts a private room right away; a public room waits for everyone', async () => {
+    const host = new TestClient();
+    await host.open();
+    host.send({ type: 'hello', v: PROTOCOL_VERSION, name: 'Againy', guestId: 'pa1', join: { kind: 'create', settings: { bots: false } } });
+    const hw = await host.waitFor('welcome');
+    const room = lobby.rooms.get(hw.room.code)!;
+    const friend = new TestClient();
+    await friend.open();
+    friend.send({ type: 'hello', v: PROTOCOL_VERSION, name: 'Pal', guestId: 'pa2', join: { kind: 'code', code: hw.room.code } });
+    const fw = await friend.waitFor('welcome');
+    host.send({ type: 'host', action: 'start' });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(room.sim.phase).toBe('playing');
+    room.sim.endMatch();
+    expect(room.sim.phase).toBe('results');
+    // A guest pressing it only says they're ready...
+    friend.send({ type: 'again' });
+    const ready = await host.waitFor('again');
+    expect(ready.ids).toEqual([fw.you]);
+    expect(room.sim.phase).toBe('results');
+    // ...the host pressing it starts the next match now.
+    host.send({ type: 'again' });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(room.sim.phase).toBe('playing');
+    host.ws.close();
+    friend.ws.close();
+
+    // A public room with bots: the lone human pressing it skips the wait.
+    const solo = new TestClient();
+    await solo.open();
+    solo.send({ type: 'hello', v: PROTOCOL_VERSION, name: 'Solo', guestId: 'pa3', join: { kind: 'quick', mode: 'suddenDeath' } });
+    const sw = await solo.waitFor('welcome');
+    const pub = lobby.rooms.get(sw.room.code)!;
+    await new Promise((r) => setTimeout(r, 150));
+    if (pub.sim.phase !== 'playing') pub.sim.startMatch();
+    pub.sim.endMatch();
+    const before = pub.sim.phaseEndsAt;
+    expect(before).toBeGreaterThan(pub.sim.time + 5);
+    solo.send({ type: 'again' });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(lobby.rooms.get(sw.room.code)!.sim.phase).toBe('playing');
+    solo.ws.close();
+  });
+
   it('challenge links make a private 1v1 that the first visitor joins', async () => {
     const a = new TestClient();
     await a.open();

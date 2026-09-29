@@ -338,14 +338,14 @@ select.field:disabled {
   margin: 0;
   font-family: var(--font-display);
   font-size: min(16vw, 136px);
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1;
   color: var(--yellow);
-  -webkit-text-stroke: 12px var(--ink);
+  /* A thin outline and a shallow edge: thick ones filled in the holes of the B's. */
+  -webkit-text-stroke: 5px var(--ink);
   paint-order: stroke fill;
-  /* A chunky extruded edge under the letters, then a soft shadow on the sky. */
-  text-shadow: 0 3px 0 var(--ink), 0 6px 0 var(--ink), 0 9px 0 var(--ink), 0 12px 0 var(--ink), 0 24px 28px rgba(29, 27, 58, 0.35);
-  letter-spacing: 3px;
+  text-shadow: 0 4px 0 var(--ink), 0 16px 22px rgba(29, 27, 58, 0.35);
+  letter-spacing: 6px;
   white-space: nowrap;
   transform: rotate(-4deg);
   animation: wobble 3.2s ease-in-out infinite;
@@ -1686,11 +1686,12 @@ select.field:disabled {
   vertical-align: 2px;
 }
 
-/* Results: title pops, the podium rises (3rd, 2nd, then 1st), awards and stats pop in, counters
-   count up, and confetti falls when you (or your team) win. */
+/* Results: title pops, a small podium rises (3rd, 2nd, then 1st), your line and the buttons pop
+   in, and confetti falls when you (or your team) win. */
 .overlay .panel.results-panel {
-  width: min(620px, 96vw);
-  max-width: min(620px, 96vw);
+  --pad-y: 18px;
+  width: min(460px, 96vw);
+  max-width: min(460px, 96vw);
   text-align: center;
 }
 
@@ -1715,12 +1716,12 @@ select.field:disabled {
 
 .overlay .results-title {
   margin: 0;
-  font-size: 46px;
+  font-size: 36px;
   letter-spacing: 1px;
   color: #fff;
-  -webkit-text-stroke: 10px var(--ink);
+  -webkit-text-stroke: 6px var(--ink);
   paint-order: stroke fill;
-  text-shadow: 0 4px 0 var(--ink), 0 7px 0 var(--ink);
+  text-shadow: 0 3px 0 var(--ink);
   animation: title-pop 0.7s var(--ease-pop) 0.1s backwards;
 }
 
@@ -1735,17 +1736,17 @@ select.field:disabled {
 
 .results .podium {
   display: flex;
-  gap: 12px;
+  gap: 8px;
   align-items: flex-end;
   justify-content: center;
-  margin: 14px 0 16px;
+  margin: 10px 0 10px;
 }
 
 .results .step {
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: 150px;
+  width: 116px;
   min-width: 0;
 }
 
@@ -1770,11 +1771,11 @@ select.field:disabled {
 }
 
 .results .step .tube-man-wrap {
-  width: 44px;
+  width: 32px;
 }
 
 .results .step.p1 .tube-man-wrap {
-  width: 56px;
+  width: 42px;
 }
 
 .results .step .crown {
@@ -1791,7 +1792,7 @@ select.field:disabled {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 900;
-  font-size: 16px;
+  font-size: 15px;
 }
 
 .results .step .pts {
@@ -1809,11 +1810,11 @@ select.field:disabled {
   align-items: flex-start;
   justify-content: center;
   width: 100%;
-  height: var(--h, 80px);
-  padding-top: 8px;
-  border: 4px solid var(--ink);
-  border-radius: 16px 16px 6px 6px;
-  font-size: 32px;
+  height: var(--h, 50px);
+  padding-top: 6px;
+  border: 3px solid var(--ink);
+  border-radius: 12px 12px 4px 4px;
+  font-size: 22px;
   line-height: 1;
   box-shadow: var(--gloss);
   transform-origin: 50% 100%;
@@ -1821,19 +1822,19 @@ select.field:disabled {
 }
 
 .results .p1 .block {
-  --h: 124px;
+  --h: 72px;
   background: linear-gradient(180deg, #ffec85, var(--gold));
   animation-delay: 0.7s;
 }
 
 .results .p2 .block {
-  --h: 92px;
+  --h: 52px;
   background: linear-gradient(180deg, #f3f6fc, var(--silver));
   animation-delay: 0.45s;
 }
 
 .results .p3 .block {
-  --h: 66px;
+  --h: 36px;
   background: linear-gradient(180deg, #ffd0b5, var(--bronze));
   animation-delay: 0.2s;
 }
@@ -1885,32 +1886,50 @@ select.field:disabled {
   color: var(--ink-soft);
 }
 
-.results-stats {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+/* Your match in one line. */
+.results .my-line {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 14px;
+  font-weight: 900;
+  font-size: 15px;
+  color: var(--ink-soft);
+  animation: pop-in 0.4s var(--ease-pop) 1.2s backwards;
 }
 
-.results-stats .stat {
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 6px;
-  text-align: center;
-  animation: pop-in 0.4s var(--ease-pop) backwards;
-  animation-delay: 1.3s;
+.results-buttons {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  animation: pop-in 0.4s var(--ease-pop) 1.3s backwards;
 }
-.results-stats .stat:nth-child(2) {
-  animation-delay: 1.38s;
+
+.results .results-buttons .play-again {
+  flex: 1;
+  max-width: 280px;
+  font-size: 26px;
+  padding: 10px 18px;
 }
-.results-stats .stat:nth-child(3) {
-  animation-delay: 1.46s;
-}
-.results-stats .stat:nth-child(4) {
-  animation-delay: 1.54s;
+
+.results .results-buttons .play-again.done {
+  background: linear-gradient(180deg, #b8f5c0 0%, #7ee08a 100%);
+  cursor: default;
 }
 
 .results-foot {
   display: flex;
   justify-content: center;
-  margin-top: 14px;
+  margin-top: 10px;
+}
+
+.results .countdown {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 13px;
 }
 
 .countdown {
@@ -1955,8 +1974,8 @@ select.field:disabled {
 .results.settled .results-title,
 .results.settled .step .who,
 .results.settled .block,
-.results.settled .award,
-.results.settled .results-stats .stat {
+.results.settled .my-line,
+.results.settled .results-buttons {
   animation: none;
 }
 
@@ -3451,62 +3470,6 @@ select.field:disabled {
   bottom: calc(9vh + 16px);
 }
 
-.awards {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-bottom: 12px;
-  text-align: left;
-}
-
-.award {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  background: #fff4c2;
-  border: 3px solid var(--ink);
-  border-radius: 12px;
-  padding: 6px 10px;
-  animation: pop-in 0.4s var(--ease-pop) 1.15s backwards;
-}
-
-.award:nth-child(2) {
-  animation-delay: 1.2s;
-}
-.award:nth-child(3) {
-  animation-delay: 1.25s;
-}
-.award:nth-child(4) {
-  animation-delay: 1.3s;
-}
-
-.award.me {
-  background: #c9f7c1;
-}
-
-.award .ico {
-  flex: none;
-  font-size: 22px;
-  line-height: 1;
-}
-
-.award .k {
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  color: var(--ink-soft);
-}
-
-.award .v {
-  font-size: 16px;
-  font-weight: 900;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 @media (max-height: 640px) {
   .logo,
   .logo-wrap .logo-mascot {
@@ -3514,8 +3477,8 @@ select.field:disabled {
   }
 
   .logo {
-    -webkit-text-stroke: 8px var(--ink);
-    text-shadow: 0 3px 0 var(--ink), 0 6px 0 var(--ink), 0 14px 18px rgba(29, 27, 58, 0.3);
+    -webkit-text-stroke: 4px var(--ink);
+    text-shadow: 0 3px 0 var(--ink), 0 12px 16px rgba(29, 27, 58, 0.3);
   }
 
   .menu {
@@ -3705,7 +3668,7 @@ select.field:disabled {
     font-size: min(12vw, 96px);
   }
   .logo {
-    -webkit-text-stroke: 10px var(--ink);
+    -webkit-text-stroke: 4px var(--ink);
   }
   .tagline {
     font-size: 19px;
@@ -4685,8 +4648,8 @@ select.field:disabled {
 }
 /* Match rewards on the results screen. */
 .progress-box {
-  margin-top: 14px;
-  padding: 14px;
+  margin-top: 12px;
+  padding: 10px 12px;
   border-radius: var(--r-lg);
   background: #fff;
   border: 3px solid var(--ink);
@@ -4699,12 +4662,24 @@ select.field:disabled {
 }
 .progress-box .totals {
   display: flex;
-  align-items: baseline;
-  gap: 14px;
+  align-items: center;
+  gap: 10px;
   font-family: var(--font-display);
-  font-size: 28px;
+  font-size: 20px;
   font-weight: 700;
   line-height: 1;
+}
+.progress-box .totals .lv-badge {
+  flex: none;
+}
+.progress-box .reward-details {
+  margin-top: 6px;
+  font-size: 13px;
+}
+.progress-box .reward-details summary {
+  cursor: pointer;
+  font-weight: 900;
+  color: var(--ink-soft);
 }
 .progress-box .totals .xp {
   color: var(--success);
@@ -5132,8 +5107,8 @@ body.touch .center-note {
   }
   .logo {
     font-size: 40px;
-    -webkit-text-stroke: 4px var(--ink);
-    text-shadow: 0 4px 0 var(--ink);
+    -webkit-text-stroke: 2px var(--ink);
+    text-shadow: 0 2px 0 var(--ink);
     align-self: flex-start;
     margin: 2px 0 0 10px;
   }
@@ -5980,7 +5955,8 @@ body.touch .inflation .self-gain {
 .ult-meter {
   --ult: #ffd60a;
   position: absolute;
-  left: calc(50% + 196px);
+  /* Kept clear of the reload / camera key hints on narrower windows. */
+  left: min(calc(50% + 196px), calc(100% - 340px));
   bottom: 14px;
   width: 78px;
   height: 78px;
@@ -6585,4 +6561,49 @@ body.mouse-play .touch-controls {
 }
 .host-grid .team-names .btn {
   flex: none;
+}
+
+/* Results on short screens (phones held sideways): a flatter podium so PLAY AGAIN stays in view. */
+@media (max-height: 520px) {
+  .overlay .panel.results-panel {
+    --pad-y: 10px;
+  }
+  .overlay .results-title {
+    font-size: 26px;
+    -webkit-text-stroke: 5px var(--ink);
+  }
+  .results .step .tube-man-wrap,
+  .results .step .crown {
+    display: none;
+  }
+  .results .podium {
+    margin: 4px 0 6px;
+  }
+  .results .block {
+    padding-top: 2px;
+    font-size: 15px;
+  }
+  .results .p1 .block {
+    --h: 30px;
+  }
+  .results .p2 .block {
+    --h: 22px;
+  }
+  .results .p3 .block {
+    --h: 16px;
+  }
+  .results .progress-box {
+    margin-top: 6px;
+    padding: 6px 10px;
+  }
+  .results-buttons {
+    margin-top: 8px;
+  }
+  .results .results-buttons .play-again {
+    font-size: 20px;
+    padding: 6px 14px;
+  }
+  .results-foot {
+    margin-top: 4px;
+  }
 }
