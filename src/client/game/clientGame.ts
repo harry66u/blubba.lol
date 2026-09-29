@@ -265,7 +265,7 @@ export class ClientGame {
   ) {
     this.map = getMap('dealership');
     this.world = new World(this.map);
-    this.mapView = new MapView(this.map, this.world);
+    this.mapView = new MapView(this.map, this.world, () => r.quality);
     this.ctx = this.makeCtx({ ...ALL_FEATURES });
     r.scene.add(this.mapView.root, this.effects.root, this.circles.root, this.entities.root);
     r.scene.add(r.camera);
@@ -301,7 +301,7 @@ export class ClientGame {
     this.mapView.dispose();
     this.map = getMap(id);
     this.world = new World(this.map);
-    this.mapView = new MapView(this.map, this.world);
+    this.mapView = new MapView(this.map, this.world, () => this.r.quality);
     this.r.scene.add(this.mapView.root);
     this.r.setTheme(this.map.theme);
     this.ctx = this.makeCtx(this.ctx.features);
