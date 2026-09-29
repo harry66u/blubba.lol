@@ -317,3 +317,46 @@ plan. Built so far:
   progress after every match that counted.
 - Saved in the profile (`daily`); older profiles pick it up with empty defaults. A new
   `crownKos` match stat tracks knockouts of the crown wearer.
+
+## Review pass: hit feel, accounts that last, launch hardening
+
+Players asked for more dopamine on hits, more feeling when hit, "cracked" knockouts, stronger
+quick shots, a weaker dash, and to see damage the moment it lands. Built:
+
+- **Your hits show +X% on the body you hit**, the target's size and name tag update at once (no
+  waiting for the next snapshot), and a running tally under the crosshair stacks every hit in a
+  row ("+42% · 3 HITS") with a bell that climbs two semitones per hit. The marker turns red on
+  targets near bursting.
+- **Getting hit:** the view snaps away from the blow (pitch and roll toward the push), the field
+  of view punches out, the screen flashes pink-red, the inflation you took flies off your meter
+  as "+X%", and speed lines streak in while you're launched.
+- **Knockouts read popped, cracked, deflated, bonked, launched or yeeted** (chain-popped, pinned
+  and yeeted when they fit), on the kill feed, callouts and "Cracked by X!" respawn screen. Your
+  long-range pops (26 m+) are **CRACKED SHOT!**, air-juggle pops **JUGGLED!**, and every pop of
+  yours gets confetti, a gold flash and "CRACKED! +1" under the crosshair.
+- **Quick taps inflate more:** a shot adds `power + (1 - power) × 0.5` of its weapon's inflation,
+  so an Air Cannon tap adds 75% of a full charge's (was 50%). Charging mostly buys launch power.
+  Typical fights take about 6.2 landed hits per knockout.
+- **Dash nerf:** 16.5 m/s (was 19), 3.2 s recharge (was 2.4), weaker air lift, and dashing out
+  of a launch now steers it (keeps 60% of the launch, 70% dash strength, then 0.9 s before
+  another dash) instead of cancelling it.
+- **Sky scenery** on every map: hot air balloons, a BLUBBA blimp, flocks of birds, a banner
+  plane, and floating islands around and far below the arena (fewer on Low).
+
+Launch hardening, now that real players are showing up:
+
+- **Accounts survive restarts.** Render's free plan wipes the disk on every restart and deploy.
+  With `DATABASE_URL` set to a Postgres database, the server loads everything from it at startup
+  and copies every change back within about a second (README, "Keeping accounts").
+  `/api/health` shows `"storage":"postgres"`. Verified in a browser: sign up, earn coins, wipe
+  the server's disk, restart, and the old login still works and a fresh browser logs in to the
+  same coins and level. The full account smoke test (guest, sign-up with recovery code, buying,
+  rewards, ranked 1v1) passes on Postgres.
+- **Auto-reconnect:** a dropped connection or a server update mid-match shows "Blubba is
+  updating!" and puts you back into a match (about 11 s after a restart in tests) instead of
+  dumping you on the menu.
+- **Crash guards:** a bad message or stray exception is logged instead of taking every match
+  down; a room that keeps failing is closed and its players reconnect to a fresh one.
+- **Browser errors reach the server log** (`[client] ...` lines, rate limited), so problems
+  players hit are visible in the host's logs.
+- The leaderboard is cached for 30 s instead of reading every account on each request.

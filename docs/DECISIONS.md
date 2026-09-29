@@ -252,3 +252,22 @@ The spec leaves the tech stack and many details open. This file records what was
   streak holder untouchable (the crown already makes them worth triple). They are part of the
   shared player state (so prediction is exact) and clear when you're popped.
 
+
+## Review pass
+
+- **Tap shots inflate, charged shots launch.** Quick shots now add most of a weapon's inflation
+  (`BALANCE.inflation.tapBonus`), so spraying builds damage and charging finishes; knockback
+  still scales fully with charge.
+- **Dashing out of a launch steers instead of cancelling.** The old dash erased most of a hit's
+  momentum 0.18 s after it landed, which made good hits feel wasted. It still saves you from
+  flying off if you react, but you keep most of the launch.
+- **Instant feedback is client-side and cosmetic.** Your confirmed hit updates the target's
+  displayed inflation right away (a short-lived hint that yields to snapshots), and the server's
+  hit event carries `gain` so "+X%" is exact.
+- **Postgres as a mirror, not a rewrite.** SQLite stays the working copy (synchronous, fast, the
+  game code is unchanged); Postgres is loaded at startup and receives every change in ordered
+  background batches. This keeps accounts on hosts with wiped disks without making every game
+  path async. It assumes one server process per database, which is how Blubba runs.
+- **Reconnect rejoins, it doesn't resume.** After a drop you land back in the same private room
+  or a room of the same mode with your saved progress; the match state of your old body is not
+  restored (the server may have restarted).
