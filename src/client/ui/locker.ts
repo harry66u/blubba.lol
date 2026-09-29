@@ -1,5 +1,5 @@
 import { PLAYER_COLORS } from '../../shared/colors';
-import { COSMETIC_SLOTS, type CosmeticItem, type CosmeticSlot, type Cosmetics, ITEMS, ITEM_BY_ID, SLOT_INFO, cosmeticKey, ownsItem } from '../../shared/economy';
+import { COSMETIC_SLOTS, type CosmeticItem, type CosmeticSlot, type Cosmetics, ITEMS, ITEM_BY_ID, SLOT_INFO, cosmeticKey, ownsItem, unlockLevelOf } from '../../shared/economy';
 import type { WeaponId } from '../../shared/loadout';
 import type { Audio } from '../audio/audio';
 import type { AccountClient } from '../net/account';
@@ -300,7 +300,7 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
     const p = account.profile;
     const pick: Partial<Cosmetics> = {};
     for (const s of COSMETIC_SLOTS) {
-      const mine = ITEMS.filter((i) => i.slot === s && ownsItem(p.owned, i.id, p.level));
+      const mine = ITEMS.filter((i) => i.slot === s && ownsItem(p.owned, i.id, unlockLevelOf(p)));
       pick[s] = mine[Math.floor(Math.random() * mine.length)]?.id ?? p.cosmetics[s];
     }
     trying = null;
@@ -383,7 +383,7 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
     slotNote.textContent = slotHint(slot);
     clear(grid);
     for (const item of ITEMS.filter((i) => i.slot === slot)) {
-      const owned = ownsItem(p.owned, item.id, p.level);
+      const owned = ownsItem(p.owned, item.id, unlockLevelOf(p));
       const levelLocked = !!item.levelReq && !owned;
       const equipped = p.cosmetics[item.slot] === item.id;
       // One short status line, only when it matters (nothing for things you own).

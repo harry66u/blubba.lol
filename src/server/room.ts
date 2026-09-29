@@ -163,7 +163,8 @@ export class Room {
 
   /** Mods and utilities this connection has unlocked. */
   private allowed(conn: { key: string | null }): { parts: string[]; utils: string[] } {
-    return conn.key && this.store ? allowedLoadout(this.store.profile(conn.key)) : unlockedAt(1);
+    if (!conn.key || !this.store) return unlockedAt(1);
+    return this.store.unlocksAll(conn.key) ? unlockedAt(this.store.unlockLevel(conn.key)) : allowedLoadout(this.store.profile(conn.key));
   }
 
   /** Your chosen color if nobody else here is wearing it. */

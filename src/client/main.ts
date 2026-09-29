@@ -1,5 +1,5 @@
 import { BALANCE } from '../shared/balance';
-import { QUICK_CHAT, unlockedAt } from '../shared/economy';
+import { QUICK_CHAT, unlockLevelOf, unlockedAt } from '../shared/economy';
 import { sanitizeLoadout } from '../shared/loadout';
 import { KNOCKOUT_MAPS, mapForMode } from '../shared/maps';
 import { randomGuestName } from '../shared/names';
@@ -247,7 +247,7 @@ let lastAccountName: string | null = null;
 account.onChange(() => {
   setActiveCount(account.active);
   // Drop anything the saved loadout has that isn't unlocked yet.
-  const allowed = unlockedAt(account.profile.level);
+  const allowed = unlockedAt(unlockLevelOf(account.profile));
   const clean = sanitizeLoadout(game.loadout, allowed);
   if (JSON.stringify(clean) !== JSON.stringify(game.loadout)) game.setLoadout(clean, false);
   const name = account.account?.name ?? null;

@@ -1,4 +1,4 @@
-import { type Cosmetics, DEFAULT_COSMETICS, type ProfileView, emptyStats, unlockedAt } from '../../shared/economy';
+import { type Cosmetics, DEFAULT_COSMETICS, type ProfileView, emptyStats, unlockLevelOf, unlockedAt } from '../../shared/economy';
 import { PART_IDS, UTILITY_IDS } from '../../shared/loadout';
 import { ULT_IDS } from '../../shared/game/ults';
 
@@ -62,7 +62,7 @@ export class AccountClient {
 
   /** What's locked in the loadout screen at the current level. */
   get locked(): { parts: string[]; utils: string[]; ults: string[] } {
-    const u = unlockedAt(this.profile.level);
+    const u = unlockedAt(unlockLevelOf(this.profile));
     return {
       parts: PART_IDS.filter((m) => !u.parts.includes(m)),
       utils: UTILITY_IDS.filter((x) => !u.utils.includes(x)),

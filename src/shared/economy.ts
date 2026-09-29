@@ -294,6 +294,17 @@ export function ownsItem(owned: Iterable<string>, id: string, level = 1): boolea
   return false;
 }
 
+/** Coins an unlock-all account always has (see Store.unlocksAll). */
+export const UNLOCK_ALL_COINS = 999_999;
+
+/** The level unlock-all accounts count as for level rewards and loadout unlocks. */
+export const UNLOCK_ALL_LEVEL = 99;
+
+/** The level that decides what a profile has unlocked (everything for unlock-all accounts). */
+export function unlockLevelOf(p: { level: number; unlockAll?: boolean }): number {
+  return p.unlockAll ? UNLOCK_ALL_LEVEL : p.level;
+}
+
 /**
  * Keeps only real items the player owns, in the right slots; anything else falls back to the
  * default. Profiles saved before a slot existed simply get that slot's default.
@@ -512,6 +523,8 @@ export interface ProfileView {
   rating: number | null;
   rankedGames: number;
   daily: DailyView;
+  /** An unlock-all account: every item owned and every loadout part usable, whatever the level. */
+  unlockAll?: boolean;
 }
 
 /** Sent after each match. */

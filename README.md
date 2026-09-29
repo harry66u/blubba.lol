@@ -145,6 +145,13 @@ within about a second. If a local database already exists and Postgres is empty,
 the first time. Run one server per database. Without `DATABASE_URL` on Render, the server logs a
 warning at startup.
 
+### Unlock-all accounts
+
+The account named **Harry** gets everything: unlimited coins (always topped back up to 999,999),
+every Locker item including level rewards, and every loadout part and gadget from level 1.
+Change who with `BUBBA_UNLOCK_ALL` (comma-separated account names, e.g. `Harry,Ben`; set it
+empty for nobody). Names are matched ignoring capitals, and guests never get it.
+
 ### Moderation and character faces
 
 Set `BUBBA_ADMIN_TOKEN` (12+ characters) in the server's environment, then open `/admin` and

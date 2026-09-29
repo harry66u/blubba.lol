@@ -6,9 +6,12 @@ import { promisify } from 'node:util';
 import {
   type Cosmetics,
   DEFAULT_COSMETICS,
+  ITEMS,
   type LifetimeStats,
   type ProfileView,
   RANKED,
+  UNLOCK_ALL_COINS,
+  UNLOCK_ALL_LEVEL,
   emptyStats,
   levelForXp,
   sanitizeCosmetics,
@@ -107,6 +110,17 @@ export class Store {
   private readonly cache = new Map<string, ProfileData>();
   /** Durable Postgres copy (set with `attachMirror`), for hosts that wipe the disk. */
   mirror: Mirror | null = null;
+  /**
+   * Account names (lowercase) that get everything: unlimited coins, every item and every loadout
+   * part. Set BUBBA_UNLOCK_ALL to a comma-separated list of names (empty for nobody).
+   */
+  readonly unlockAllNames = new Set(
+    (process.env.BUBBA_UNLOCK_ALL ?? 'Harry')
+      .split(',')
+      .map((n) => n.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  private readonly unlockAllKeys = new Map<string, boolean>();
 
   constructor(path = process.env.BUBBA_DB ?? 'data/bubba.db') {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
@@ -291,7 +305,7 @@ export class Store {
   /** Loads (or starts) a profile. Changes are kept in memory until `saveProfile`. */
   profile(key: string): ProfileData {
     const cached = this.cache.get(key);
-    if (cached) return cached;
+    if (cached) return this.topUp(key, cached);
     const row = this.db.prepare('SELECT data FROM profiles WHERE key = ?').get(key) as { data: string } | undefined;
     let data = newProfile();
     if (row) {
@@ -299,7 +313,7 @@ export class Store {
         const parsed = JSON.parse(row.data) as Partial<ProfileData>;
         data = { ...data, ...parsed, stats: { ...emptyStats(), ...(parsed.stats ?? {}) } };
         // Level rewards count as owned from your level; slots added since the save get defaults.
-        data.cosmetics = sanitizeCosmetics(data.cosmetics, data.owned, levelForXp(data.xp).level);
+        data.cosmetics = sanitizeCosmetics(data.cosmetics, data.owned, this.unlocksAll(key) ? UNLOCK_ALL_LEVEL : levelForXp(data.xp).level);
         // Profiles saved before daily challenges existed have no `daily` (sanitize fills it in).
         data.daily = sanitizeDaily(parsed.daily);
       } catch {
@@ -308,6 +322,34 @@ export class Store {
     }
     this.cache.set(key, data);
     if (this.cache.size > 5000) this.cache.delete(this.cache.keys().next().value!);
+    return this.topUp(key, data);
+  }
+
+  /** True for the accounts named in `unlockAllNames` (guests never). */
+  unlocksAll(key: string): boolean {
+    if (!key.startsWith('a:') || this.unlockAllNames.size === 0) return false;
+    let yes = this.unlockAllKeys.get(key);
+    if (yes === undefined) {
+      const acc = this.accountById(Number(key.slice(2)));
+      yes = !!acc && this.unlockAllNames.has(acc.name.toLowerCase());
+      this.unlockAllKeys.set(key, yes);
+    }
+    return yes;
+  }
+
+  /** The level loadout unlocks are checked against (everything for unlock-all accounts). */
+  unlockLevel(key: string): number {
+    return this.unlocksAll(key) ? UNLOCK_ALL_LEVEL : levelForXp(this.profile(key).xp).level;
+  }
+
+  /** Unlock-all accounts: coins back up to the max and every item owned, every time they're read. */
+  private topUp(key: string, data: ProfileData): ProfileData {
+    if (!this.unlocksAll(key)) return data;
+    if (data.coins < UNLOCK_ALL_COINS) data.coins = UNLOCK_ALL_COINS;
+    if (data.owned.length < ITEMS.length) {
+      const have = new Set(data.owned);
+      for (const i of ITEMS) if (!have.has(i.id)) data.owned.push(i.id);
+    }
     return data;
   }
 
@@ -355,6 +397,7 @@ export class Store {
       rating: isAccount ? data.rating : null,
       rankedGames: data.rankedGames,
       daily: dailyView(data.daily, key, now),
+      ...(this.unlocksAll(key) ? { unlockAll: true } : {}),
     };
   }
 
