@@ -5030,3 +5030,109 @@ body.touch .inflation .self-gain {
     grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   }
 }
+
+/* A lone last mode tile (Ranked) spans its row instead of sitting in a corner. */
+.mode-picker button:last-child:nth-child(3n + 1) {
+  grid-column: 1 / -1;
+}
+
+/* Narrow and short screens: PLAY first. The side menu becomes a row of small pills under the
+   main card instead of a column of big buttons above it. */
+@media (max-width: 999px) {
+  .menu-body > .menu-card {
+    order: 0;
+  }
+  .menu-body > .menu-nav {
+    order: 1;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    width: min(460px, 92vw);
+    gap: 6px;
+  }
+  .menu-body > .daily-card {
+    order: 2;
+  }
+  .menu-nav .btn.nav-btn {
+    font-size: 14px;
+    padding: 6px 10px;
+    gap: 6px;
+  }
+  .menu-nav .nav-btn .ico {
+    width: auto;
+    font-size: 16px;
+  }
+}
+
+/* Phones held sideways: two columns so PLAY is on screen without scrolling (name and modes on
+   the left, PLAY and the room buttons on the right), and a smaller header. */
+@media (max-height: 500px) and (min-width: 600px) {
+  .main-menu .menu-head .tagline {
+    display: none;
+  }
+  .main-menu .menu-head .logo {
+    font-size: 34px;
+  }
+  /* The account chip holds the top-right corner. */
+  .main-menu .menu-head {
+    align-self: flex-start;
+    margin-left: 12px;
+  }
+  .main-menu .menu-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    column-gap: 14px;
+    row-gap: 6px;
+    align-items: start;
+    width: min(780px, 96vw);
+    padding: 10px 14px;
+  }
+  .main-menu .menu-card > * {
+    grid-column: 1;
+    margin: 0;
+  }
+  .main-menu .menu-card > .notice,
+  .main-menu .menu-card > .error-text {
+    grid-column: 1 / -1;
+  }
+  .main-menu .menu-card > .btn.play {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: stretch;
+    min-height: 88px;
+  }
+  .main-menu .menu-card > .row.split {
+    grid-column: 2;
+    grid-row: 3;
+  }
+  .main-menu .menu-card > .row.code-row {
+    grid-column: 2;
+    grid-row: 4;
+  }
+  .main-menu .menu-card > .name-row {
+    grid-row: 1;
+  }
+  .main-menu .menu-card > .mode-picker {
+    grid-row: 2 / span 2;
+    gap: 5px;
+  }
+  .main-menu .menu-card > .mode-blurb {
+    grid-row: 4;
+    font-size: 12px;
+  }
+  .main-menu .name-row .field {
+    font-size: 16px;
+    padding: 5px 10px;
+  }
+  .main-menu .mode-picker button {
+    font-size: 13px;
+    padding: 5px 6px;
+    min-height: 0;
+  }
+  .main-menu .code-row .field.code,
+  .main-menu .code-row .btn,
+  .main-menu .row.split .btn {
+    font-size: 15px;
+    padding: 6px 10px;
+  }
+}
