@@ -1,6 +1,32 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import type { MapDef } from '../../shared/maps/types';
+import type { BlastZone, MapDef } from '../../shared/maps/types';
+import {
+  BLUE,
+  FONT,
+  GREEN,
+  INK,
+  LOGO_COLORS,
+  ORANGE,
+  PINK,
+  PURPLE,
+  RED,
+  TAU,
+  UP,
+  WHITE,
+  YELLOW,
+  canvasTexture,
+  edgeDistance,
+  hash,
+  makeCanvas,
+  merge,
+  onFontReady,
+  paint,
+  place,
+  rng,
+  rod,
+  seedOf,
+} from './sceneryKit';
 
 /** What the banner plane tows past, in turn (the last four are the characters' ads). */
 const BANNERS = [
@@ -14,22 +40,14 @@ const BANNERS = [
   'KESTY ROBOTICS',
 ];
 
-// Sky scenery around every map: hot air balloons, a BLUBBA blimp, bird flocks, a banner plane,
-// floating islands, beach balls and party balloons. Client-only and far outside the blast zone,
-// so it never touches gameplay. Built for cheap draws: each object is one merged, vertex-colored
-// mesh sharing a few materials; birds, beach balls and party balloons are one instanced mesh
-// each; everything animates by transforms only and casts no shadows.
+// Sky scenery around every map: two blimps (BLUBBA, and an ad for one of the characters), hot
+// air balloons, bird flocks, a banner plane, floating islands, beach balls and party balloons.
+// Client-only and outside the blast zone, so it never touches gameplay, but close enough to see
+// from the arena: the blimps and balloons circle just past the blast zone's corners, above or
+// beside the action. Built for cheap draws: each object is one merged, vertex-colored mesh sharing
+// a few materials; birds, beach balls and party balloons are one instanced mesh each; everything
+// animates by transforms only and casts no shadows.
 
-const TAU = Math.PI * 2;
-const INK = 0x1d1b3a;
-const PINK = 0xff3b8a;
-const YELLOW = 0xffd60a;
-const BLUE = 0x2ec5ff;
-const GREEN = 0x5ee05e;
-const PURPLE = 0x8a4dff;
-const ORANGE = 0xff8a1f;
-const RED = 0xff3b5c;
-const WHITE = 0xffffff;
 const RAINBOW = [RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE];
 const BALLOON_PALETTES = [
   [PINK, YELLOW, WHITE],
@@ -40,88 +58,12 @@ const BALLOON_PALETTES = [
   [RED, YELLOW, BLUE],
   [YELLOW, BLUE, PINK],
 ];
-const FONT = '"Arial Rounded MT Bold", Arial, sans-serif';
-
-/** Small seeded PRNG (mulberry32) so a map gets the same sky every visit. */
-function rng(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function seedOf(s: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
-  return h >>> 0;
-}
-
-function hash(n: number): number {
-  const s = Math.sin(n * 12.9898) * 43758.5453;
-  return s - Math.floor(s);
-}
-
-type Paint = number | ((x: number, y: number, z: number) => number);
-
-/**
- * Non-indexed copy of `geo` with vertex colors (one color, or one per triangle picked from its
- * center) so many parts can be merged into a single draw call. `flat` gives faceted normals;
- * `vary` jitters each triangle's brightness a little for a hand-made look.
- */
-function paint(geo: THREE.BufferGeometry, color: Paint, flat = false, vary = 0): THREE.BufferGeometry {
-  const g = geo.index ? geo.toNonIndexed() : geo;
-  if (g !== geo) geo.dispose();
-  for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal') g.deleteAttribute(name);
-  g.clearGroups();
-  if (flat || !g.attributes.normal) g.computeVertexNormals();
-  const pos = g.attributes.position;
-  const col = new Float32Array(pos.count * 3);
-  const c = new THREE.Color();
-  for (let i = 0; i < pos.count; i += 3) {
-    if (typeof color === 'number') c.setHex(color);
-    else {
-      const x = (pos.getX(i) + pos.getX(i + 1) + pos.getX(i + 2)) / 3;
-      const y = (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3;
-      const z = (pos.getZ(i) + pos.getZ(i + 1) + pos.getZ(i + 2)) / 3;
-      c.setHex(color(x, y, z));
-    }
-    if (vary) c.multiplyScalar(1 + (hash(i * 0.37 + pos.getX(i)) - 0.5) * vary);
-    for (let k = i; k < i + 3; k++) col.set([c.r, c.g, c.b], k * 3);
-  }
-  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  return g;
-}
 
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
 const _p = new THREE.Vector3();
 const _s = new THREE.Vector3();
-const UP = new THREE.Vector3(0, 1, 0);
-
-/** Moves, turns (XYZ euler) and scales a geometry in place. */
-function place(g: THREE.BufferGeometry, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0, sx = 1, sy = sx, sz = sx): THREE.BufferGeometry {
-  _m.compose(_p.set(x, y, z), _q.setFromEuler(_e.set(rx, ry, rz)), _s.set(sx, sy, sz));
-  return g.applyMatrix4(_m);
-}
-
-/** An open tube from a to b (ropes, struts, trunk segments). */
-function rod(a: THREE.Vector3, b: THREE.Vector3, r0: number, r1 = r0, sides = 5): THREE.BufferGeometry {
-  const dir = b.clone().sub(a);
-  const g = new THREE.CylinderGeometry(r1, r0, dir.length(), sides, 1, true);
-  _m.compose(a.clone().add(b).multiplyScalar(0.5), _q.setFromUnitVectors(UP, dir.normalize()), _s.set(1, 1, 1));
-  return g.applyMatrix4(_m);
-}
-
-function merge(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
-  const g = mergeGeometries(parts, false)!;
-  for (const p of parts) p.dispose();
-  return g;
-}
 
 /** Distance from point p to the segment a-b. */
 function segDist(px: number, py: number, pz: number, ax: number, ay: number, az: number, bx: number, by: number, bz: number): number {
@@ -238,11 +180,128 @@ interface Floater {
 
 const MAX_BIRDS = 9;
 /** The toy plane is modeled at about real size; bigger reads better from across the sky. */
-const PLANE_SCALE = 1.35;
-/** Blimp cruising speed (rad/s): about one lap every six minutes. */
-const BLIMP_SPEED = 0.017;
+const PLANE_SCALE = 1.6;
 const PARTY_BOTTOM = -120;
 const PARTY_TOP = 75;
+/** Hot air balloons stay under this height, clear of the BLUBBA blimp's gondola. */
+const BALLOON_TOP = 36;
+
+/** How a blimp is painted: a title along each side, and a smaller line under it. */
+interface BlimpLook {
+  title: string;
+  sub: string;
+  hull: string;
+  /** Title letter colors, in turn. */
+  letters: string[];
+  subColor: string;
+  outline: string;
+  /** Nose and tail bands: a color, or 'checker' (BOR's shirt). */
+  bands: string;
+  trim: string;
+  fin: number;
+}
+
+const BLUBBA_BLIMP: BlimpLook = { title: 'BLUBBA', sub: 'BLUBBA.LOL', hull: '#f7f4ee', letters: LOGO_COLORS, subColor: '#ff3b8a', outline: '#1d1b3a', bands: '#ff3b8a', trim: '#ffd60a', fin: PINK };
+
+/** The second blimp flies an ad for one of the four characters (one per map). */
+const AD_BLIMPS: BlimpLook[] = [
+  { title: "BOR'S GYM", sub: 'GET PUMPED', hull: '#ffd60a', letters: ['#1d1b3a'], subColor: '#ff3b8a', outline: '#ffffff', bands: 'checker', trim: '#1d1b3a', fin: INK },
+  { title: 'SOL x AMIRI', sub: 'SMELL THE WIN', hull: '#1b1b20', letters: ['#f4f1ea'], subColor: '#9dff6f', outline: '#1b1b20', bands: '#5ee05e', trim: '#f4f1ea', fin: 0x1b1b20 },
+  { title: 'KESTY', sub: 'ROBOTICS', hull: '#c9d2e8', letters: ['#2ec5ff'], subColor: '#1d1b3a', outline: '#1d1b3a', bands: '#2ec5ff', trim: '#ff3b5c', fin: 0x8a93a8 },
+  { title: "ABAG'S", sub: 'CHASE CLUB', hull: '#2ec5ff', letters: ['#ffffff'], subColor: '#ffd60a', outline: '#1d1b3a', bands: '#ff3b8a', trim: '#ffd60a', fin: PINK },
+];
+
+/** A blimp cruising a circle around the map, nose along its path. */
+interface Blimp {
+  group: THREE.Group;
+  a: number;
+  r: number;
+  y: number;
+  /** Angular speed (rad/s); negative goes the other way around. */
+  w: number;
+  /** Half its length, for keeping planes and birds clear of it. */
+  half: number;
+}
+
+/** Blimp hull as modeled (before scaling): length and widest radius, in meters. */
+const BLIMP_L = 56;
+const BLIMP_R = 7.5;
+
+/**
+ * Paints a blimp's hull texture: u wraps around the hull (0.25 is the +z side, 0.75 the -z side),
+ * v runs from the tail (0) to the nose (1). Bands at both ends, and the ad on each side.
+ */
+function paintBlimpSkin(c: HTMLCanvasElement, look: BlimpLook): void {
+  const g = c.getContext('2d')!;
+  const W = c.width;
+  const H = c.height;
+  const vy = (v: number) => (1 - v) * H; // canvas row for texture v
+  g.fillStyle = look.hull;
+  g.fillRect(0, 0, W, H);
+  for (const [v0, v1] of [
+    [0.88, 1],
+    [0, 0.1],
+  ]) {
+    if (look.bands === 'checker') {
+      const cell = 32;
+      for (let y = vy(v1); y < vy(v0); y += cell) {
+        for (let x = 0; x < W; x += cell) {
+          g.fillStyle = (Math.floor(x / cell) + Math.floor(y / cell)) % 2 ? '#ffffff' : '#1d1b3a';
+          g.fillRect(x, y, cell, Math.min(cell, vy(v0) - y));
+        }
+      }
+    } else {
+      g.fillStyle = look.bands;
+      g.fillRect(0, vy(v1), W, vy(v0) - vy(v1));
+    }
+  }
+  g.fillStyle = look.trim;
+  g.fillRect(0, vy(0.88), W, H * 0.025);
+  g.fillRect(0, vy(0.125), W, H * 0.025);
+  // Letters run along the hull, so each side is drawn turned a quarter turn (opposite ways so
+  // both read left to right), scaled from meters on the hull to pixels. The title sits a little
+  // above the hull's middle and the smaller line under it.
+  for (const [u, turn] of [
+    [0.25, -Math.PI / 2],
+    [0.75, Math.PI / 2],
+  ]) {
+    g.save();
+    g.translate(u * W, vy(0.5));
+    g.rotate(turn);
+    g.scale(H / BLIMP_L / 10, W / (TAU * BLIMP_R) / 10); // 1 unit = 10 cm on the hull
+    g.textBaseline = 'middle';
+    g.lineJoin = 'round';
+    const maxW = BLIMP_L * 10 * 0.62;
+    g.font = `700 72px ${FONT}`;
+    const gap = 6;
+    const chars = [...look.title];
+    const widths = chars.map((ch) => g.measureText(ch).width);
+    const total = widths.reduce((a, b) => a + b, 0) + gap * (chars.length - 1);
+    g.save();
+    g.translate(0, -12);
+    g.scale(Math.min(1, maxW / total), 1);
+    let x = -total / 2;
+    chars.forEach((ch, i) => {
+      g.lineWidth = 13;
+      g.strokeStyle = look.outline;
+      g.strokeText(ch, x, 0);
+      g.fillStyle = look.letters[i % look.letters.length];
+      g.fillText(ch, x, 0);
+      x += widths[i] + gap;
+    });
+    g.restore();
+    g.font = `700 30px ${FONT}`;
+    g.textAlign = 'center';
+    const subW = g.measureText(look.sub).width;
+    g.scale(Math.min(1, maxW / subW), 1);
+    g.lineWidth = 7;
+    g.strokeStyle = look.outline;
+    g.strokeText(look.sub, 0, 44);
+    g.fillStyle = look.subColor;
+    g.fillText(look.sub, 0, 44);
+    g.restore();
+  }
+}
 
 export class SkyLife {
   readonly root = new THREE.Group();
@@ -255,10 +314,7 @@ export class SkyLife {
   private readonly reach: number;
   private readonly mat: THREE.MeshStandardMaterial;
   private readonly gloss: THREE.MeshStandardMaterial;
-  private readonly blimp = new THREE.Group();
-  private blimpA = 0;
-  private readonly blimpR: number;
-  private readonly blimpY = 34;
+  private readonly blimps: Blimp[] = [];
   private readonly birds: THREE.InstancedMesh;
   private readonly flocks: Flock[] = [];
   private readonly plane = new THREE.Group();
@@ -271,14 +327,15 @@ export class SkyLife {
   private readonly ballState: Floater[] = [];
   private readonly party: THREE.InstancedMesh;
   private readonly partyState: Floater[] = [];
+  private readonly blast: BlastZone;
   private low = false;
   private t = 0;
+  private disposed = false;
 
   constructor(map: MapDef) {
-    const b = map.blast;
+    const b = (this.blast = map.blast);
     this.reach = Math.hypot(Math.max(-b.minX, b.maxX), Math.max(-b.minZ, b.maxZ));
     this.rnd = rng(seedOf(map.id));
-    this.blimpR = this.reach + 175;
     const theme = map.theme;
     const horizon = new THREE.Color(theme.skyHorizon);
     // 0 on a blue day, ~0.75 on the sunset rooftop: warms the paint and deepens the silhouettes.
@@ -293,7 +350,13 @@ export class SkyLife {
 
     this.buildBalloons();
     this.buildIslands(beachy);
-    this.buildBlimp(tint, horizon, warmth);
+    // The BLUBBA blimp laps just past the blast zone's corners, high over the action (about
+    // three and a half minutes a lap); a character's ad blimp goes the other way, lower and
+    // farther out.
+    const paintOpts = { tint, horizon, warmth };
+    this.addBlimp(BLUBBA_BLIMP, 1.45, this.reach + 50, 54, 0.03, paintOpts);
+    const ad = this.addBlimp(AD_BLIMPS[seedOf(`${map.id}:ad`) % AD_BLIMPS.length], 1.3, this.reach + 100, 32, -0.02, paintOpts);
+    this.rich.push(ad.group);
 
     // Birds: all flocks share one instanced mesh of two-triangle "V" birds; flapping is the
     // instance's y scale swinging through zero, so the wings go up and down with no vertex work.
@@ -331,7 +394,7 @@ export class SkyLife {
     this.plane.scale.setScalar(PLANE_SCALE);
     this.plane.visible = false;
     this.root.add(this.plane);
-    this.pass = { ...this.newPass(), wait: 7 + this.rnd() * 5 };
+    this.pass = { ...this.newPass(), wait: 4 + this.rnd() * 4 };
 
     // Beach balls drifting below the map edges: a handful on the beach maps, a couple elsewhere.
     const ballGeo = paint(new THREE.SphereGeometry(1, 18, 12), (x, y, z) => {
@@ -354,8 +417,8 @@ export class SkyLife {
         rise: 0,
       });
     }
-    // Bunches of party balloons rising from far below and sailing up past the map. Every bunch
-    // is the same four colors, but each turns on its own so they don't look alike.
+    // Bunches of party balloons rising from far below and sailing up just past the blast zone's
+    // edge. Every bunch is the same four colors, but each turns on its own so they don't look alike.
     const bunch: THREE.BufferGeometry[] = [];
     const tie = new THREE.Vector3(0, -1.5, 0);
     for (const [x, y, z, color] of [
@@ -369,16 +432,17 @@ export class SkyLife {
       bunch.push(paint(rod(new THREE.Vector3(x, y - 1.1, z), tie, 0.035, 0.035, 3), WHITE));
     }
     const partyGeo = merge(bunch);
-    const nParty = 8;
+    const nParty = 12;
     this.party = new THREE.InstancedMesh(partyGeo, this.gloss, nParty);
     this.party.frustumCulled = false;
     for (let i = 0; i < nParty; i++) {
+      const a = this.rnd() * TAU;
       this.partyState.push({
-        r: this.reach + 4 + this.rnd() * 6,
-        a: this.rnd() * TAU,
+        r: edgeDistance(b, a, 4 + this.rnd() * 6),
+        a,
         w: (this.rnd() - 0.5) * 0.4, // spin while rising
         y: PARTY_BOTTOM + ((i + this.rnd() * 0.5) / nParty) * (PARTY_TOP - PARTY_BOTTOM),
-        size: 1.8 + this.rnd() * 0.6,
+        size: 2.6 + this.rnd() * 0.8,
         phase: this.rnd() * TAU,
         rise: 1.8 + this.rnd() * 1.4,
       });
@@ -395,9 +459,10 @@ export class SkyLife {
       const pal = BALLOON_PALETTES[(i + Math.floor(this.rnd() * 3)) % BALLOON_PALETTES.length];
       const geo = balloonGeometry(i === 2 ? 3 : Math.floor(this.rnd() * 3), pal);
       const mesh = new THREE.Mesh(geo, this.mat);
-      // Bigger ones farther out so none of them crowd the view.
+      // Bigger ones farther out so none of them crowd the view; all near enough to read from the
+      // arena, and low enough to pass under the BLUBBA blimp.
       const far = this.rnd();
-      const size = 13 + far * 9 + this.rnd() * 4;
+      const size = 14 + far * 8 + this.rnd() * 3;
       mesh.scale.setScalar(size);
       this.root.add(mesh);
       this.trash.push(geo);
@@ -405,10 +470,10 @@ export class SkyLife {
       if (i % 2 === 1 || i === n - 1) this.rich.push(mesh);
       this.drifters.push({
         obj: mesh,
-        r: this.reach + 35 + far * 110,
+        r: this.reach + 20 + far * 40,
         a: ((i + (this.rnd() - 0.5) * 0.6) / n) * TAU,
         w: (this.rnd() < 0.5 ? -1 : 1) * (0.005 + this.rnd() * 0.007),
-        y: -2 + this.rnd() * 44,
+        y: -6 + this.rnd() * Math.max(0, BALLOON_TOP - 2.5 - size + 6),
         bob: 1 + this.rnd() * 1.5,
         phase: this.rnd() * TAU,
         spin: (this.rnd() - 0.5) * 0.06,
@@ -529,68 +594,33 @@ export class SkyLife {
     return merge(parts);
   }
 
-  /** The BLUBBA blimp: a lathed hull with the name painted on both sides, plus fins and gondola. */
-  private buildBlimp(tint: THREE.Color, horizon: THREE.Color, warmth: number): void {
-    const L = 56;
-    const R = 7.5;
+  /**
+   * A blimp (a lathed hull with its ad painted on both sides, plus fins and a gondola) cruising a
+   * circle of radius r at height y. The hull is modeled 56 m long and scaled up by `scale`.
+   */
+  private addBlimp(look: BlimpLook, scale: number, r: number, y: number, w: number, opts: { tint: THREE.Color; horizon: THREE.Color; warmth: number }): Blimp {
+    const L = BLIMP_L;
+    const R = BLIMP_R;
     const pts: THREE.Vector2[] = [];
     for (let k = 0; k <= 24; k++) {
       const s = (k / 24) * 2 - 1; // -1 tail .. 1 nose
-      const r = R * Math.sqrt(Math.max(0, 1 - Math.pow(Math.abs(s), s > 0 ? 2.2 : 1.7)));
-      pts.push(new THREE.Vector2(r, s * (L / 2)));
+      const hr = R * Math.sqrt(Math.max(0, 1 - Math.pow(Math.abs(s), s > 0 ? 2.2 : 1.7)));
+      pts.push(new THREE.Vector2(hr, s * (L / 2)));
     }
     // Starting the lathe at -90 degrees puts the texture seam along the top once the hull is
     // turned to point its nose down +x: u = 0.25 is then the +z side and u = 0.75 the -z side.
     const hull = new THREE.LatheGeometry(pts, 28, -Math.PI / 2);
     hull.rotateZ(-Math.PI / 2);
 
-    const W = 1024;
-    const H = 512;
-    const c = document.createElement('canvas');
-    c.width = W;
-    c.height = H;
-    const g = c.getContext('2d')!;
-    const vy = (v: number) => (1 - v) * H; // canvas row for texture v (0 = tail, 1 = nose)
-    g.fillStyle = '#f7f4ee';
-    g.fillRect(0, 0, W, H);
-    g.fillStyle = '#ff3b8a';
-    g.fillRect(0, vy(1), W, vy(0.88));
-    g.fillRect(0, vy(0.1), W, H - vy(0.1));
-    g.fillStyle = '#ffd60a';
-    g.fillRect(0, vy(0.88), W, H * 0.025);
-    g.fillRect(0, vy(0.125), W, H * 0.025);
-    // Letters run along the hull, so each side is drawn turned a quarter turn (opposite ways so
-    // both read left to right), scaled from meters on the hull to pixels.
-    const letters = 'BLUBBA';
-    const colors = ['#ffd60a', '#ff3b8a', '#2ec5ff', '#5ee05e', '#ffd60a', '#ff3b8a'];
-    for (const [u, turn] of [
-      [0.25, -Math.PI / 2],
-      [0.75, Math.PI / 2],
-    ]) {
-      g.save();
-      g.translate(u * W, vy(0.5));
-      g.rotate(turn);
-      g.scale(H / L / 10, W / (TAU * R) / 10); // 1 unit = 10 cm on the hull
-      g.font = `900 72px ${FONT}`;
-      g.textBaseline = 'middle';
-      g.lineJoin = 'round';
-      g.lineWidth = 13;
-      g.strokeStyle = '#1d1b3a';
-      const gap = 6;
-      const widths = [...letters].map((ch) => g.measureText(ch).width);
-      let x = -(widths.reduce((a, b) => a + b, 0) + gap * (letters.length - 1)) / 2;
-      [...letters].forEach((ch, i) => {
-        g.strokeText(ch, x, 4);
-        g.fillStyle = colors[i];
-        g.fillText(ch, x, 4);
-        x += widths[i] + gap;
-      });
-      g.restore();
-    }
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 4;
-    const hullMat = new THREE.MeshStandardMaterial({ map: tex, color: tint, roughness: 0.45, emissive: horizon, emissiveIntensity: 0.1 + 0.1 * warmth });
+    const [c] = makeCanvas(1024, 512);
+    paintBlimpSkin(c, look);
+    const tex = canvasTexture(c);
+    onFontReady(() => {
+      if (this.disposed) return;
+      paintBlimpSkin(c, look);
+      tex.needsUpdate = true;
+    });
+    const hullMat = new THREE.MeshStandardMaterial({ map: tex, color: opts.tint, roughness: 0.45, emissive: opts.horizon, emissiveIntensity: 0.1 + 0.1 * opts.warmth });
     const hullMesh = new THREE.Mesh(hull, hullMat);
 
     const parts: THREE.BufferGeometry[] = [];
@@ -598,7 +628,7 @@ export class SkyLife {
       const shape = new THREE.Shape([new THREE.Vector2(-L / 2 + 1, 0), new THREE.Vector2(-L / 2 + 12, 0), new THREE.Vector2(-L / 2 + 6.5, R * 1.2), new THREE.Vector2(-L / 2 + 1.5, R * 1.2)]);
       const fin = new THREE.ExtrudeGeometry(shape, { depth: 0.5, bevelEnabled: false });
       fin.translate(0, 0, -0.25);
-      const finGeo = paint(fin, PINK, true);
+      const finGeo = paint(fin, look.fin, true);
       finGeo.rotateX((k / 4) * TAU);
       parts.push(finGeo);
     }
@@ -610,11 +640,15 @@ export class SkyLife {
       parts.push(paint(rod(new THREE.Vector3(-1.5, -7.6, z), new THREE.Vector3(-1.5, -7.9, z * 0.45), 0.12), 0x8a93a8));
     }
     const details = new THREE.Mesh(merge(parts), this.mat);
-    this.blimp.add(hullMesh, details);
-    this.blimp.rotation.order = 'YXZ';
-    this.blimpA = this.rnd() * TAU;
-    this.root.add(this.blimp);
+    const group = new THREE.Group();
+    group.add(hullMesh, details);
+    group.scale.setScalar(scale);
+    group.rotation.order = 'YXZ';
+    this.root.add(group);
     this.trash.push(hull, tex, hullMat, details.geometry);
+    const blimp: Blimp = { group, a: this.rnd() * TAU, r, y, w, half: (L / 2) * scale };
+    this.blimps.push(blimp);
+    return blimp;
   }
 
   /** A toy biplane towing a banner. Nose points down +x. */
@@ -707,10 +741,10 @@ export class SkyLife {
 
   /**
    * Starts `p` on a fresh chord: its closest approach to the map center is between minD and maxD
-   * past the blast zone, and it tries a few headings to miss the balloons and the blimp.
+   * past the blast zone, and it tries a few headings to miss the balloons and the blimps.
    */
   private launch(p: Pass, minD: number, maxD: number, y0: number, y1: number, speed: number, len: number, tail: number, margin: number): void {
-    for (let tries = 0; tries < 10; tries++) {
+    for (let tries = 0; tries < 16; tries++) {
       p.a = this.rnd() * TAU;
       const d = (this.reach + minD + this.rnd() * (maxD - minD)) * (this.rnd() < 0.5 ? -1 : 1);
       p.cx = Math.sin(p.a) * d;
@@ -724,7 +758,7 @@ export class SkyLife {
     p.active = true;
   }
 
-  /** Whether a pass (and whatever trails `tail` meters behind it) misses the balloons and blimp. */
+  /** Whether a pass (and whatever trails `tail` meters behind it) misses the balloons and blimps. */
   private clear(p: Pass, tail: number, margin: number): boolean {
     const dx = Math.cos(p.a);
     const dz = -Math.sin(p.a);
@@ -739,8 +773,11 @@ export class SkyLife {
         const dist = segDist(Math.cos(a) * d.r, d.y + d.size * 0.4, Math.sin(a) * d.r, hx, p.y, hz, hx - dx * tail, p.y, hz - dz * tail);
         if (dist < d.size * 0.65 + margin) return false;
       }
-      const ba = this.blimpA + BLIMP_SPEED * tau;
-      if (segDist(Math.cos(ba) * this.blimpR, this.blimpY, Math.sin(ba) * this.blimpR, hx, p.y, hz, hx - dx * tail, p.y, hz - dz * tail) < 34 + margin) return false;
+      for (const b of this.blimps) {
+        if (!b.group.visible) continue;
+        const ba = b.a + b.w * tau;
+        if (segDist(Math.cos(ba) * b.r, b.y, Math.sin(ba) * b.r, hx, p.y, hz, hx - dx * tail, p.y, hz - dz * tail) < b.half + 6 + margin) return false;
+      }
     }
     return true;
   }
@@ -767,10 +804,14 @@ export class SkyLife {
       d.obj.rotation.set(Math.sin(t * 0.43 + d.phase * 2) * d.sway, d.phase + t * d.spin, Math.sin(t * 0.5 + d.phase) * d.sway);
     }
 
-    // The blimp cruises a big circle, nose along its path (rotation.y = -(angle + 90 degrees)).
-    this.blimpA += dt * BLIMP_SPEED;
-    this.blimp.position.set(Math.cos(this.blimpA) * this.blimpR, this.blimpY + Math.sin(t * 0.2) * 1.5, Math.sin(this.blimpA) * this.blimpR);
-    this.blimp.rotation.set(Math.sin(t * 0.37) * 0.02, -this.blimpA - Math.PI / 2, Math.sin(t * 0.23) * 0.025);
+    // Blimps cruise their circles, nose along the path: rotation.y = -(angle + 90 degrees) going
+    // one way around, 90 degrees - angle going the other.
+    this.blimps.forEach((b, i) => {
+      if (!b.group.visible) return;
+      b.a += dt * b.w;
+      b.group.position.set(Math.cos(b.a) * b.r, b.y + Math.sin(t * 0.2 + i * 2) * 1.5, Math.sin(b.a) * b.r);
+      b.group.rotation.set(Math.sin(t * 0.37 + i) * 0.02, b.w > 0 ? -b.a - Math.PI / 2 : Math.PI / 2 - b.a, Math.sin(t * 0.23 + i) * 0.025);
+    });
 
     let birdsMoved = false;
     for (const f of this.flocks) {
@@ -784,7 +825,7 @@ export class SkyLife {
       if (!f.active) {
         f.wait -= dt;
         if (f.wait > 0) continue;
-        this.launch(f, 10, 70, 6, 40, 10 + this.rnd() * 4, 300, 12, 6);
+        this.launch(f, 10, 70, 6, 34, 10 + this.rnd() * 4, 300, 12, 6);
         f.count = 5 + Math.floor(this.rnd() * (MAX_BIRDS - 4));
         f.size = 1.7 + this.rnd() * 0.5;
         this.hideBirds(f.first, MAX_BIRDS);
@@ -823,7 +864,9 @@ export class SkyLife {
     if (!p.active) {
       p.wait -= dt;
       if (p.wait <= 0) {
-        this.launch(p, 30, 100, 16, 36, 17, 380, 42 * PLANE_SCALE, 12);
+        // Close in (just past the blast zone's corners) and below the BLUBBA blimp, so the
+        // banner reads from the arena.
+        this.launch(p, 12, 40, 22, 34, 17, 300, 42 * PLANE_SCALE, 10);
         this.drawBanner(BANNERS[this.bannerText++ % BANNERS.length]);
         this.plane.visible = true;
       }
@@ -832,7 +875,7 @@ export class SkyLife {
       p.s += p.speed * dt;
       if (p.s > p.len) {
         p.active = false;
-        p.wait = 25 + this.rnd() * 30;
+        p.wait = 12 + this.rnd() * 14;
         this.plane.visible = false;
       } else {
         this.plane.position.set(p.cx + Math.cos(p.a) * p.s, p.y + Math.sin(t * 0.6) * 0.8, p.cz - Math.sin(p.a) * p.s);
@@ -856,6 +899,7 @@ export class SkyLife {
         if (b.y > PARTY_TOP) {
           b.y = PARTY_BOTTOM;
           b.a = this.rnd() * TAU;
+          b.r = edgeDistance(this.blast, b.a, 4 + this.rnd() * 6);
         }
         // Grow in at the bottom and shrink away at the top instead of popping.
         const k = THREE.MathUtils.clamp(Math.min(b.y - PARTY_BOTTOM, PARTY_TOP - b.y) / 18, 0, 1) * b.size;
@@ -869,6 +913,7 @@ export class SkyLife {
   }
 
   dispose(): void {
+    this.disposed = true;
     for (const d of this.trash) d.dispose();
   }
 }
