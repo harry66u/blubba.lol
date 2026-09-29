@@ -5,7 +5,7 @@ import { MODE_INFO, type ModeId, isTeamMode } from '../../shared/game/modes';
 import { type ProgressReport, QUICK_CHAT, cosmeticKey } from '../../shared/economy';
 import type { GameEvent } from '../../shared/game/events';
 import { type InputFrame, emptyInput, quantizeInput } from '../../shared/input';
-import { getMap } from '../../shared/maps';
+import { MAPS, getMap } from '../../shared/maps';
 import type { MapDef } from '../../shared/maps/types';
 import {
   ALL_FEATURES,
@@ -3103,6 +3103,12 @@ export class ClientGame {
       if (c && c.mode !== MODE_DEAD) place(c.px, c.py, c.pz, c.inflation);
     }
     this.circles.end();
+  }
+
+  /** Menu background: shows this map (the one picked on the menu) while you're not in a match. */
+  showMenuMap(id: string | null): void {
+    if (this.active || !id || !MAPS[id]) return;
+    this.setMap(id);
   }
 
   /** Menu background: slow orbit around the map with the decor flailing. */

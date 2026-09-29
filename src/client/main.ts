@@ -1,7 +1,7 @@
 import { BALANCE } from '../shared/balance';
 import { QUICK_CHAT, unlockedAt } from '../shared/economy';
 import { sanitizeLoadout } from '../shared/loadout';
-import { KNOCKOUT_MAPS } from '../shared/maps';
+import { KNOCKOUT_MAPS, mapForMode } from '../shared/maps';
 import { randomGuestName } from '../shared/names';
 import type { ModeId } from '../shared/game/modes';
 import type { JoinRequest, ServerMessage } from '../shared/protocol';
@@ -129,8 +129,14 @@ function loadMode(): PlayMode {
   return 'knockout';
 }
 let lastMode = loadMode();
+/** The menu's background shows the map you'd play: the mode's own arena, or the one you picked. */
+function showPickedMap(): void {
+  game.showMenuMap(mapForMode(lastMode) ?? lastMap);
+}
+
 function rememberMode(m: PlayMode): void {
   lastMode = m;
+  showPickedMap();
   try {
     window.localStorage.setItem(MODE_KEY, m);
   } catch {
@@ -152,6 +158,7 @@ function loadMap(): string | null {
 let lastMap = loadMap();
 function rememberMap(m: string | null): void {
   lastMap = m;
+  showPickedMap();
   try {
     if (m) window.localStorage.setItem(MAP_KEY, m);
     else window.localStorage.removeItem(MAP_KEY);
@@ -181,6 +188,7 @@ function showMenu(notice?: MenuNotice | string): void {
 
 /** Draws the main menu without touching whatever overlay is open. */
 function renderMenu(notice?: MenuNotice | string): void {
+  showPickedMap();
   clear(menuLayer);
   menuLayer.append(
     buildMainMenu(identity.name, {
