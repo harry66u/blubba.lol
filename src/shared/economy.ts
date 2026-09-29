@@ -334,7 +334,7 @@ export function levelForXp(xp: number): { level: number; into: number; next: num
 }
 
 /**
- * Weapon parts, utilities and ults unlock by level (every weapon, and the Standard option in every
+ * Weapon parts and utilities unlock by level (ults are free: one is dealt at random each spawn) (every weapon, and the Standard option in every
  * part slot, is available from the start). New players get a couple of parts to play with right
  * away, then one or two more each level up to 8.
  */
@@ -343,26 +343,21 @@ export const UNLOCKS: { level: number; kind: 'part' | 'utility' | 'ult'; id: Spe
   { level: 1, kind: 'utility', id: 'airGrenade' },
   { level: 1, kind: 'part', id: 'stubbyBarrel' },
   { level: 1, kind: 'part', id: 'miniTank' },
-  { level: 1, kind: 'ult', id: 'bigBlow' },
   { level: 2, kind: 'part', id: 'wideNozzle' },
   { level: 2, kind: 'part', id: 'sprintGrip' },
-  { level: 2, kind: 'ult', id: 'juice' },
   { level: 3, kind: 'utility', id: 'inflatableWall' },
   { level: 3, kind: 'part', id: 'quickValve' },
   { level: 4, kind: 'part', id: 'bigTank' },
   { level: 4, kind: 'part', id: 'jetNozzle' },
-  { level: 4, kind: 'ult', id: 'cropDuster' },
   { level: 5, kind: 'utility', id: 'vacuumGrenade' },
   { level: 5, kind: 'part', id: 'chargeValve' },
   { level: 6, kind: 'part', id: 'longBarrel' },
   { level: 6, kind: 'part', id: 'anchorStock' },
   { level: 7, kind: 'part', id: 'hairTrigger' },
   { level: 7, kind: 'part', id: 'pumpNozzle' },
-  { level: 7, kind: 'ult', id: 'chase' },
   { level: 8, kind: 'part', id: 'kickStock' },
   { level: 9, kind: 'utility', id: 'airMine' },
   { level: 10, kind: 'utility', id: 'heliumBomb' },
-  { level: 10, kind: 'ult', id: 'robot' },
   { level: 12, kind: 'utility', id: 'tornado' },
 ];
 
@@ -375,7 +370,7 @@ export function unlockedAt(level: number): { parts: PartId[]; utils: UtilityId[]
   return {
     parts: PART_IDS.filter((m) => m === 'standard' || unlockLevel(m) <= level),
     utils: UTILITY_IDS.filter((u) => unlockLevel(u) <= level),
-    ults: ULT_IDS.filter((u) => unlockLevel(u) <= level),
+    ults: [...ULT_IDS],
   };
 }
 

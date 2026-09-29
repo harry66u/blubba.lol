@@ -2,9 +2,9 @@ import { BALANCE } from '../balance';
 import type { PlayerState } from '../player';
 
 /**
- * Ultimate abilities ("ults"): a meter that fills as you play, then one big move, picked in the
- * loadout and unlocked by level (never bought). Four are the signature moves of the regulars (BOR,
- * ABAG, SOL and KESTY), but any character can take any ult.
+ * Ultimate abilities ("ults"): a meter that fills as you play, then one big move. The four in play
+ * are the signature moves of the regulars (BOR, ABAG, SOL and KESTY). They're all free: every spawn
+ * deals you one at random (PLAYABLE_ULTS). Big Blow is kept for the debug tools only.
  *
  * This file holds what both sides share: the list, the public snapshot bits, and the effects on
  * movement that client prediction has to reproduce exactly. The server side is game/ultSim.ts.
@@ -13,7 +13,14 @@ import type { PlayerState } from '../player';
 export const ULT_IDS = ['bigBlow', 'juice', 'chase', 'cropDuster', 'robot'] as const;
 export type UltId = (typeof ULT_IDS)[number];
 
-export const DEFAULT_ULT: UltId = 'bigBlow';
+export const DEFAULT_ULT: UltId = 'juice';
+
+/** The ults dealt out in matches, one at random each time you spawn. */
+export const PLAYABLE_ULTS: readonly UltId[] = ['juice', 'chase', 'cropDuster', 'robot'];
+
+export function randomUlt(): UltId {
+  return PLAYABLE_ULTS[Math.floor(Math.random() * PLAYABLE_ULTS.length)];
+}
 
 export interface UltInfo {
   name: string;

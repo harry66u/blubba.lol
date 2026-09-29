@@ -48,7 +48,7 @@ import { collapsePlan } from './shrink';
 import type { GameEvent, LootKind } from './events';
 import { type AirMine, LOOT_KINDS, type LootCrate, type Tornado, floorBelow, lostBelow, pickLootSpot, rollLoot, stepCrate, stepTornado } from './loot';
 import { UltSystem } from './ultSim';
-import { ULT_IDS, isUltProjectile, ultIndex, ultMassMult, ultPowerMult } from './ults';
+import { ULT_IDS, isUltProjectile, randomUlt, ultIndex, ultMassMult, ultPowerMult } from './ults';
 
 export type { ModeId } from './modes';
 export type MatchPhase = 'waiting' | 'playing' | 'results';
@@ -510,7 +510,6 @@ export class GameSim {
       p.state.charging = 0;
       p.state.charge = 0;
       p.state.reloadTimer = 0;
-      p.state.ultKind = ultIndex(l.ult);
       this.emitLoadout(p);
     } else {
       p.pendingLoadout = l;
@@ -2844,7 +2843,8 @@ export class GameSim {
       this.emitLoadout(p);
     }
     p.weapon = computeWeaponStats(p.loadout.weapon, p.loadout.parts);
-    s.ultKind = ultIndex(p.loadout.ult);
+    // Ults are dealt at random each spawn (all four are free).
+    s.ultKind = ultIndex(randomUlt());
     s.hoverTimer = p.weapon.hoverTime;
     const sp = this.pickSpawn(p.id);
     s.px = sp[0];

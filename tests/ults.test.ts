@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { BALANCE } from '../src/shared/balance';
-import { unlockLevel, unlockedAt } from '../src/shared/economy';
+import { unlockedAt } from '../src/shared/economy';
 import type { GameEvent } from '../src/shared/game/events';
 import { GameSim, type SimPlayer } from '../src/shared/game/sim';
-import { PROJ_BIG_BLOW, PROJ_ROCKET, ULT_BIT_READY, ULT_IDS, type UltId, publicUlt, publicUltKind, steerToward, ultIndex } from '../src/shared/game/ults';
+import { PLAYABLE_ULTS, PROJ_BIG_BLOW, PROJ_ROCKET, ULT_BIT_READY, ULT_IDS, type UltId, publicUlt, publicUltKind, steerToward, ultIndex } from '../src/shared/game/ults';
 import { emptyInput } from '../src/shared/input';
 import { type Loadout, sanitizeLoadout } from '../src/shared/loadout';
 import { DEALERSHIP } from '../src/shared/maps/dealership';
@@ -20,6 +20,10 @@ function setup(loadouts: Partial<Loadout>[]) {
   sim.eventMult = 0;
   const ps: SimPlayer[] = loadouts.map((l, i) => sim.addPlayer(`p${i}`, { loadout: sanitizeLoadout(l) }));
   if (sim.phase !== 'playing') sim.startMatch();
+  // Matches deal ults at random each spawn: give each test player the one it asked for.
+  ps.forEach((p, i) => {
+    if (loadouts[i].ult) p.state.ultKind = ultIndex(loadouts[i].ult!);
+  });
   const ds = ps.map((p) => new Driver(sim, p));
   for (const p of ps) p.state.spawnProt = 0;
   sim.drainEvents();
@@ -455,21 +459,18 @@ describe('bots and ults', () => {
 });
 
 describe('ult loadout, unlocks and wire format', () => {
-  it('sanitizes the ult choice and respects locks', () => {
-    expect(sanitizeLoadout({}).ult).toBe('bigBlow');
-    expect(sanitizeLoadout({ ult: 'nope' as UltId }).ult).toBe('bigBlow');
-    expect(sanitizeLoadout({ ult: 'cropDuster' }).ult).toBe('cropDuster');
-    expect(sanitizeLoadout({ ult: 'robot' }, unlockedAt(1)).ult).toBe('bigBlow');
-    expect(sanitizeLoadout({ ult: 'robot' }, unlockedAt(10)).ult).toBe('robot');
-  });
-
-  it('unlocks Big Blow at level 1 and the rest by level 10', () => {
-    expect(unlockLevel('bigBlow')).toBe(1);
-    for (const u of ULT_IDS.filter((x) => x !== 'bigBlow')) {
-      expect(unlockLevel(u)).toBeGreaterThanOrEqual(2);
-      expect(unlockLevel(u)).toBeLessThanOrEqual(10);
+  it('deals one of the four character ults at random each spawn, all free', () => {
+    expect(PLAYABLE_ULTS).toEqual(['juice', 'chase', 'cropDuster', 'robot']);
+    expect(unlockedAt(1).ults).toEqual([...ULT_IDS]);
+    expect(sanitizeLoadout({}).ult).toBe('juice');
+    const sim = new GameSim({ map: DEALERSHIP, durationSec: 999 });
+    const p = sim.addPlayer('p', { loadout: sanitizeLoadout({ ult: 'bigBlow' }) });
+    const seen = new Set<string>();
+    for (let i = 0; i < 200; i++) {
+      sim.respawn(p);
+      seen.add(ULT_IDS[p.state.ultKind]);
     }
-    expect(unlockedAt(10).ults).toEqual([...ULT_IDS]);
+    expect([...seen].sort()).toEqual([...PLAYABLE_ULTS].sort());
   });
 
   it('the snapshot carries the ult state for everyone to see', () => {

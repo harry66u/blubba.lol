@@ -49,7 +49,7 @@ describe('loadouts', () => {
     expect(lb.blastRadius).toBeLessThan(base.blastRadius);
     // Old saved loadouts: each mod moves into its slot (the first of two clashing ones wins).
     expect(sanitizeLoadout({ weapon: 'airHorn', mods: ['chargeValve', 'quickValve', 'bigTank'] }).parts).toEqual({ barrel: 'standard', tank: 'bigTank', valve: 'chargeValve', nozzle: 'standard', grip: 'standard' });
-    expect(sanitizeLoadout({ weapon: 'bogus', mods: ['x'], utils: ['airGrenade', 'airGrenade'] })).toEqual({ weapon: 'airCannon', parts: STANDARD_PARTS, utils: ['airGrenade', 'bouncePad'], ult: 'bigBlow' });
+    expect(sanitizeLoadout({ weapon: 'bogus', mods: ['x'], utils: ['airGrenade', 'airGrenade'] })).toEqual({ weapon: 'airCannon', parts: STANDARD_PARTS, utils: ['airGrenade', 'bouncePad'], ult: 'juice' });
   });
 
   it('Leaf Blower pushes whoever is in the stream', () => {

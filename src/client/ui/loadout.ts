@@ -20,11 +20,9 @@ import {
   weaponRange,
 } from '../../shared/loadout';
 import { type Cosmetics, ITEMS, cosmeticKey, ownsItem, unlockLevel } from '../../shared/economy';
-import { ULT_IDS } from '../../shared/game/ults';
 import { PLAYER_COLORS } from '../../shared/colors';
 import { GunPreview } from '../render/gunPreview';
 import { clear, el } from './dom';
-import { buildUltPicker } from './ultPicker';
 
 const KEY = 'bubba.loadout.v1';
 const BUILDS_KEY = 'bubba.builds.v1';
