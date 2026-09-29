@@ -45,7 +45,20 @@ import {
 } from '../../shared/protocol';
 import { type MatchPhase, type MatchResult, rayCapsule } from '../../shared/game/sim';
 import { World } from '../../shared/world';
-import { DEFAULT_LOADOUT, type Loadout, UTILITY_INFO, WEAPON_IDS, WEAPON_INFO, type WeaponStats, computeWeaponStats, sanitizeLoadout } from '../../shared/loadout';
+import {
+  DEFAULT_LOADOUT,
+  type Loadout,
+  type Parts,
+  STANDARD_PARTS,
+  UTILITY_INFO,
+  WEAPON_IDS,
+  WEAPON_INFO,
+  type WeaponStats,
+  computeWeaponStats,
+  normalizeParts,
+  sanitizeLoadout,
+} from '../../shared/loadout';
+import { pelletDirs, shotDir, spreadAt } from '../../shared/shots';
 import { EntityView } from '../render/entities';
 import { CHAOS_INFO, type ChaosEvent, type Environment, NORMAL_ENV, envAt } from '../../shared/game/chaos';
 import { Announcer } from '../audio/announcer';
@@ -54,7 +67,7 @@ import type { ReplayData } from '../../shared/game/sim';
 import type { Audio } from '../audio/audio';
 import { type Action, type InputManager, codeLabel } from '../input/input';
 import type { Connection } from '../net/connection';
-import { Effects, LandingCircles, type Projectile3D } from '../render/effects';
+import { Effects, LandingCircles, type Projectile3D, type ShotStyle, shotStyleFor } from '../render/effects';
 import { MapView } from '../render/mapView';
 import { BeachBall } from '../render/beachBall';
 import type { Renderer } from '../render/renderer';
@@ -115,6 +128,7 @@ interface RemoteShot {
   vy: number;
   vz: number;
   p3: Projectile3D;
+  style: ShotStyle;
 }
 
 interface LocalShot {
@@ -123,6 +137,11 @@ interface LocalShot {
   life: number;
   exploded: boolean;
   boomAt: THREE.Vector3 | null;
+  /** Gravity (lobbed shots). */
+  g: number;
+  style: ShotStyle;
+  /** Blast radius to show if it lands. */
+  blast: number;
 }
 
 export interface MatchInfo {
@@ -162,6 +181,12 @@ export class ClientGame {
   readonly entities = new EntityView();
   loadout: Loadout = { ...DEFAULT_LOADOUT };
   weapon: WeaponStats = computeWeaponStats('airCannon', []);
+  /** Parts of the weapon you're holding right now (changes apply on respawn). */
+  private activeParts: Parts = { ...STANDARD_PARTS };
+  /** Other players' weapon parts, from their loadout events (their guns look the part). */
+  private readonly remoteParts = new Map<number, Parts>();
+  private readonly pelletBuf: number[] = [];
+  private readonly arcPts: number[] = [];
   private streamStrength = 0;
   readonly announcer = new Announcer();
   readonly replay: ReplayView;
@@ -278,9 +303,10 @@ export class ClientGame {
   }
 
   private applyWeapon(l: Loadout): void {
-    this.weapon = computeWeaponStats(l.weapon, l.mods);
+    this.weapon = computeWeaponStats(l.weapon, l.parts);
+    this.activeParts = { ...l.parts };
     this.ctx.weapon = this.weapon;
-    this.viewModel.setWeapon(l.weapon);
+    this.viewModel.setWeapon(l.weapon, l.parts);
     this.hud.setUtilities(l.utils.map((u) => UTILITY_INFO[u].name));
   }
 
@@ -570,7 +596,10 @@ export class ClientGame {
       case 'loadout':
       case 'honk':
       case 'tracer':
+      case 'pellets':
         return e.id === you;
+      case 'tap':
+        return e.attacker === you || e.target === you || this.localByServer.has(e.id);
       case 'chaos':
       case 'crown':
       case 'final':
@@ -687,17 +716,29 @@ export class ClientGame {
             this.localByServer.set(e.id, -e.cs!);
           } else {
             const key = -100000 - e.id;
-            const p3 = fx.addProjectile(key, e.x, e.y, e.z, e.vx, e.vy, e.vz, e.r);
-            this.localShots.set(key, { p3, serverId: e.id, life: this.weapon.projLifetime, exploded: false, boomAt: null });
+            const style = shotStyleFor(e.wi);
+            const p3 = fx.addProjectile(key, e.x, e.y, e.z, e.vx, e.vy, e.vz, e.r, undefined, 0, style);
+            this.localShots.set(key, { p3, serverId: e.id, life: this.weapon.projLifetime, exploded: false, boomAt: null, g: e.g ?? 0, style, blast: this.weapon.blastRadius });
             this.localByServer.set(e.id, key);
           }
         } else {
-          const p3 = fx.addProjectile(e.id, e.x, e.y, e.z, e.vx, e.vy, e.vz, e.r, undefined, e.w);
-          this.remoteShots.set(e.id, { id: e.id, g: e.g ?? 0, tick: e.tick, x: e.x, y: e.y, z: e.z, vx: e.vx, vy: e.vy, vz: e.vz, p3 });
+          const style = e.w === 0 ? shotStyleFor(e.wi) : 'air';
+          const p3 = fx.addProjectile(e.id, e.x, e.y, e.z, e.vx, e.vy, e.vz, e.r, undefined, e.w, style);
+          this.remoteShots.set(e.id, { id: e.id, g: e.g ?? 0, tick: e.tick, x: e.x, y: e.y, z: e.z, vx: e.vx, vy: e.vy, vz: e.vz, p3, style });
           if (e.w === 0) {
-            a.shoot(e.power, [e.x, e.y, e.z]);
+            const pos: [number, number, number] = [e.x, e.y, e.z];
             const sp = Math.hypot(e.vx, e.vy, e.vz) || 1;
-            fx.muzzleFlash(e.x, e.y, e.z, e.vx / sp, e.vy / sp, e.vz / sp, e.power);
+            if (style === 'cork') {
+              a.popShot(pos);
+              fx.muzzleFlash(e.x, e.y, e.z, e.vx / sp, e.vy / sp, e.vz / sp, 0.15);
+            } else if (style === 'balloon') {
+              a.mortarLaunch(e.power, pos);
+              fx.muzzleFlash(e.x, e.y, e.z, e.vx / sp, e.vy / sp, e.vz / sp, e.power * 0.8);
+              fx.airPuff(e.x, e.y, e.z, 8, 3, 0.3);
+            } else {
+              a.shoot(e.power, pos);
+              fx.muzzleFlash(e.x, e.y, e.z, e.vx / sp, e.vy / sp, e.vz / sp, e.power);
+            }
           } else a.whoosh(0.3, e.owner === you ? null : [e.x, e.y, e.z]);
           const rv = this.remotes.get(e.owner);
           if (rv) rv.man.group.userData.kick = 1;
@@ -711,7 +752,7 @@ export class ClientGame {
           this.localByServer.delete(e.id);
           if (ls) {
             const shownFar = ls.boomAt && ls.boomAt.distanceTo(tmpV.set(e.x, e.y, e.z)) > 3;
-            if (!ls.exploded || shownFar) this.showBlast(e.x, e.y, e.z, e.r, e.power);
+            if (!ls.exploded || shownFar) this.showBlast(e.x, e.y, e.z, e.r, e.power, ls.style);
             fx.removeProjectile(localKey);
             this.localShots.delete(localKey);
           }
@@ -721,7 +762,7 @@ export class ClientGame {
             fx.removeProjectile(e.id);
             this.remoteShots.delete(e.id);
           }
-          this.showBlast(e.x, e.y, e.z, e.r, e.power);
+          this.showBlast(e.x, e.y, e.z, e.r, e.power, rs?.style ?? 'air');
           if (e.k) {
             fx.confettiBurst(e.x, e.y, e.z, 25, [0x2ec5ff, 0xffffff, 0x9fe8ff]);
             this.hud.popup(tmpV.set(e.x, e.y + 1.5, e.z), 'KA-WHOOSH!', '#2ec5ff', 1.2, 1, e.owner !== you);
@@ -820,6 +861,7 @@ export class ClientGame {
       }
       case 'loadout':
         if (e.id === you) this.applyWeapon(sanitizeLoadout(e));
+        else this.remoteParts.set(e.id, normalizeParts(e.parts));
         break;
       case 'chaos': {
         this.chaos = this.chaos.filter((c) => c.endTick > e.tick);
@@ -909,6 +951,25 @@ export class ClientGame {
         break;
       case 'fizzle': {
         const localKey = this.localByServer.get(e.id);
+        let style: ShotStyle = 'air';
+        if (localKey !== undefined) {
+          const ls = this.localShots.get(localKey);
+          if (ls) style = ls.style;
+          fx.removeProjectile(localKey);
+          this.localShots.delete(localKey);
+          this.localByServer.delete(e.id);
+        } else if (this.remoteShots.has(e.id)) {
+          style = this.remoteShots.get(e.id)!.style;
+          fx.removeProjectile(e.id);
+          this.remoteShots.delete(e.id);
+        }
+        if (style === 'cork') fx.corkPop(e.x, e.y, e.z);
+        else fx.airPuff(e.x, e.y, e.z, 6, 1.5, 0.3);
+        break;
+      }
+      case 'tap': {
+        // A Pop Gun cork landed: a light push, not a launch.
+        const localKey = this.localByServer.get(e.id);
         if (localKey !== undefined) {
           fx.removeProjectile(localKey);
           this.localShots.delete(localKey);
@@ -917,7 +978,27 @@ export class ClientGame {
           fx.removeProjectile(e.id);
           this.remoteShots.delete(e.id);
         }
-        fx.airPuff(e.x, e.y, e.z, 6, 1.5, 0.3);
+        fx.corkPop(e.x, e.y, e.z, true);
+        a.corkTap(e.infl, e.target === you ? null : [e.x, e.y, e.z]);
+        if (e.attacker === you && e.target !== you) {
+          this.hud.hitMarker(0.15);
+          if (Math.random() < 0.35) this.audio.hitConfirm(0.12);
+        }
+        if (e.target === you) this.trauma = Math.min(1, this.trauma + 0.03);
+        break;
+      }
+      case 'pellets': {
+        if (e.id !== you) {
+          const rv = this.remotes.get(e.id);
+          const from = rv?.man.muzzleWorld(new THREE.Vector3()) ?? new THREE.Vector3(e.x, e.y, e.z);
+          const dirs = pelletDirs(e.dx, e.dy, e.dz, e.spread, e.ends.length, this.pelletBuf);
+          const ends: number[] = [];
+          for (let i = 0; i < e.ends.length; i++) ends.push(e.x + dirs[i * 3] * e.ends[i], e.y + dirs[i * 3 + 1] * e.ends[i], e.z + dirs[i * 3 + 2] * e.ends[i]);
+          fx.bubbleVolley(from.x, from.y, from.z, ends, e.power);
+          fx.muzzleFlash(from.x, from.y, from.z, e.dx, e.dy, e.dz, e.power * 0.6);
+          a.bubbleBlast(e.power, [e.x, e.y, e.z]);
+          if (rv) rv.man.group.userData.kick = 1;
+        }
         break;
       }
       case 'hit': {
@@ -1243,9 +1324,15 @@ export class ClientGame {
     return new THREE.Vector3(rv.cur.px, rv.cur.py + 1.3 * inflationScale(rv.cur.inflation), rv.cur.pz);
   }
 
-  private showBlast(x: number, y: number, z: number, r: number, power: number): void {
-    this.effects.blast(x, y, z, r, power, this.r.camera.position);
-    this.audio.whoosh(power, [x, y, z]);
+  private showBlast(x: number, y: number, z: number, r: number, power: number, style: ShotStyle = 'air'): void {
+    if (style === 'balloon') {
+      this.effects.splash(x, y, z, r, power, this.r.camera.position);
+      this.audio.splash(power, [x, y, z]);
+      this.hud.popup(tmpV.set(x, y + 1.2, z), 'SPLOOSH!', '#3ab8ff', 1 + power * 0.4, 0.9, true);
+    } else {
+      this.effects.blast(x, y, z, r, power, this.r.camera.position);
+      this.audio.whoosh(power, [x, y, z]);
+    }
     const d = this.r.camera.position.distanceTo(tmpV.set(x, y, z));
     if (d < 8) this.trauma = Math.min(1, this.trauma + (1 - d / 8) * 0.25);
   }
@@ -1358,6 +1445,24 @@ export class ClientGame {
       this.hud.popup(tmpV3.set(tmpV.x + f.dx * 2.5, tmpV.y + f.dy * 2.5 + 0.4, tmpV.z + f.dz * 2.5), 'FWOOMP!', '#ffd60a', 0.9 + f.power * 0.5, 0.6);
       return;
     }
+    if (w.kind === 'spread') {
+      // Bubble Shotgun: the same fixed pellet ring the server uses, drawn to where each pellet stops.
+      this.viewModel.kick(f.power * 1.3);
+      this.audio.bubbleBlast(f.power, null);
+      this.trauma = Math.min(1, this.trauma + 0.1 + f.power * 0.2);
+      this.punchV += 0.7 + f.power * 1.4;
+      this.fovKick += 1.5 + f.power * 3;
+      this.muzzlePos(tmpV);
+      const dirs = pelletDirs(f.dx, f.dy, f.dz, spreadAt(w, f.charge), w.pellets, this.pelletBuf);
+      const ends: number[] = [];
+      for (let i = 0; i < dirs.length; i += 3) {
+        const end = this.localRay(f.ox, f.oy, f.oz, dirs[i], dirs[i + 1], dirs[i + 2], w.range, w.rayRadius);
+        ends.push(end.x, end.y, end.z);
+      }
+      this.effects.bubbleVolley(tmpV.x, tmpV.y, tmpV.z, ends, f.power);
+      this.effects.muzzleFlash(tmpV.x, tmpV.y, tmpV.z, f.dx, f.dy, f.dz, f.power * 0.5);
+      return;
+    }
     if (w.kind === 'hitscan') {
       this.viewModel.kick(f.power);
       this.audio.pew(f.power, null);
@@ -1370,9 +1475,12 @@ export class ClientGame {
       return;
     }
     const M = BALANCE.streaks;
-    const kick = f.mega ? 1.6 : 1;
+    const style: ShotStyle = w.light ? 'cork' : w.projGravity > 0 ? 'balloon' : 'air';
+    const kick = (f.mega ? 1.6 : 1) * (style === 'cork' ? 0.25 : style === 'balloon' ? 1.4 : 1);
     this.viewModel.kick(f.power * kick);
-    this.audio.shoot(f.power, null);
+    if (style === 'cork') this.audio.popShot(null);
+    else if (style === 'balloon') this.audio.mortarLaunch(f.power, null);
+    else this.audio.shoot(f.power, null);
     this.trauma = Math.min(1, this.trauma + (0.1 + f.power * 0.2) * kick);
     this.punchV += (0.5 + f.power * 1.3) * kick;
     this.fovKick += (1 + f.power * 3) * kick;
@@ -1380,13 +1488,12 @@ export class ClientGame {
     this.muzzlePos(tmpV);
     this.effects.muzzleFlash(tmpV.x, tmpV.y, tmpV.z, f.dx, f.dy, f.dz, f.power * 0.6 * kick);
     const r = w.projRadius * (0.75 + 0.25 * f.power) * (f.mega ? M.megaRadius : 1);
-    this.localBlast = w.blastRadius * (f.mega ? M.megaBlast : 1);
-    const p3 = this.effects.addProjectile(key, f.ox, f.oy, f.oz, f.dx * w.projSpeed, f.dy * w.projSpeed, f.dz * w.projSpeed, r, tmpV);
-    this.localShots.set(key, { p3, serverId: -1, life: w.projLifetime, exploded: false, boomAt: null });
-    this.effects.airPuff(tmpV.x, tmpV.y, tmpV.z, 5, 2, 0.12);
+    const blast = w.blastRadius * (f.mega ? M.megaBlast : 1);
+    const d = shotDir(w, f.dx, f.dy, f.dz, tmpDir);
+    const p3 = this.effects.addProjectile(key, f.ox, f.oy, f.oz, d.x * w.projSpeed, d.y * w.projSpeed, d.z * w.projSpeed, r, tmpV, 0, style);
+    this.localShots.set(key, { p3, serverId: -1, life: w.projLifetime, exploded: false, boomAt: null, g: w.projGravity, style, blast });
+    if (style !== 'cork') this.effects.airPuff(tmpV.x, tmpV.y, tmpV.z, style === 'balloon' ? 9 : 5, 2, style === 'balloon' ? 0.22 : 0.12);
   }
-
-  private localBlast = BALANCE.weapons.airCannon.blastRadius;
 
   /** Where a ray from your eye stops (world or another player), for instant tracer feedback. */
   private localRay(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, range: number, extra: number): THREE.Vector3 {
@@ -1660,7 +1767,7 @@ export class ClientGame {
     p.powered = (c.flags & FLAG_POWERED) !== 0;
     if (p.powered && Math.random() < dt * 12) this.effects.sparkle(c.px + (Math.random() - 0.5) * 1.4, c.py + Math.random() * 2.2, c.pz + (Math.random() - 0.5) * 1.4);
     p.nemesis = rv.id === this.nemesisId;
-    rv.man.setWeapon(WEAPON_IDS[c.weapon] ?? 'airCannon');
+    rv.man.setWeapon(WEAPON_IDS[c.weapon] ?? 'airCannon', this.remoteParts.get(rv.id) ?? null);
     p.dashing = (c.flags & FLAG_DASHING) !== 0;
     p.protected = (c.flags & FLAG_PROTECTED) !== 0;
     rv.man.update(p);
@@ -1714,6 +1821,7 @@ export class ClientGame {
         continue;
       }
       const p = s.p3;
+      if (s.g > 0) p.vy -= s.g * dt;
       const nx = p.x + p.vx * dt;
       const ny = p.y + p.vy * dt;
       const nz = p.z + p.vz * dt;
@@ -1737,13 +1845,14 @@ export class ClientGame {
         s.exploded = true;
         s.boomAt = new THREE.Vector3(nx, ny, nz);
         this.effects.removeProjectile(key);
-        this.showBlast(nx, ny, nz, this.localBlast * 0.9, 0.7);
+        if (s.style === 'cork') this.effects.corkPop(nx, ny, nz);
+        else this.showBlast(nx, ny, nz, s.blast * 0.9, 0.7, s.style);
         continue;
       }
       if (s.life <= 0) {
         s.exploded = true;
         this.effects.removeProjectile(key);
-        this.effects.airPuff(nx, ny, nz, 5, 1.5, 0.25);
+        if (s.style !== 'cork') this.effects.airPuff(nx, ny, nz, 5, 1.5, 0.25);
         continue;
       }
       this.effects.placeProjectile(p, nx, ny, nz, dt);
@@ -1852,7 +1961,7 @@ export class ClientGame {
     pose.nemesis = false;
     pose.dashing = p.dashTimer > 0;
     pose.protected = p.spawnProt > 0;
-    man.setWeapon(this.weapon.id);
+    man.setWeapon(this.weapon.id, this.activeParts);
     man.update(pose);
   }
 
@@ -1955,10 +2064,12 @@ export class ClientGame {
     this.input.lookDX = 0;
     this.input.lookDY = 0;
     const charge = alive && p.charging && w.kind !== 'stream' ? p.charge : 0;
-    if (charge !== this.lastCharge) {
-      this.audio.setCharge(charge);
-      this.lastCharge = charge;
+    const whine = w.auto ? 0 : charge;
+    if (whine !== this.lastCharge) {
+      this.audio.setCharge(whine);
+      this.lastCharge = whine;
     }
+    this.updateAimArc(alive && p.charging === 1 && w.kind === 'projectile' && w.projGravity > 0);
     if (p.ammo === 0 && this.lastAmmo > 0) this.hud.setNote('Reloading...');
     const launched = p.launchTimer > 0;
     if (launched && !this.wasLaunched) this.launchTips++;
@@ -2000,7 +2111,8 @@ export class ClientGame {
         sub,
         alive,
         weaponName: WEAPON_INFO[w.id].name.toUpperCase(),
-        stream: w.kind === 'stream',
+        // Big magazines show as a gauge instead of a row of pips.
+        stream: w.kind === 'stream' || w.ammo > 10,
         u1Ready: 1 - Math.min(1, p.u1Cool / BALANCE.utilities[this.loadout.utils[0]].cooldown),
         u2Ready: 1 - Math.min(1, p.u2Cool / BALANCE.utilities[this.loadout.utils[1]].cooldown),
         pin: p.pinTimer,
@@ -2041,6 +2153,44 @@ export class ClientGame {
       utilName: (i) => UTILITY_INFO[this.loadout.utils[i]].name,
     });
     this.hud.ping.textContent = `${Math.round(this.net.rtt)} ms`;
+  }
+
+  /** Balloon Mortar: while charging, dots trace the arc and a ring marks where it will land. */
+  private updateAimArc(show: boolean): void {
+    if (!show) {
+      this.effects.setAimArc(null, null);
+      return;
+    }
+    const p = this.pred;
+    const w = this.weapon;
+    const look = lookDir(p.yaw, p.pitch, tmpDir);
+    const ox = p.px + look.x * 0.5;
+    const oy = p.py + eyeHeight(p) + look.y * 0.5;
+    const oz = p.pz + look.z * 0.5;
+    const d = shotDir(w, look.x, look.y, look.z, { x: 0, y: 0, z: 0 });
+    let x = ox;
+    let y = oy;
+    let z = oz;
+    let vx = d.x * w.projSpeed;
+    let vy = d.y * w.projSpeed;
+    let vz = d.z * w.projSpeed;
+    const pts = this.arcPts;
+    pts.length = 0;
+    const step = 1 / 30;
+    let land: THREE.Vector3 | null = null;
+    for (let i = 0; i < 90; i++) {
+      vy -= w.projGravity * step;
+      x += vx * step;
+      y += vy * step;
+      z += vz * step;
+      if (this.world.sphereHit(x, y, z, w.projRadius * 0.45) >= 0) {
+        land = tmpV2.set(x, y, z);
+        break;
+      }
+      if (i % 2 === 1 && i > 2) pts.push(x, y, z);
+      if (y < -40) break;
+    }
+    this.effects.setAimArc(pts, land, w.blastRadius * 0.8);
   }
 
   private key(a: Action): string {

@@ -252,12 +252,13 @@ export const BALANCE = {
       fireCooldown: 0.85,
       chargeTime: 0.8,
       tapPower: 0.55,
-      projSpeed: 27,
+      /** Slow and lofted: a level shot flies up about 37 degrees and lands ~22 m out. */
+      projSpeed: 21,
       projRadius: 0.75,
-      projLifetime: 3,
+      projLifetime: 3.5,
       projGravity: 20,
-      /** Added to the aim's vertical direction so a level shot still arcs. */
-      projLoft: 0.3,
+      /** Added to the aim's vertical direction so a level shot still arcs high. */
+      projLoft: 0.75,
       blastRadius: 4.6,
       inflation: 0.18,
       knockback: 1.4,

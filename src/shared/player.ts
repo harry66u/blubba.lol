@@ -466,7 +466,8 @@ function stepMove(
       p.slideTimer = Math.max(0, p.slideTimer - dt);
       if (Math.hypot(p.vx, p.vz) < D.speed * 0.3) p.slideTimer = 0;
     } else {
-      accelerate(p, wx, wz, P.walkSpeed * wishLen * moveMult, P.groundAccel * env.accelMult, dt);
+      // (Walking speed is friction-limited, so the parts' speed multiplier scales acceleration too.)
+      accelerate(p, wx, wz, P.walkSpeed * wishLen * moveMult, P.groundAccel * env.accelMult * W.moveMult, dt);
     }
   } else if (p.dashTimer > 0) {
     p.dashTimer -= dt;
@@ -488,7 +489,7 @@ function stepMove(
       p.vz += wz * K.launchSteerAccel * wishLen * dt;
       drag = K.launchDrag;
     } else {
-      accelerate(p, wx, wz, P.airMaxSpeed * wishLen * moveMult, P.airAccel, dt);
+      accelerate(p, wx, wz, P.airMaxSpeed * wishLen * moveMult, P.airAccel * W.moveMult, dt);
     }
     const f = Math.max(0, 1 - drag * dt);
     p.vx *= f;

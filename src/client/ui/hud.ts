@@ -319,7 +319,7 @@ export class Hud {
     }
     this.utilEls[0].cool.style.height = `${Math.round((1 - s.u1Ready) * 100)}%`;
     this.utilEls[1].cool.style.height = `${Math.round((1 - s.u2Ready) * 100)}%`;
-    const power = [s.turbo > 0 ? `⚡ TURBO ${Math.ceil(s.turbo)}s` : '', s.mega > 0 ? `💥 MEGA ×${s.mega}` : ''].filter(Boolean).join('  ');
+    const power = [s.turbo > 0 ? `⚡ TURBO ${Math.ceil(s.turbo)}s` : '', s.mega > 0 ? `💥 MEGA ×${Math.ceil(s.mega)}` : ''].filter(Boolean).join('  ');
     this.setIf('power', power, () => {
       this.powerBadge.textContent = power;
       this.powerBadge.classList.toggle('hidden', !power);
