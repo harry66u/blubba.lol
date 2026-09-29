@@ -28,6 +28,8 @@ export const PLAYER_FIELDS = [
   'hitStop', 'hsVx', 'hsVy', 'hsVz',
   // Streak rewards: Turbo Tank seconds left, Mega Blast shots left.
   'turboTimer', 'megaShots',
+  // Floor loot and gadgets: Feather (low gravity) seconds, Helium Bomb float seconds, Spring Shoes jumps left.
+  'floatTimer', 'heliumTimer', 'springJumps',
 ] as const;
 
 export type PlayerField = (typeof PLAYER_FIELDS)[number];
@@ -104,6 +106,8 @@ export interface ShotSpec {
 /** Everything notable that happened during one player step; used for effects and server logic. */
 export class StepResult {
   jumped = false;
+  /** The jump was a Spring Shoes super jump. */
+  springJump = false;
   doubleJumped = false;
   dashed = false;
   slid = false;
@@ -129,6 +133,7 @@ export class StepResult {
 
   reset(): void {
     this.jumped = false;
+    this.springJump = false;
     this.doubleJumped = false;
     this.dashed = false;
     this.slid = false;
@@ -280,6 +285,8 @@ function tickTimers(p: PlayerState, dt: number): void {
   p.u2Cool = Math.max(0, p.u2Cool - dt);
   p.pinTimer = Math.max(0, p.pinTimer - dt);
   p.blownTimer = Math.max(0, p.blownTimer - dt);
+  p.floatTimer = Math.max(0, p.floatTimer - dt);
+  p.heliumTimer = Math.max(0, p.heliumTimer - dt);
   p.sinceHit += dt;
   if (p.mode === MODE_HELD || p.holding >= 0) p.holdTimer += dt;
   if (p.launchTimer > 0) {
@@ -384,6 +391,12 @@ function stepMove(
   if (jumpP && !launched && !doubled && p.zipTimer <= 0) {
     if ((p.onGround || p.coyote > 0) && p.jumpsUsed === 0) {
       p.vy = P.jumpVelocity;
+      if (p.springJumps > 0) {
+        // Spring Shoes (floor loot): a few super jumps.
+        p.springJumps -= 1;
+        p.vy = P.jumpVelocity * BALANCE.loot.springJumpMult;
+        out.springJump = true;
+      }
       p.jumpsUsed = 1;
       p.onGround = 0;
       p.coyote = 0;
@@ -488,7 +501,9 @@ function stepMove(
       p.vz += wz * K.launchSteerAccel * wishLen * dt;
       drag = K.launchDrag;
     } else {
-      accelerate(p, wx, wz, P.airMaxSpeed * wishLen * moveMult, P.airAccel, dt);
+      // Floating in helium you drift like a balloon: little air control.
+      const floaty = p.heliumTimer > 0 ? BALANCE.utilities.heliumBomb.airControl : 1;
+      accelerate(p, wx, wz, P.airMaxSpeed * wishLen * moveMult, P.airAccel * floaty, dt);
     }
     const f = Math.max(0, 1 - drag * dt);
     p.vx *= f;
@@ -504,8 +519,19 @@ function stepMove(
 
   // --- Gravity ---------------------------------------------------------------------------
   if (p.dashTimer <= 0) {
-    p.vy -= P.gravity * env.gravityMult * dt;
-    if (p.vy < -P.maxFallSpeed) p.vy = -P.maxFallSpeed;
+    if (p.heliumTimer > 0) {
+      // Helium Bomb: buoyancy instead of gravity, easing toward a gentle rise.
+      const H = BALANCE.utilities.heliumBomb;
+      p.vy += (H.rise - p.vy) * Math.min(1, H.buoyancy * dt);
+    } else if (p.floatTimer > 0) {
+      // Feather (floor loot): light gravity and a slow, soft-capped fall.
+      const L = BALANCE.loot;
+      p.vy -= P.gravity * env.gravityMult * L.featherGravity * dt;
+      if (p.vy < -L.featherMaxFall) p.vy = Math.min(-L.featherMaxFall, p.vy + 30 * dt);
+    } else {
+      p.vy -= P.gravity * env.gravityMult * dt;
+      if (p.vy < -P.maxFallSpeed) p.vy = -P.maxFallSpeed;
+    }
   }
 
   moveBody(p, world, dt, out);

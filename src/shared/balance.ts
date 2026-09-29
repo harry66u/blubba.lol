@@ -234,8 +234,56 @@ export const BALANCE = {
     airGrenade: { cooldown: 10, throwSpeed: 18, fuse: 1.2, radius: 4.5, knockback: 0.95, inflation: 0.06 },
     inflatableWall: { cooldown: 14, throwSpeed: 13, lifetime: 6, width: 4.5, height: 3, thickness: 0.6, raftLifetime: 3.5, raftSize: 3.6 },
     vacuumGrenade: { cooldown: 12, throwSpeed: 18, fuse: 1.0, radius: 7, duration: 1.3, pull: 24 },
+    /**
+     * Air Mine: a small trap that sticks where it lands, arms after `armTime`, and blasts the first
+     * enemy within `trigger` meters up and out (everyone within `radius` gets caught). One per player.
+     */
+    airMine: { cooldown: 11, throwSpeed: 12, armTime: 1, trigger: 1.8, radius: 3.4, knockback: 1.0, inflation: 0.08, lift: 0.8, lifetime: 30 },
+    /**
+     * Helium Bomb: bursts into a helium cloud; enemies caught in it float up at `rise` m/s instead of
+     * falling for `float` seconds and take `knockbackMult` times the knockback while floating.
+     */
+    heliumBomb: { cooldown: 12, throwSpeed: 18, fuse: 1.0, radius: 5, cloudTime: 1.2, float: 3, rise: 2.4, buoyancy: 2.2, airControl: 0.4, knockbackMult: 1.25, popUp: 5 },
+    /**
+     * Tornado: a spinning wind column that travels forward at `speed` for `duration` seconds.
+     * Enemies within `radius` get whirled around it at `spin` m/s (more when inflated) and lifted
+     * (up to `lift` m/s) for at most `holdMax` seconds, then flung out. A dash breaks free.
+     */
+    tornado: { cooldown: 15, speed: 5.5, duration: 4, radius: 3.2, height: 7, spin: 9, spinInflation: 0.6, grip: 6, holdMax: 1.6, lift: 7, liftAccel: 44, inflation: 0.03 },
     /** Thrown utilities fall with this gravity. */
     gravity: 22,
+  },
+
+  /**
+   * Floor loot: supply crates that drift down under a balloon at random walkable spots. Touching
+   * one grabs it for a random instant effect (weights below; some are skipped when useless).
+   */
+  loot: {
+    firstDrop: 20,
+    intervalMin: 15,
+    intervalMax: 25,
+    maxCrates: 3,
+    /** Crates start this high above where they'll land and sink at `fallSpeed` m/s. */
+    dropHeight: 22,
+    fallSpeed: 3.4,
+    /** Seconds a crate waits on the ground before it floats away. */
+    lifetime: 25,
+    /** Grab reach (added to the player's radius). */
+    radius: 0.9,
+    /** Crates never land closer than this to each other. */
+    spacing: 7,
+    weights: { deflate: 20, mega: 16, turbo: 16, gadgets: 16, feather: 16, spring: 16 },
+    /** Deflate: inflation drops by this much (0.4 = 40 points). */
+    deflate: 0.4,
+    megaShots: 2,
+    turboSeconds: 8,
+    /** Feather: low gravity and a slow, floaty fall for you alone. */
+    featherSeconds: 6,
+    featherGravity: 0.38,
+    featherMaxFall: 7,
+    /** Spring Shoes: your next few ground jumps launch you much higher. */
+    springJumps: 3,
+    springJumpMult: 1.65,
   },
 
   pickups: {

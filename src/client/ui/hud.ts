@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { BALANCE } from '../../shared/balance';
+import { utilityIcon } from '../../shared/loadout';
 import { clear, el, formatTime } from './dom';
 
 const ESCAPE_BAR_SEC = 0.8;
@@ -40,6 +41,10 @@ export interface HudState {
   /** Streak rewards: Turbo Tank seconds left, Mega Blast shots left. */
   turbo: number;
   mega: number;
+  /** Floor loot / gadget effects on you: Feather and helium seconds, Spring Shoes jumps. */
+  feather?: number;
+  helium?: number;
+  spring?: number;
 }
 
 /** Team score strip under the clock (team modes only). */
@@ -335,7 +340,15 @@ export class Hud {
     }
     this.utilEls[0].cool.style.height = `${Math.round((1 - s.u1Ready) * 100)}%`;
     this.utilEls[1].cool.style.height = `${Math.round((1 - s.u2Ready) * 100)}%`;
-    const power = [s.turbo > 0 ? `⚡ TURBO ${Math.ceil(s.turbo)}s` : '', s.mega > 0 ? `💥 MEGA ×${s.mega}` : ''].filter(Boolean).join('  ');
+    const power = [
+      s.turbo > 0 ? `⚡ TURBO ${Math.ceil(s.turbo)}s` : '',
+      s.mega > 0 ? `💥 MEGA ×${s.mega}` : '',
+      (s.feather ?? 0) > 0 ? `🪶 FEATHER ${Math.ceil(s.feather!)}s` : '',
+      (s.spring ?? 0) > 0 ? `👟 SPRING ×${s.spring}` : '',
+      (s.helium ?? 0) > 0 ? `🎈 FLOATING ${Math.ceil(s.helium!)}s` : '',
+    ]
+      .filter(Boolean)
+      .join('  ');
     this.setIf('power', power, () => {
       this.powerBadge.textContent = power;
       this.powerBadge.classList.toggle('hidden', !power);
@@ -510,11 +523,10 @@ export class Hud {
   }
 
   setUtilities(names: string[]): void {
-    const icons: Record<string, string> = { 'Bounce Pad': '🟣', 'Air Grenade': '💥', 'Inflatable Wall': '🧱', 'Vacuum Grenade': '🌀' };
     names.forEach((n, i) => {
       const u = this.utilEls[i];
       if (!u) return;
-      u.icon.textContent = icons[n] ?? '?';
+      u.icon.textContent = utilityIcon(n);
       u.box.title = n;
     });
   }

@@ -224,8 +224,19 @@ export class Effects {
     new THREE.MeshStandardMaterial({ color: 0x9b4dff, emissive: 0x9b4dff, emissiveIntensity: 0.5, roughness: 0.3 }),
     new THREE.MeshStandardMaterial({ color: 0xff4fa3, emissive: 0xff4fa3, emissiveIntensity: 0.3, roughness: 0.3 }),
     new THREE.MeshStandardMaterial({ color: 0x8ee000, emissive: 0x8ee000, emissiveIntensity: 0.3, roughness: 0.3 }),
+    // Air Mine (dark puck with a red glow) and Helium Bomb (pink balloon).
+    new THREE.MeshStandardMaterial({ color: 0x3a3450, emissive: 0xff2d55, emissiveIntensity: 0.35, roughness: 0.4 }),
+    new THREE.MeshStandardMaterial({ color: 0xff8fd8, emissive: 0xff8fd8, emissiveIntensity: 0.45, roughness: 0.2 }),
   ];
-  private readonly utilGeos = [null, new THREE.IcosahedronGeometry(0.3, 1), new THREE.IcosahedronGeometry(0.3, 1), new THREE.CylinderGeometry(0.35, 0.35, 0.15, 16), new THREE.BoxGeometry(0.45, 0.45, 0.45)];
+  private readonly utilGeos = [
+    null,
+    new THREE.IcosahedronGeometry(0.3, 1),
+    new THREE.IcosahedronGeometry(0.3, 1),
+    new THREE.CylinderGeometry(0.35, 0.35, 0.15, 16),
+    new THREE.BoxGeometry(0.45, 0.45, 0.45),
+    new THREE.CylinderGeometry(0.3, 0.34, 0.14, 14),
+    new THREE.SphereGeometry(0.34, 14, 10),
+  ];
   private readonly ringGeo = new THREE.RingGeometry(0.8, 1, 40);
   private time = 0;
   /** Camera position, so particles right in front of the lens can fade out. */
@@ -681,6 +692,42 @@ export class Effects {
       const vx = (x - px) * 2 - Math.sin(a) * 6;
       const vz = (z - pz) * 2 + Math.cos(a) * 6;
       this.puffs.spawn({ x: px, y: py, z: pz, vx, vy: (y - py) * 2, vz, size: 0.14, grow: -0.5, max: 0.45, drag: 0.5 }, 0xd6b8ff);
+    }
+  }
+
+  /** Air spiralling up a tornado column (call every frame). */
+  tornadoSwirl(x: number, y: number, z: number, radius: number, height: number, dt: number, near = 1): void {
+    const n = Math.max(1, Math.round(dt * 70 * near));
+    for (let i = 0; i < n; i++) {
+      const h = Math.random();
+      const r = (0.25 + h * 0.85) * radius * (0.7 + Math.random() * 0.4);
+      const a = Math.random() * Math.PI * 2;
+      const px = x + Math.cos(a) * r;
+      const pz = z + Math.sin(a) * r;
+      // Around (counter-clockwise from above, like the push) and up.
+      const sp = 9 + h * 6;
+      const dust = h < 0.2 && Math.random() < 0.5;
+      this.puffs.spawn(
+        { x: px, y: y + h * height, z: pz, vx: -Math.sin(a) * sp, vy: 2 + Math.random() * 3, vz: Math.cos(a) * sp, size: dust ? 0.18 : 0.08 + h * 0.12, grow: 0.8, max: 0.5, drag: 1.5 },
+        dust ? 0xcbbfa8 : 0xeef4ff,
+      );
+    }
+    if (Math.random() < dt * 20) {
+      const a = Math.random() * Math.PI * 2;
+      const r = radius * (0.3 + Math.random() * 0.5);
+      this.confetti.spawn({ x: x + Math.cos(a) * r, y: y + Math.random() * height * 0.6, z: z + Math.sin(a) * r, vx: -Math.sin(a) * 10, vy: 4, vz: Math.cos(a) * 10, size: 0.9, max: 0.9, drag: 1, spin: 14 }, [0x6fbf3a, 0xd98e2b, 0xc2d43a][Math.floor(Math.random() * 3)]);
+    }
+  }
+
+  /** Fizzing bubbles inside a helium cloud, and around anyone floating on it. */
+  heliumFizz(x: number, y: number, z: number, radius: number, count = 1): void {
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(Math.random()) * radius;
+      this.puffs.spawn(
+        { x: x + Math.cos(a) * r, y: y + (Math.random() - 0.5) * radius, z: z + Math.sin(a) * r, vx: 0, vy: 1.5 + Math.random() * 2, vz: 0, size: 0.1 + Math.random() * 0.12, grow: 0.6, max: 0.9, drag: 0.8 },
+        [0xffb3e6, 0xffffff, 0xd9c2ff][Math.floor(Math.random() * 3)],
+      );
     }
   }
 

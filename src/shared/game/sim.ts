@@ -31,7 +31,8 @@ import { COSMETIC_SLOTS, type Cosmetics, DEFAULT_COSMETICS, ITEMS } from '../eco
 import { type BallEvent, BallGame, type ModeId, PumpGame, isTeamMode } from './modes';
 import { CHAOS_KINDS, type ChaosEvent, type ChaosKind, type Environment, NORMAL_ENV, chaosDuration, envAt } from './chaos';
 import { collapsePlan } from './shrink';
-import type { GameEvent } from './events';
+import type { GameEvent, LootKind } from './events';
+import { type AirMine, LOOT_KINDS, type LootCrate, type Tornado, floorBelow, lostBelow, pickLootSpot, rollLoot, stepCrate, stepTornado } from './loot';
 
 export type { ModeId } from './modes';
 export type MatchPhase = 'waiting' | 'playing' | 'results';
@@ -118,13 +119,35 @@ export const PROJ_AIR_GRENADE = 1;
 export const PROJ_VACUUM = 2;
 export const PROJ_PAD = 3;
 export const PROJ_WALL = 4;
+export const PROJ_MINE = 5;
+export const PROJ_HELIUM = 6;
 
+/** Projectile kind each thrown utility flies as (-1: not thrown). */
 const UTIL_PROJ: Record<UtilityId, number> = {
   bouncePad: PROJ_PAD,
   airGrenade: PROJ_AIR_GRENADE,
   vacuumGrenade: PROJ_VACUUM,
   inflatableWall: PROJ_WALL,
+  airMine: PROJ_MINE,
+  heliumBomb: PROJ_HELIUM,
+  tornado: -1,
 };
+
+/** A Helium Bomb's cloud: enemies who touch it start floating (once per cloud). */
+export interface HeliumCloud {
+  id: number;
+  owner: number;
+  x: number;
+  y: number;
+  z: number;
+  until: number;
+  touched: Set<number>;
+}
+
+/** A tornado on the server, plus when it caught each player (it lets go after a while). */
+export interface SimTornado extends Tornado {
+  caught: Map<number, number>;
+}
 
 export interface VacuumField {
   x: number;
@@ -261,6 +284,17 @@ export class GameSim {
   readonly vacuums: VacuumField[] = [];
   readonly pickups: Pickup[] = [];
   readonly dynamicSolids = new Map<number, DynamicSolidInfo>();
+  /** Floor loot: supply crates drifting down or waiting on the ground. */
+  readonly crates: LootCrate[] = [];
+  readonly mines: AirMine[] = [];
+  readonly heliumClouds: HeliumCloud[] = [];
+  readonly tornados: SimTornado[] = [];
+  /** Supply drops on/off (tests that need a quiet map can switch them off). */
+  lootEnabled = true;
+  private nextLootAt = Infinity;
+  private nextLootId = 1;
+  private nextGadgetId = 1;
+  private readonly lostY: number;
   private nextPinAt = 0;
   private nextPadId = 1000;
   /** Random events: the one running now and the one announced next. */
@@ -306,6 +340,7 @@ export class GameSim {
     // Sudden Death always has the same short cap (its shrinking schedule is built around it).
     if (this.mode === 'suddenDeath') this.durationSec = BALANCE.modes.suddenDeath.durationSec;
     this.scheduleNextPin();
+    this.lostY = lostBelow(this.map);
     const n = this.map.spawns.length;
     this.homePoint = {
       x: this.map.spawns.reduce((a, s) => a + s[0], 0) / n,
@@ -399,6 +434,10 @@ export class GameSim {
     this.releaseInvolving(p);
     this.players.delete(id);
     this.bots.delete(id);
+    // Their gadgets leave with them (a newcomer could get the same id).
+    for (let i = this.mines.length - 1; i >= 0; i--) if (this.mines[i].owner === id) this.removeMine(i, false);
+    for (const t of this.tornados) if (t.owner === id) t.until = this.tick;
+    for (const c of this.heliumClouds) if (c.owner === id) c.until = this.time;
     for (const other of this.players.values()) {
       if (other.lastAttacker === id) other.lastAttacker = -1;
     }
@@ -551,6 +590,8 @@ export class GameSim {
     this.stepVacuums();
     this.stepModes();
     this.stepPickups();
+    this.stepLoot();
+    this.stepGadgets();
     this.expireDynamics();
     this.recordHistory();
     this.recordReplayFrame();
@@ -633,7 +674,7 @@ export class GameSim {
     if (out.stream > 0) this.blow(p, out.stream);
     if (out.util1) this.useUtility(p, 0);
     if (out.util2) this.useUtility(p, 1);
-    if (out.jumped) this.events.push({ t: 'move', tick, id: p.id, kind: 'jump', x: s.px, y: s.py, z: s.pz });
+    if (out.jumped) this.events.push({ t: 'move', tick, id: p.id, kind: out.springJump ? 'spring' : 'jump', x: s.px, y: s.py, z: s.pz });
     if (out.doubleJumped) this.events.push({ t: 'move', tick, id: p.id, kind: 'djump', x: s.px, y: s.py, z: s.pz });
     if (out.dashed) {
       this.events.push({
@@ -903,7 +944,9 @@ export class GameSim {
     const inflBefore = s.inflation;
     s.inflation = Math.min(BALANCE.inflation.max, s.inflation + inflationAdd * (braced ? Br.inflationMult : 1));
     const mass = inflationMass(s.inflation);
-    const speed = (power * (K.base + K.growth * Math.pow(s.inflation, K.growthExp))) / mass * (braced ? Br.knockbackMult : 1);
+    // Floating in helium, you have nothing to brace your feet against.
+    const floaty = s.heliumTimer > 0 ? BALANCE.utilities.heliumBomb.knockbackMult : 1;
+    const speed = (power * (K.base + K.growth * Math.pow(s.inflation, K.growthExp))) / mass * (braced ? Br.knockbackMult : 1) * floaty;
 
     // Normalize and guarantee some lift so targets leave the ground.
     let l = Math.hypot(dx, dy, dz) || 1;
@@ -1263,8 +1306,12 @@ export class GameSim {
       this.deployRaft(p);
       return;
     }
+    if (id === 'tornado') {
+      this.spawnTornado(p);
+      return;
+    }
     const d = lookDir(s.yaw, s.pitch, { x: 0, y: 0, z: 0 });
-    const speed = U[id].throwSpeed;
+    const speed = (U[id] as { throwSpeed: number }).throwSpeed;
     const ox = s.px + d.x * 0.6;
     const oy = s.py + eyeHeight(s) + d.y * 0.6 - 0.2;
     const oz = s.pz + d.z * 0.6;
@@ -1303,7 +1350,7 @@ export class GameSim {
     const half = pr.radius;
     pr.fuse -= dt;
     pr.vy -= pr.gravity * dt;
-    const grenade = pr.weapon === PROJ_AIR_GRENADE || pr.weapon === PROJ_VACUUM;
+    const grenade = pr.weapon === PROJ_AIR_GRENADE || pr.weapon === PROJ_VACUUM || pr.weapon === PROJ_HELIUM;
     // Grenades go off on contact with a player.
     if (grenade) {
       for (const p of this.players.values()) {
@@ -1340,8 +1387,9 @@ export class GameSim {
         }
       }
     }
-    if ((pr.weapon === PROJ_PAD || pr.weapon === PROJ_WALL) && landed) {
+    if ((pr.weapon === PROJ_PAD || pr.weapon === PROJ_WALL || pr.weapon === PROJ_MINE) && landed) {
       if (pr.weapon === PROJ_PAD) this.deployPad(pr);
+      else if (pr.weapon === PROJ_MINE) this.deployMine(pr);
       else this.deployWall(pr);
       return true;
     }
@@ -1363,6 +1411,12 @@ export class GameSim {
       const until = this.time + U.vacuumGrenade.duration;
       this.vacuums.push({ x: pr.x, y: pr.y, z: pr.z, owner: pr.owner, until });
       this.events.push({ t: 'vacuum', tick: this.tick, id: pr.id, x: pr.x, y: pr.y, z: pr.z, until: Math.round(until / this.dt) });
+      return;
+    }
+    if (pr.weapon === PROJ_HELIUM) {
+      const until = this.time + U.heliumBomb.cloudTime;
+      this.heliumClouds.push({ id: pr.id, owner: pr.owner, x: pr.x, y: pr.y, z: pr.z, until, touched: new Set() });
+      this.events.push({ t: 'helium', tick: this.tick, id: pr.id, owner: pr.owner, x: pr.x, y: pr.y, z: pr.z, r: U.heliumBomb.radius, until: Math.round(until / this.dt) });
       return;
     }
     const G = U.airGrenade;
@@ -1544,8 +1598,314 @@ export class GameSim {
     }
   }
 
+  // --- Floor loot ----------------------------------------------------------------------------
+
+  private scheduleLoot(first: boolean): void {
+    const L = BALANCE.loot;
+    this.nextLootAt = this.time + (first ? L.firstDrop : L.intervalMin) + Math.random() * (L.intervalMax - L.intervalMin) * (first ? 0.3 : 1);
+  }
+
+  /** Drops a supply crate at a random walkable spot (or near `near`). Returns it, or null if no spot was found. */
+  dropLoot(near?: { x: number; y: number; z: number; r: number }, forced: LootKind | null = null, height: number = BALANCE.loot.dropHeight): LootCrate | null {
+    const L = BALANCE.loot;
+    const spot = pickLootSpot(this.world, this.map, Math.random, this.crates, near);
+    if (!spot) return null;
+    const c: LootCrate = { id: this.nextLootId++, x: spot.x, y: spot.y + height, z: spot.z, falling: true, fall: L.fallSpeed, ground: -1, landedAt: Infinity, forced };
+    this.crates.push(c);
+    this.events.push({ t: 'loot', tick: this.tick, id: c.id, x: c.x, y: c.y, z: c.z, groundY: spot.y, fall: c.fall });
+    return c;
+  }
+
+  /** Debug: drop a crate (optionally with a chosen effect) a few meters from a player, from low up. */
+  debugDropLoot(id: number, kind?: string): LootCrate | null {
+    const p = this.players.get(id);
+    if (!p || p.state.mode === MODE_DEAD) return null;
+    const s = p.state;
+    const forced = LOOT_KINDS.find((k) => k === kind) ?? null;
+    return this.dropLoot({ x: s.px, y: s.py, z: s.pz, r: 6 }, forced, 9);
+  }
+
+  private stepLoot(): void {
+    const L = BALANCE.loot;
+    if (this.phase === 'playing' && this.lootEnabled && this.time >= this.nextLootAt) {
+      this.scheduleLoot(false);
+      if (this.crates.length < L.maxCrates) this.dropLoot();
+    }
+    for (let i = this.crates.length - 1; i >= 0; i--) {
+      const c = this.crates[i];
+      const r = stepCrate(c, this.world, this.dt, this.lostY);
+      if (r === 'land') {
+        c.landedAt = this.time;
+        this.events.push({ t: 'lootLand', tick: this.tick, id: c.id, x: c.x, y: c.y, z: c.z });
+      }
+      if (r === 'lost' || (!c.falling && this.time >= c.landedAt + L.lifetime)) {
+        this.events.push({ t: 'lootGone', tick: this.tick, id: c.id, x: c.x, y: c.y, z: c.z, why: r === 'lost' ? 'lost' : 'expired' });
+        this.crates.splice(i, 1);
+        continue;
+      }
+      for (const p of this.players.values()) {
+        const st = p.state;
+        if (st.mode === MODE_DEAD || st.mode === MODE_HELD) continue;
+        if (Math.hypot(st.px - c.x, st.pz - c.z) > L.radius + playerRadius(st)) continue;
+        if (st.py > c.y + 1.3 || st.py + playerHeight(st) < c.y - 0.2) continue;
+        const kind = c.forced ?? rollLoot(Math.random, { inflation: st.inflation, stream: p.weapon.kind === 'stream', gadgetsReady: st.u1Cool <= 0 && st.u2Cool <= 0 });
+        this.applyLoot(p, kind);
+        this.events.push({ t: 'lootGrab', tick: this.tick, id: c.id, by: p.id, kind, x: c.x, y: c.y, z: c.z });
+        this.crates.splice(i, 1);
+        break;
+      }
+    }
+  }
+
+  /** What a crate does to whoever grabs it. */
+  applyLoot(p: SimPlayer, kind: LootKind): void {
+    const L = BALANCE.loot;
+    const s = p.state;
+    switch (kind) {
+      case 'deflate':
+        s.inflation = Math.max(0, s.inflation - L.deflate);
+        if (p.savedInflation >= 0) p.savedInflation = Math.max(0, p.savedInflation - L.deflate);
+        break;
+      case 'mega':
+        s.megaShots = Math.min(9, s.megaShots + L.megaShots);
+        break;
+      case 'turbo':
+        s.turboTimer = Math.max(s.turboTimer, L.turboSeconds);
+        s.ammo = p.weapon.ammo;
+        s.reloadTimer = 0;
+        break;
+      case 'gadgets':
+        s.u1Cool = 0;
+        s.u2Cool = 0;
+        break;
+      case 'feather':
+        s.floatTimer = L.featherSeconds;
+        break;
+      case 'spring':
+        s.springJumps = L.springJumps;
+        break;
+    }
+  }
+
+  // --- Gadgets in the world (Air Mines, helium clouds, tornados) -----------------------------
+
+  private deployMine(pr: Projectile): void {
+    const M = BALANCE.utilities.airMine;
+    const y = pr.y - pr.radius;
+    const ground = floorBelow(this.world, pr.x, y + 0.1, pr.z, 0.5);
+    if (!ground) {
+      this.events.push({ t: 'fizzle', tick: this.tick, id: pr.id, x: pr.x, y: pr.y, z: pr.z });
+      return;
+    }
+    // One mine per player: a new one replaces the old.
+    for (let i = this.mines.length - 1; i >= 0; i--) {
+      if (this.mines[i].owner === pr.owner) this.removeMine(i, false);
+    }
+    const m: AirMine = { id: this.nextGadgetId++, owner: pr.owner, x: pr.x, y: ground.maxY, z: pr.z, ground: ground.id, armAt: this.time + M.armTime, expires: this.time + M.lifetime };
+    this.mines.push(m);
+    this.events.push({ t: 'mine', tick: this.tick, id: m.id, proj: pr.id, owner: m.owner, x: m.x, y: m.y, z: m.z, arm: Math.round(m.armAt / this.dt) });
+  }
+
+  private removeMine(i: number, boom: boolean): void {
+    const m = this.mines[i];
+    this.mines.splice(i, 1);
+    this.events.push({ t: 'mineGone', tick: this.tick, id: m.id, owner: m.owner, x: m.x, y: m.y, z: m.z, boom });
+  }
+
+  /** Air Mine blast: launches everyone nearby up and out (its owner gets a blast jump). */
+  private mineBlast(m: AirMine): void {
+    const M = BALANCE.utilities.airMine;
+    const cx = m.x;
+    const cy = m.y + 0.3;
+    const cz = m.z;
+    this.pushBall(cx, cy, cz, M.radius, BALANCE.modes.ball.splashImpulse * 1.2, m.owner);
+    const out = Math.sqrt(1 - M.lift * M.lift);
+    for (const p of this.players.values()) {
+      const s = p.state;
+      if (s.mode === MODE_DEAD) continue;
+      const r = playerRadius(s);
+      const h = playerHeight(s);
+      const ay = Math.max(s.py + r, Math.min(s.py + h - r, cy));
+      const d = Math.max(0, Math.hypot(cx - s.px, cy - ay, cz - s.pz) - r);
+      if (d > M.radius) continue;
+      const falloff = 0.4 + 0.6 * (1 - d / M.radius);
+      let hx = s.px - cx;
+      let hz = s.pz - cz;
+      const hl = Math.hypot(hx, hz);
+      if (hl > 1e-3) {
+        hx /= hl;
+        hz /= hl;
+      } else {
+        hx = hz = 0;
+      }
+      if (p.id === m.owner) this.blastJump(p, hx * out, M.lift, hz * out, falloff, 1);
+      else this.applyHit(p, m.owner, hx * out, M.lift, hz * out, M.knockback * falloff, M.inflation * falloff, { direct: false, low: false, x: cx, y: cy, z: cz });
+    }
+  }
+
+  private spawnTornado(p: SimPlayer): void {
+    const T = BALANCE.utilities.tornado;
+    const s = p.state;
+    const fx = -Math.sin(s.yaw);
+    const fz = -Math.cos(s.yaw);
+    const x = s.px + fx * 1.2;
+    const z = s.pz + fz * 1.2;
+    const g = this.world.groundBelow(x, s.py + 0.5, z, 4);
+    const until = this.tick + Math.round(T.duration / this.dt);
+    const t: SimTornado = { id: this.nextGadgetId++, owner: p.id, x, y: g ?? s.py, z, dx: fx, dz: fz, speed: T.speed, until, caught: new Map() };
+    this.tornados.push(t);
+    this.events.push({ t: 'tornado', tick: this.tick, id: t.id, owner: t.owner, x: t.x, y: t.y, z: t.z, dx: t.dx, dz: t.dz, speed: t.speed, until });
+  }
+
+  private stepGadgets(): void {
+    const dt = this.dt;
+    // Air Mines ride their ground, time out, and go off under the first enemy to step close.
+    const M = BALANCE.utilities.airMine;
+    for (let i = this.mines.length - 1; i >= 0; i--) {
+      const m = this.mines[i];
+      const g = this.world.solid(m.ground);
+      if (!g || !g.enabled || m.x < g.minX || m.x > g.maxX || m.z < g.minZ || m.z > g.maxZ || this.time >= m.expires) {
+        this.removeMine(i, false);
+        continue;
+      }
+      m.x += g.dX;
+      m.z += g.dZ;
+      m.y = g.maxY;
+      if (this.time < m.armAt) continue;
+      for (const p of this.players.values()) {
+        const s = p.state;
+        if (s.mode === MODE_DEAD || s.mode === MODE_HELD || s.spawnProt > 0 || !this.isEnemy(m.owner, p.id)) continue;
+        if (Math.hypot(s.px - m.x, s.pz - m.z) > M.trigger + playerRadius(s)) continue;
+        if (s.py > m.y + 2.2 || s.py + playerHeight(s) < m.y - 0.3) continue;
+        this.removeMine(i, true);
+        this.mineBlast(m);
+        break;
+      }
+    }
+
+    // Helium clouds: every enemy who touches one floats up for a while (once per cloud).
+    const H = BALANCE.utilities.heliumBomb;
+    for (let i = this.heliumClouds.length - 1; i >= 0; i--) {
+      const c = this.heliumClouds[i];
+      if (this.time >= c.until) {
+        this.heliumClouds.splice(i, 1);
+        continue;
+      }
+      for (const p of this.players.values()) {
+        const s = p.state;
+        if (c.touched.has(p.id) || s.mode === MODE_DEAD || s.mode === MODE_HELD || s.spawnProt > 0 || p.id === c.owner || !this.isEnemy(c.owner, p.id)) continue;
+        const cy = s.py + playerHeight(s) * 0.5;
+        if (Math.hypot(s.px - c.x, cy - c.y, s.pz - c.z) > H.radius + playerRadius(s)) continue;
+        c.touched.add(p.id);
+        if (s.mode === MODE_HANG || s.mode === MODE_CLIMB) releaseLedge(s, 0);
+        s.heliumTimer = H.float;
+        s.vy = Math.max(s.vy, H.popUp);
+        s.onGround = 0;
+        s.groundId = -1;
+        s.slideTimer = 0;
+        this.credit(p, c.owner);
+        this.events.push({ t: 'floaty', tick: this.tick, id: p.id, by: c.owner, until: this.tick + Math.round(H.float / dt) });
+      }
+    }
+
+    // Tornados roll along, swirling up anyone they catch.
+    const T = BALANCE.utilities.tornado;
+    for (let i = this.tornados.length - 1; i >= 0; i--) {
+      const t = this.tornados[i];
+      stepTornado(t, this.world, dt);
+      if (this.tick >= t.until || t.y < this.lostY) {
+        this.tornados.splice(i, 1);
+        this.events.push({ t: 'tornadoGone', tick: this.tick, id: t.id, x: t.x, y: t.y, z: t.z });
+        continue;
+      }
+      for (const p of this.players.values()) {
+        const s = p.state;
+        if (p.id === t.owner || s.mode === MODE_DEAD || s.mode === MODE_HELD || s.spawnProt > 0 || !this.isEnemy(t.owner, p.id)) continue;
+        // Dashing breaks free, and nobody gets whirled for more than `holdMax` by one tornado.
+        const since = t.caught.get(p.id);
+        if (s.dashTimer > 0 || (since !== undefined && this.time - since > T.holdMax)) continue;
+        const r = playerRadius(s);
+        let ux = s.px - t.x;
+        let uz = s.pz - t.z;
+        const d = Math.hypot(ux, uz);
+        if (d > T.radius + r || s.py > t.y + T.height || s.py + playerHeight(s) < t.y - 1) continue;
+        if (d > 1e-3) {
+          ux /= d;
+          uz /= d;
+        } else {
+          ux = 1;
+          uz = 0;
+        }
+        if (s.mode === MODE_HANG || s.mode === MODE_CLIMB) releaseLedge(s, 0);
+        // Steer the velocity (relative to the moving column) toward a whirl around it
+        // (counter-clockwise from above) with a slight inward drift. Lighter, more inflated
+        // players get gripped faster and whirled harder.
+        const mass = inflationMass(s.inflation);
+        const k = Math.min(1, (T.grip * dt) / mass);
+        const spin = T.spin * (1 + T.spinInflation * s.inflation);
+        const tvx = t.dx * t.speed;
+        const tvz = t.dz * t.speed;
+        const rvx = s.vx - tvx;
+        const rvz = s.vz - tvz;
+        let vt = -rvx * uz + rvz * ux;
+        vt += (spin - vt) * k;
+        // Held in orbit, drifting slowly toward the middle.
+        const vr = -1.5 * Math.min(1, d / T.radius);
+        s.vx = tvx + ux * vr - uz * vt;
+        s.vz = tvz + uz * vr + ux * vt;
+        if (s.py < t.y + T.height * 0.75 && s.vy < T.lift) s.vy = Math.min(T.lift, s.vy + T.liftAccel * dt);
+        s.onGround = 0;
+        s.groundId = -1;
+        s.slideTimer = 0;
+        s.blownTimer = 0.15;
+        s.inflation = Math.min(BALANCE.inflation.max, s.inflation + T.inflation * dt);
+        s.sinceHit = 0;
+        if (since === undefined) {
+          t.caught.set(p.id, this.time);
+          // Caught: you're tumbling (dash out once the launch lockout passes).
+          s.launchElapsed = 0;
+          this.events.push({ t: 'swept', tick: this.tick, id: t.id, target: p.id, x: s.px, y: s.py, z: s.pz });
+        }
+        s.launchTimer = Math.max(s.launchTimer, 0.2);
+        this.credit(p, t.owner);
+      }
+    }
+  }
+
+  /** Gives `by` credit for launching `p` (knockout credit and longest-launch stats). */
+  private credit(p: SimPlayer, by: number): void {
+    if (by < 0) return;
+    const s = p.state;
+    p.lastAttacker = by;
+    p.lastAttackTime = this.time;
+    if (p.launchBy !== by) {
+      p.launchBy = by;
+      p.launchFromX = s.px;
+      p.launchFromZ = s.pz;
+      p.launchStartTick = this.tick;
+    }
+  }
+
+  /** Debug: swap a player's gadgets right away (ignores unlocks). */
+  debugSetUtilities(id: number, utils: unknown): void {
+    const p = this.players.get(id);
+    if (!p) return;
+    p.loadout = sanitizeLoadout({ ...p.loadout, utils });
+    if (p.pendingLoadout) p.pendingLoadout = { ...p.pendingLoadout, utils: p.loadout.utils };
+    p.state.u1Cool = 0;
+    p.state.u2Cool = 0;
+    this.emitLoadout(p);
+  }
+
   private resetEntities(): void {
     this.vacuums.length = 0;
+    for (const c of this.crates) this.events.push({ t: 'lootGone', tick: this.tick, id: c.id, x: c.x, y: c.y, z: c.z, why: 'reset' });
+    this.crates.length = 0;
+    while (this.mines.length) this.removeMine(this.mines.length - 1, false);
+    this.heliumClouds.length = 0;
+    for (const t of this.tornados) this.events.push({ t: 'tornadoGone', tick: this.tick, id: t.id, x: t.x, y: t.y, z: t.z });
+    this.tornados.length = 0;
+    this.scheduleLoot(true);
     for (const id of this.dynamicSolids.keys()) {
       this.world.setSolidAt(id, null);
       this.events.push({ t: 'solidGone', tick: this.tick, id });
@@ -1572,10 +1932,16 @@ export class GameSim {
     pads: { id: number; x: number; y: number; z: number; half: number; strength: number; until: number }[];
     chaos: (ChaosEvent | null)[];
     crownId: number;
+    crates: { id: number; x: number; y: number; z: number; falling: boolean; fall: number }[];
+    mines: { id: number; owner: number; x: number; y: number; z: number; arm: number }[];
+    tornados: Tornado[];
   } {
     return {
       chaos: [this.chaosCurrent, this.chaosNext],
       crownId: this.crownId,
+      crates: this.crates.map((c) => ({ id: c.id, x: c.x, y: c.y, z: c.z, falling: c.falling, fall: c.fall })),
+      mines: this.mines.map((m) => ({ id: m.id, owner: m.owner, x: m.x, y: m.y, z: m.z, arm: Math.round(m.armAt / this.dt) })),
+      tornados: this.tornados.map((t) => ({ id: t.id, owner: t.owner, x: t.x, y: t.y, z: t.z, dx: t.dx, dz: t.dz, speed: t.speed, until: t.until })),
       pickups: this.pickups.map((k) => ({ ...k })),
       solids: [...this.dynamicSolids.values()].map((d) => ({ ...d, expires: Math.round(d.expires / this.dt) })),
       pads: this.world.pads.filter((p) => p.owner >= 0).map((p) => ({ id: p.id, x: p.x, y: p.y, z: p.z, half: p.half, strength: p.strength, until: Math.round(p.expires / this.dt) })),

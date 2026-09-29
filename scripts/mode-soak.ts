@@ -27,12 +27,15 @@ for (const mode of MODE_IDS.filter((m) => !only || m === only)) {
       const shrinks: number[] = [];
       const left: string[] = [];
       let firstKoAt = -1;
+      // Supply drops and the newer gadgets, to see bots use them.
+      const extra: Record<string, number> = { loot: 0, lootGrab: 0, mine: 0, helium: 0, tornado: 0 };
       const start = sim.time;
       while (sim.phase !== 'results' && sim.time - start < 400) {
         sim.step();
         for (const e of sim.drainEvents()) {
           if (e.t === 'goal') goals++;
           if (e.t === 'ballOut') outs++;
+          if (e.t in extra) extra[e.t]++;
           if (e.t === 'shrink') shrinks.push(Math.round(e.startTick * sim.dt - start));
           if (e.t === 'survivors') left.push(`${e.left.length}@${Math.round(sim.time - start)}s`);
           if (e.t === 'ko') {
@@ -59,7 +62,8 @@ for (const mode of MODE_IDS.filter((m) => !only || m === only)) {
         `${mode.padEnd(13)} ${mapId.padEnd(12)} ${String(len).padStart(3)}s kos=${kos} falls=${falls} firstKo=${firstKoAt}s shrinks=[${shrinks.join(',')}]` +
           (sim.ballGame ? ` goals=${goals} outs=${outs}` : '') +
           pump +
-          (r?.teams ? ` teams=${r.teams.scores.join('-')} winner=${r.teams.winner}` : mode === 'suddenDeath' ? sd : ` top=${r?.standings[0]?.name}:${r?.standings[0]?.score}`),
+          (r?.teams ? ` teams=${r.teams.scores.join('-')} winner=${r.teams.winner}` : mode === 'suddenDeath' ? sd : ` top=${r?.standings[0]?.name}:${r?.standings[0]?.score}`) +
+          ` loot=${extra.lootGrab}/${extra.loot} mines=${extra.mine} helium=${extra.helium} tornados=${extra.tornado}`,
       );
     }
   }

@@ -4,7 +4,7 @@ export const WEAPON_IDS = ['airCannon', 'leafBlower', 'airHorn', 'pumpRifle'] as
 export type WeaponId = (typeof WEAPON_IDS)[number];
 export const MOD_IDS = ['wideNozzle', 'bigTank', 'chargeValve', 'quickValve', 'longBarrel'] as const;
 export type ModId = (typeof MOD_IDS)[number];
-export const UTILITY_IDS = ['bouncePad', 'airGrenade', 'inflatableWall', 'vacuumGrenade'] as const;
+export const UTILITY_IDS = ['bouncePad', 'airGrenade', 'inflatableWall', 'vacuumGrenade', 'airMine', 'heliumBomb', 'tornado'] as const;
 export type UtilityId = (typeof UTILITY_IDS)[number];
 
 export type WeaponKind = 'projectile' | 'stream' | 'cone' | 'hitscan';
@@ -39,12 +39,21 @@ export const MOD_INFO: Record<ModId, { name: string; plus: string; minus: string
   longBarrel: { name: 'Long Barrel', plus: 'Longer range', minus: 'Narrower blast' },
 };
 
-export const UTILITY_INFO: Record<UtilityId, { name: string; blurb: string }> = {
-  bouncePad: { name: 'Bounce Pad', blurb: 'Throw it down to launch yourself or surprise enemies.' },
-  airGrenade: { name: 'Air Grenade', blurb: 'Blasts everyone nearby outward.' },
-  inflatableWall: { name: 'Inflatable Wall', blurb: 'Blocks shots. Thrown while falling, it catches you.' },
-  vacuumGrenade: { name: 'Vacuum Grenade', blurb: 'Sucks nearby players together for a big follow-up.' },
+export const UTILITY_INFO: Record<UtilityId, { name: string; blurb: string; icon: string }> = {
+  bouncePad: { name: 'Bounce Pad', blurb: 'Throw it down to launch yourself or surprise enemies.', icon: '🟣' },
+  airGrenade: { name: 'Air Grenade', blurb: 'Blasts everyone nearby outward.', icon: '💥' },
+  inflatableWall: { name: 'Inflatable Wall', blurb: 'Blocks shots. Thrown while falling, it catches you.', icon: '🧱' },
+  vacuumGrenade: { name: 'Vacuum Grenade', blurb: 'Sucks nearby players together for a big follow-up.', icon: '🌀' },
+  airMine: { name: 'Air Mine', blurb: 'A sneaky trap. Arms after a second and pops the first enemy who steps near it sky-high. One at a time.', icon: '🧨' },
+  heliumBomb: { name: 'Helium Bomb', blurb: 'A cloud of helium: enemies inside float helplessly up for a few seconds and fly farther when hit.', icon: '🎈' },
+  tornado: { name: 'Tornado', blurb: 'Sends a spinning wind column rolling forward that swirls up anyone it catches.', icon: '🌪️' },
 };
+
+/** Utility icon by display name (the HUD and touch buttons know utilities by name). */
+export function utilityIcon(name: string): string {
+  for (const id of UTILITY_IDS) if (UTILITY_INFO[id].name === name) return UTILITY_INFO[id].icon;
+  return '?';
+}
 
 /** Effective weapon stats after mods. Used by the server and by client prediction. */
 export interface WeaponStats {
