@@ -385,12 +385,51 @@ export const BALANCE = {
     deckShrinkStart: 10,
   },
 
+  /**
+   * Mid-match shrink (knockout-style modes): at half time the outermost pieces (highest collapse
+   * order) sink, after a warning everyone can see. The final 30 seconds finish the job.
+   */
+  shrink: {
+    /** Seconds of warning (countdown, debris, red flashing edges) before pieces start to fall. */
+    warning: 5,
+    /** Red-edge warning before the later final-30 pieces go (the final callout announces those). */
+    finalWarning: 4,
+    /** Matches shorter than this skip the mid-match stage (it would run into the final 30). */
+    minMatchSec: 100,
+  },
+
   revenge: { bonus: 1 },
 
   modes: {
     /** Public team rooms are topped up with bots to this many players (4v4). */
     teamFill: 8,
     duel: { target: 5, durationSec: 180 },
+    /** One life each, everyone at 100% inflation, last tube man standing wins. */
+    suddenDeath: {
+      /** Hard cap on a match; if it runs out, survivors are ranked by knockouts, then hits. */
+      durationSec: 150,
+      /** People who join this soon after the start still play; later ones watch until the next match. */
+      joinGrace: 3,
+      /** A little longer than usual: everyone spawns one hit from flying. */
+      spawnProtection: 3,
+      /** Pause after the last pop before the results, so everyone sees the winner. */
+      winnerDelay: 2.5,
+      /** Rounds are short, so the results screen (replay included) is too. */
+      resultsSec: 18,
+      /**
+       * The map keeps shrinking to force a finish. `at` is seconds into the match; `sink` lists the
+       * collapse orders that start sinking; `deck` is how much of the main deck's half-size has
+       * crumbled away per side once the stage is done (over `deckTime` seconds).
+       */
+      stages: [
+        { at: 40, sink: [3], deck: 0 },
+        { at: 60, sink: [2], deck: 0 },
+        { at: 80, sink: [1], deck: 0.15 },
+        { at: 100, sink: [], deck: 0.3 },
+        { at: 120, sink: [], deck: 0.45 },
+      ] as { at: number; sink: number[]; deck: number }[],
+      deckTime: 6,
+    },
     ball: {
       gravity: 14,
       drag: 0.25,

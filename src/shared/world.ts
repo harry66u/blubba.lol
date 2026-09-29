@@ -1,5 +1,5 @@
 import { BALANCE } from './balance';
-import { deckShrink, islandSink } from './game/chaos';
+import { type ShrinkStage, deckShrinkAt, sinkDepth } from './game/shrink';
 import type { BouncePadDef, MapDef, MoverDef } from './maps/types';
 
 /** Axis-aligned solid in the collision world. Movers update their bounds every tick. */
@@ -25,7 +25,7 @@ export interface Solid {
   dX: number;
   dY: number;
   dZ: number;
-  /** Collapse order for the final 30 seconds (-1 = never collapses, 0 = crumbles inward). */
+  /** Collapse order (-1 = never collapses, 0 = main deck, crumbles inward; higher sinks sooner). */
   collapse: number;
   /** Rubbery restitution (0 = normal floor). */
   bounce: number;
@@ -70,8 +70,10 @@ export class World {
   time = 0;
   /** Solids with an id at or above this were added during play (walls, rafts). */
   readonly staticCount: number;
-  /** Time (s) the final-30-seconds collapse began; Infinity when it hasn't. */
-  collapseStart = Infinity;
+  /** When each part of the map falls away this match (empty: nothing does). See game/shrink.ts. */
+  plan: readonly ShrinkStage[] = [];
+  /** Time each collapse order starts sinking, from the plan. */
+  private sinkAt: number[] = [];
 
   constructor(readonly map: MapDef) {
     map.solids.forEach((def, i) => {
@@ -107,6 +109,45 @@ export class World {
 
   private readonly off = { ox: 0, oy: 0, oz: 0, shrink: 0 };
 
+  /** Sets this match's collapse plan (the server when a match starts; clients mirror it). */
+  setCollapse(plan: readonly ShrinkStage[] | null | undefined): void {
+    this.plan = plan ?? [];
+    this.sinkAt = [];
+    for (const st of this.plan) for (const o of st.sink) this.sinkAt[o] = Math.min(this.sinkAt[o] ?? Infinity, st.at);
+  }
+
+  /** Match-clock second pieces with this collapse order start sinking (Infinity = never). */
+  sinkStart(order: number): number {
+    return order > 0 ? (this.sinkAt[order] ?? Infinity) : Infinity;
+  }
+
+  /**
+   * Seconds until solid `id` starts falling away (negative once it has; Infinity if it never
+   * will). The main deck counts from when the plan next crumbles it.
+   */
+  fallsIn(id: number, time: number): number {
+    const s = this.solids[id];
+    if (!s || s.collapse < 0 || id >= this.staticCount) return Infinity;
+    if (s.collapse > 0) return this.sinkStart(s.collapse) - time;
+    for (const st of this.plan) if (st.deck > 0 && time < st.at + st.deckTime) return st.at - time;
+    return Infinity;
+  }
+
+  /**
+   * Main-deck bounds at `time` (x/z), for looking ahead at where the edge will be. Returns the
+   * solid's own bounds for anything that isn't a crumbling deck.
+   */
+  deckBoundsAt(s: Solid, time: number, out: { minX: number; maxX: number; minZ: number; maxZ: number }): typeof out {
+    const k = s.collapse === 0 ? deckShrinkAt(this.plan, time) : 0;
+    const hw = ((s.baseMaxX - s.baseMinX) / 2) * k;
+    const hd = ((s.baseMaxZ - s.baseMinZ) / 2) * k;
+    out.minX = s.baseMinX + hw;
+    out.maxX = s.baseMaxX - hw;
+    out.minZ = s.baseMinZ + hd;
+    out.maxZ = s.baseMaxZ - hd;
+    return out;
+  }
+
   private offsetAt(s: Solid, time: number): { ox: number; oy: number; oz: number; shrink: number } {
     const o = this.off;
     o.ox = o.oy = o.oz = o.shrink = 0;
@@ -116,11 +157,8 @@ export class World {
       o.oy = s.mover.dy * k;
       o.oz = s.mover.dz * k;
     }
-    if (s.collapse >= 0 && time > this.collapseStart) {
-      const e = time - this.collapseStart;
-      if (s.collapse === 0) o.shrink = deckShrink(e);
-      else o.oy -= islandSink(s.collapse, e);
-    }
+    if (s.collapse > 0) o.oy -= sinkDepth(time - (this.sinkAt[s.collapse] ?? Infinity));
+    else if (s.collapse === 0 && this.plan.length) o.shrink = deckShrinkAt(this.plan, time);
     return o;
   }
 

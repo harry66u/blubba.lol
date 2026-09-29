@@ -244,11 +244,16 @@ export interface RewardInput {
   shots: number;
   won: boolean;
   firstWinToday: boolean;
+  /**
+   * Sudden Death rounds can end well inside the minimum time; being there from the first second
+   * to the last (and doing something) still counts.
+   */
+  wholeMatch?: boolean;
 }
 
 export function matchReward(r: RewardInput): MatchReward {
   const lines: MatchReward['lines'] = [];
-  const active = r.secondsPlayed >= REWARDS.minSeconds && (r.shots > 0 || r.hits > 0 || r.kos > 0 || r.goals > 0 || r.pumpSeconds > 0);
+  const active = (r.secondsPlayed >= REWARDS.minSeconds || !!r.wholeMatch) && (r.shots > 0 || r.hits > 0 || r.kos > 0 || r.goals > 0 || r.pumpSeconds > 0);
   if (!active) return { xp: 0, coins: 0, lines: [] };
   const share = Math.max(0.25, Math.min(1, r.secondsPlayed / Math.max(1, r.matchSeconds)));
   lines.push({ label: 'Played the match', xp: Math.round(REWARDS.matchXp * share), coins: Math.round(REWARDS.matchCoins * share) });

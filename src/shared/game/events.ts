@@ -54,6 +54,10 @@ export type GameEvent =
   /** Streak reward earned: Turbo Tank, Mega Blast, or both. */
   | { t: 'streak'; tick: number; id: number; kind: 'turbo' | 'mega' | 'both'; n: number }
   | { t: 'final'; tick: number }
+  /** The map is about to shrink: pieces of these collapse orders sink (and/or the deck crumbles) at `startTick`. */
+  | { t: 'shrink'; tick: number; startTick: number; sink: number[]; deck: number }
+  /** Sudden Death: who is still in after pops or someone leaving; `winner` once it's decided (else -1). */
+  | { t: 'survivors'; tick: number; left: number[]; winner: number }
   | { t: 'goal'; tick: number; team: 0 | 1; scorer: number; x: number; y: number; z: number }
   | { t: 'ballOut'; tick: number; x: number; y: number; z: number }
   | { t: 'ballReset'; tick: number }

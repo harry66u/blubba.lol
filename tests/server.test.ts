@@ -156,6 +156,37 @@ describe('server', () => {
     c.ws.close();
   });
 
+  it('quick play Sudden Death fills to 6 with bots; someone joining mid-match waits it out', async () => {
+    const a = new TestClient();
+    await a.open();
+    a.send({ type: 'hello', v: PROTOCOL_VERSION, name: 'Lasty', guestId: 'sd1', join: { kind: 'quick', mode: 'suddenDeath' } });
+    const w = await a.waitFor('welcome');
+    expect(w.room.settings.mode).toBe('suddenDeath');
+    await new Promise((r) => setTimeout(r, 150));
+    const lastRoster = (c: TestClient) => [...c.msgs].reverse().find((m): m is Extract<ServerMessage, { type: 'roster' }> => m.type === 'roster')!;
+    expect(lastRoster(a).players.length).toBe(6);
+    // Clients get the server's shrink schedule with the match.
+    const match = [...a.msgs].reverse().find((m): m is Extract<ServerMessage, { type: 'match' }> => m.type === 'match')!;
+    expect(match.phase).toBe('playing');
+    expect(match.collapse.filter((s) => s.announce).length).toBeGreaterThanOrEqual(3);
+    // Pretend the match has been going for a while, then a second player arrives.
+    const room = lobby.rooms.get(w.room.code)!;
+    room.sim.matchStartedAt -= 20;
+    const b = new TestClient();
+    await b.open();
+    b.send({ type: 'hello', v: PROTOCOL_VERSION, name: 'Latey', guestId: 'sd2', join: { kind: 'quick', mode: 'suddenDeath' } });
+    const bw = await b.waitFor('welcome');
+    expect(bw.room.code).toBe(w.room.code);
+    await new Promise((r) => setTimeout(r, 150));
+    const roster = lastRoster(b).players;
+    expect(roster.find((p) => p.id === bw.you)?.out).toBe(true);
+    expect(roster.find((p) => p.id === w.you)?.out).toBeFalsy();
+    // Nobody still in the fight was removed to make room: the extra bot waits for the next match.
+    expect(roster.filter((p) => p.bot).length).toBe(5);
+    a.ws.close();
+    b.ws.close();
+  });
+
   it('challenge links make a private 1v1 that the first visitor joins', async () => {
     const a = new TestClient();
     await a.open();

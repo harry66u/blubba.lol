@@ -4,9 +4,10 @@ import type { GameEvent } from './game/events';
 import type { DynamicSolidInfo, MatchPhase, MatchResult, ModeId, Pickup } from './game/sim';
 import type { Loadout } from './loadout';
 import type { ChaosEvent } from './game/chaos';
+import type { ShrinkStage } from './game/shrink';
 import type { Cosmetics, ProgressReport, ReportReason } from './economy';
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 // --- Binary message ids -------------------------------------------------------------------
 export const MSG_INPUTS = 1;
@@ -66,6 +67,8 @@ export interface RosterEntry {
   face?: { account: number; v: number };
   /** Ranked rooms only. */
   rating?: number;
+  /** Sudden Death: popped out of this match (or joined late), watching until the next one. */
+  out?: boolean;
   score: number;
   kos: number;
   deaths: number;
@@ -88,7 +91,8 @@ export type ServerMessage =
   | { type: 'welcome'; v: number; you: number; room: RoomInfo; tick: number; name: string }
   | { type: 'room'; room: RoomInfo }
   | { type: 'roster'; players: RosterEntry[] }
-  | { type: 'match'; phase: MatchPhase; endsAtTick: number; number: number; result: MatchResult | null }
+  /** `collapse`: when each part of the map falls away this match, so prediction's world matches the server's. */
+  | { type: 'match'; phase: MatchPhase; endsAtTick: number; number: number; result: MatchResult | null; collapse: ShrinkStage[] }
   | { type: 'ev'; list: GameEvent[] }
   | {
       type: 'entities';

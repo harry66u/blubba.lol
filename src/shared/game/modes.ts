@@ -3,11 +3,12 @@ import type { MapDef } from '../maps/types';
 import { MODE_DEAD, type PlayerState, playerHeight, playerRadius } from '../player';
 import type { World } from '../world';
 
-export const MODE_IDS = ['knockout', 'teamKnockout', 'ball', 'pump', 'duel'] as const;
+export const MODE_IDS = ['knockout', 'suddenDeath', 'teamKnockout', 'ball', 'pump', 'duel'] as const;
 export type ModeId = (typeof MODE_IDS)[number];
 
 export const MODE_INFO: Record<ModeId, { name: string; short: string; blurb: string; teams: boolean }> = {
   knockout: { name: 'Knockout', short: 'KO', blurb: 'Free-for-all. Most knockouts wins.', teams: false },
+  suddenDeath: { name: 'Sudden Death', short: 'SD', blurb: 'One life, everyone fully inflated, the map keeps shrinking. Last one standing wins.', teams: false },
   teamKnockout: { name: 'Team Knockout', short: 'TEAM', blurb: 'Two teams. Most team knockouts wins.', teams: true },
   ball: { name: 'Ball', short: 'BALL', blurb: "Blast the beach ball into the other team's goal.", teams: true },
   pump: { name: 'Pump', short: 'PUMP', blurb: 'Stand on your pumps to inflate your giant tube man first.', teams: true },

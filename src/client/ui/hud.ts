@@ -92,6 +92,7 @@ export class Hud {
   private readonly pinBadge: HTMLElement;
   private readonly powerBadge: HTMLElement;
   private readonly eventBanner: HTMLElement;
+  private readonly survivors: HTMLElement;
   private readonly clock: HTMLElement;
   private readonly teamBar: HTMLElement;
   private readonly teamSides: { box: HTMLElement; score: HTMLElement; fill: HTMLElement; name: HTMLElement }[] = [];
@@ -221,7 +222,8 @@ export class Hud {
       this.teamSides.push({ box, score, fill, name });
     }
     this.teamBar.append(this.teamSides[0].box, this.teamSides[1].box);
-    const timer = el('div', { class: 'timer' }, this.teamBar, this.clock, this.sub, this.eventBanner);
+    this.survivors = el('div', { class: 'survivors hidden' });
+    const timer = el('div', { class: 'timer' }, this.teamBar, this.clock, this.survivors, this.sub, this.eventBanner);
 
     this.killfeed = el('div', { class: 'killfeed' });
     this.nametags = el('div', { class: 'nametags' });
@@ -479,6 +481,24 @@ export class Hud {
         side.score.textContent = t.bars ? `${Math.floor(t.scores[i] * 100)}%` : String(t.scores[i]);
         side.fill.style.width = `${Math.round(Math.min(1, t.bars ? t.scores[i] : t.target ? t.scores[i] / t.target : 0) * 100)}%`;
       });
+    });
+  }
+
+  /**
+   * Sudden Death: how many players are still in, with a pip per player (null hides it).
+   * `you` marks whether you're still in.
+   */
+  setSurvivors(left: number | null, total = 0, youIn = false): void {
+    const key = left === null ? '' : `${left}/${total}/${youIn}`;
+    this.setIf('survivors', key, () => {
+      this.survivors.classList.toggle('hidden', left === null);
+      if (left === null) return;
+      clear(this.survivors);
+      const pips = el('div', { class: 'pips' });
+      for (let i = 0; i < total; i++) pips.append(el('span', { class: i < left ? 'in' : 'out' }));
+      this.survivors.classList.toggle('last', left <= 3);
+      this.survivors.append(el('b', { text: String(left) }), el('span', { class: 'lbl', text: left === 1 ? 'PLAYER LEFT' : 'PLAYERS LEFT' }), pips);
+      this.survivors.title = youIn ? "You're still in!" : "You're out: spectating";
     });
   }
 

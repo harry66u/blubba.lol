@@ -1284,6 +1284,54 @@ body {
   animation: pulse 0.5s ease-in-out infinite alternate;
 }
 
+/* Sudden Death: players still in, under the clock. */
+.survivors {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(20, 18, 48, 0.6);
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  padding: 3px 12px 4px;
+  color: white;
+  box-shadow: 0 3px 0 var(--ink);
+}
+.survivors b {
+  font-size: 26px;
+  line-height: 1;
+  color: var(--yellow);
+  -webkit-text-stroke: 3px var(--ink);
+  paint-order: stroke fill;
+}
+.survivors .lbl {
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+.survivors .pips {
+  display: flex;
+  gap: 3px;
+}
+.survivors .pips span {
+  width: 9px;
+  height: 14px;
+  border-radius: 5px;
+  background: var(--yellow);
+  border: 2px solid var(--ink);
+}
+.survivors .pips span.out {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(0, 0, 0, 0.35);
+}
+.survivors.last {
+  background: rgba(255, 59, 92, 0.85);
+}
+.survivors.last b {
+  animation: pulse 0.5s ease-in-out infinite alternate;
+}
+.scoreboard tr.out td {
+  opacity: 0.5;
+}
+
 .replay-banner {
   position: absolute;
   left: 50%;
@@ -1504,7 +1552,7 @@ body {
 }
 .mode-picker {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
   margin: 8px 0 4px;
 }

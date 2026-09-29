@@ -80,6 +80,8 @@ export class BotBrain {
   /** What this bot will try while recovering, decided once per trip off the stage. */
   private recovery = { grapple: false, wall: false, steer: 1, dash: false };
   private bracedFor = new Set<number>();
+  /** Jumping off a piece of the map that's about to fall (kept until we land somewhere safe). */
+  private fleeing = false;
 
   private press(key: 'jump' | 'dash' | 'brace' | 'grab' | 'grapple' | 'util1' | 'util2'): void {
     this.input[key] = (this.input[key] + 1) & 255;
@@ -129,6 +131,23 @@ export class BotBrain {
       f.moveZ = 1;
       f.yaw = Math.atan2(s.hangNx, s.hangNz) + Math.PI; // face the wall
       if (rnd() < 0.05) this.press('jump');
+      return { ...f };
+    }
+    // The map is shrinking and we're on a piece about to fall: head for the middle and jump the gap.
+    if (s.onGround) this.fleeing = doomedSpot(sim, s.px, s.pz, s.groundId) && (world.solids[s.groundId]?.collapse ?? 0) > 0;
+    if (this.fleeing && s.py > home.y - 4) {
+      const yaw = Math.atan2(-(home.x - s.px), -(home.z - s.pz));
+      f.yaw = yaw;
+      f.pitch = 0;
+      this.aimYaw = yaw;
+      f.moveZ = 1;
+      f.buttons = 0;
+      if (s.onGround) {
+        const edge = world.groundBelow(s.px - Math.sin(yaw) * 1.3, s.py + 0.6, s.pz - Math.cos(yaw) * 1.3, 3) === null;
+        if (edge) this.press('jump');
+      } else if (s.jumpsUsed === 1 && s.vy < 1.5) this.press('jump');
+      else if (s.vy < -3 && s.dashCharges > 0 && rnd() < 0.1) this.press('dash');
+      this.offStageTime = 0;
       return { ...f };
     }
     if (offStage && this.offStageTime === 0) {
@@ -261,7 +280,10 @@ export class BotBrain {
     const wz = -sinY * f.moveX - cosY * f.moveZ;
     const probe = 2.5 + Math.hypot(s.vx, s.vz) * 0.35;
     const g = world.groundBelow(s.px + wx * probe, s.py + 0.6, s.pz + wz * probe, 4);
-    if (g === null) {
+    // The map is shrinking: get off pieces that are about to fall, and back from deck edges that
+    // are about to crumble (bots see the same warning players do).
+    const doomed = s.onGround === 1 && doomedSpot(sim, s.px, s.pz, s.groundId);
+    if (g === null || doomed) {
       // Walk toward home instead, expressed relative to our current yaw.
       const hx = home.x - s.px;
       const hz = home.z - s.pz;
@@ -435,6 +457,21 @@ export class BotBrain {
     }
     return best;
   }
+}
+
+const lookAhead = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
+
+/** True when standing here is about to be a bad idea: the piece falls soon or the deck edge crumbles past it. */
+function doomedSpot(sim: GameSim, x: number, z: number, groundId: number): boolean {
+  const w = sim.world;
+  if (groundId < 0 || !w.plan.length) return false;
+  const s = w.solids[groundId];
+  if (!s || s.collapse < 0) return false;
+  const lead = BALANCE.shrink.warning + 1.5;
+  if (s.collapse > 0) return w.fallsIn(groundId, sim.time) < lead;
+  const b = w.deckBoundsAt(s, sim.time + lead, lookAhead);
+  const margin = 2.5;
+  return x < b.minX + margin || x > b.maxX - margin || z < b.minZ + margin || z > b.maxZ - margin;
 }
 
 /** Unit vector (x, z) toward the closest edge of the deck we're standing on (or the largest one). */
