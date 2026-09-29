@@ -120,17 +120,19 @@ export class Lobby {
    * map picked, only rooms on that map count, and if there are none a new room opens on it. New
    * rooms without a pick start on a random knockout map.
    */
-  findPublicRoom(mode: ModeId = 'knockout', map: string | null = null): Room {
+  findPublicRoom(mode: ModeId = 'knockout', map: string | null = null, open = false): Room {
     const want = wantedMap(mode, map);
     let best: Room | null = null;
     for (const r of this.rooms.values()) {
       if (r.isPrivate || r.mode !== mode || !r.canJoin()) continue;
+      // Open rooms (no bots) and regular public rooms (bots fill in) are kept apart.
+      if (r.settings.bots === open) continue;
       if (want && r.settings.mapId !== want) continue;
       if (!best || r.humanCount > best.humanCount) best = r;
     }
     if (best) return best;
     const mapId = want ?? KNOCKOUT_MAPS[Math.floor(Math.random() * KNOCKOUT_MAPS.length)];
-    const room = new Room(this.newCode(), false, { mode, mapId }, this.store);
+    const room = new Room(this.newCode(), false, { mode, mapId, bots: !open }, this.store);
     this.rooms.set(room.code, room);
     return room;
   }
@@ -211,7 +213,7 @@ export class Lobby {
     } else {
       const mode = typeof join.mode === 'string' && (MODE_IDS as readonly string[]).includes(join.mode) ? join.mode : 'knockout';
       picked = wantedMap(mode, join.map);
-      room = this.findPublicRoom(mode, picked);
+      room = this.findPublicRoom(mode, picked, join.open === true);
     }
     const conn = room.join(ws, name, guestId, msg.loadout, identity, picked);
     if (!conn) return fail('full', 'That room is full (10 players).');

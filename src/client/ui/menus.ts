@@ -25,6 +25,8 @@ export interface MenuCallbacks {
   /** The map picked for quick play (null: any map). */
   onMapChange: (map: string | null) => void;
   onCreate: (name: string) => void;
+  /** An open room: public, no bots, no code needed. */
+  onOpen: (name: string, mode: ModeId) => void;
   onJoinCode: (name: string, code: string) => void;
   onSettings: () => void;
   onHowTo: () => void;
@@ -319,6 +321,17 @@ export function buildMainMenu(
       },
     },
   });
+  const open = el('button', {
+    class: 'btn green',
+    text: 'OPEN ROOM',
+    attrs: { title: 'A public room with no bots: anyone can hop in without a code. Uses the mode and map picked above.' },
+    on: {
+      click: () => {
+        const n = accountName ?? validName(nameInput, err);
+        if (n) cb.onOpen(n, mode === 'ranked' ? 'knockout' : mode);
+      },
+    },
+  });
   const card = el(
     'div',
     { class: 'panel menu-card interactive' },
@@ -328,7 +341,7 @@ export function buildMainMenu(
     blurb,
     maps.el,
     play,
-    el('div', { class: 'row split' }, create, challenge),
+    el('div', { class: 'row split three' }, open, create, challenge),
     el('div', { class: 'row code-row' }, el('div', { class: 'grow code-label', text: 'Got a code?' }), codeInput, joinBtn),
     err,
   );
@@ -524,7 +537,7 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
   } else {
     panel.append(
       el('div', { class: 'room-banner', text: `Public match · ${MODE_INFO[room?.settings.mode ?? 'knockout'].name} · ${MAPS[room?.mapId ?? 'dealership']?.name ?? ''}` }),
-      el('div', { class: 'small-note', style: 'text-align:center', text: 'Bots fill public matches. Want no bots? Make a PRIVATE ROOM and switch them off.' }),
+      el('div', { class: 'small-note', style: 'text-align:center', text: 'Bots fill public matches. Want no bots? Pick OPEN ROOM on the menu (anyone can join), or make a PRIVATE ROOM and switch them off.' }),
     );
   }
   panel.append(

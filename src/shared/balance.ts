@@ -534,13 +534,14 @@ export const BALANCE = {
    */
   ults: {
     meter: {
-      /** Fill per second while alive (about 40 s on its own). */
-      perSecond: 1 / 41,
+      /** Fill per second while alive (about 27 s on its own). */
+      perSecond: 1 / 27,
       /** Fill per 100% of inflation you pump into enemies (shots, streams, throws, chains). */
-      perInflation: 1.68,
-      perKo: 0.72,
+      perInflation: 2.5,
+      /** A knockout fills it (almost) right up. */
+      perKo: 1.08,
       /** Fill per 100% of inflation you take: a little help when you're the one getting blasted. */
-      perInflationTaken: 0.6,
+      perInflationTaken: 0.9,
     },
     /** Big Blow: the next trigger pull fires one giant air blast at full power, with any weapon. */
     bigBlow: { projSpeed: 58, radius: 1.35, lifetime: 0.95, blastRadius: 5.4, knockback: 1.9, inflation: 0.24, fireCooldown: 0.5 },

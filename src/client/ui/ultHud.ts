@@ -7,6 +7,8 @@ export interface UltHudState {
   ready: boolean;
   icon: string;
   name: string;
+  /** Photo of the person the ult turns you into (shown in the meter), or null for the icon. */
+  face: string | null;
   color: string;
   key: string;
   /** What your ult is doing right now ('' = nothing), and whether it's a warning (being chased). */
@@ -74,15 +76,18 @@ export class UltHud {
       this.arc.setAttribute('stroke-dashoffset', String(CIRC * (1 - q / 100)));
       this.meter.style.setProperty('--fill', `${q}%`);
     });
-    this.setIf('look', `${s.icon}|${s.color}|${s.name}`, () => {
-      this.icon.textContent = s.icon;
+    this.setIf('look', `${s.icon}|${s.color}|${s.name}|${s.face}`, () => {
+      this.icon.textContent = '';
+      // Whose ult it is: their face (their icon as a badge) and their name on top.
+      if (s.face) add(this.icon, el('img', { class: 'ult-face', attrs: { src: s.face, alt: '' } }), el('span', { class: 'ult-badge', text: s.icon }));
+      else this.icon.textContent = s.icon;
       this.meter.style.setProperty('--ult', s.color);
       this.arc.setAttribute('stroke', s.color);
       this.meter.title = s.name;
     });
-    this.setIf('ready', `${s.ready}|${s.alive}`, () => {
+    this.setIf('ready', `${s.ready}|${s.alive}|${s.name}`, () => {
       this.meter.classList.toggle('ready', s.ready && s.alive);
-      this.label.textContent = s.ready ? 'ULT READY' : '';
+      this.label.textContent = s.ready ? `${s.name.toUpperCase()} READY` : s.name.toUpperCase();
     });
     this.setIf('key', s.key, () => (this.key.textContent = s.key));
     this.setIf('dead', s.alive, () => this.meter.classList.toggle('dead', !s.alive));

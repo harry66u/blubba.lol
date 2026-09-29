@@ -384,11 +384,7 @@ export class ClientGame {
       },
       jab: (id) => (id === this.youId ? this.selfMan?.jab() : this.remotes.get(id)?.man.jab()),
       keyOf: () => this.key('ult'),
-      charFace: (kind) => {
-        const c = ULT_CHARACTER[kind];
-        const f = c ? this.characterFaces[c.body] : undefined;
-        return f ? `/api/face/${f.account}?v=${f.v}` : c ? characterPhotoUrl(c.body) : null;
-      },
+      charFace: (kind) => this.charFaceUrl(kind),
       shake: (amount, fov) => {
         this.trauma = Math.min(1, this.trauma + amount);
         this.fovKick += fov;
@@ -848,6 +844,13 @@ export class ClientGame {
     if (!this.showFaces && id !== this.youId) return null;
     const t = this.transformOf(id);
     return t ? (this.characterFaces[t.body] ?? null) : null;
+  }
+
+  /** Image URL of the face an ult's character wears: a lent face scan, else the photo they sent. */
+  private charFaceUrl(kind: UltId): string | null {
+    const c = ULT_CHARACTER[kind];
+    const f = c ? this.characterFaces[c.body] : undefined;
+    return f ? `/api/face/${f.account}?v=${f.v}` : c ? characterPhotoUrl(c.body) : null;
   }
 
   /** Fetches the approved character faces now and then (they rarely change). */
@@ -2965,6 +2968,8 @@ export class ClientGame {
       ult: alive ? Math.min(1, p.ult) : 0,
       ultReady: alive && ultReady(p),
       ultIcon: ULT_INFO[ultOf(p)].icon,
+      ultName: ULT_INFO[ultOf(p)].name,
+      ultFace: this.charFaceUrl(ultOf(p)),
     });
     const k = (a: Action) => this.key(a);
     this.hud.setKeys(

@@ -211,6 +211,27 @@ describe('server', () => {
     for (const x of [a, b, c, d, e]) x.c.ws.close();
   });
 
+  it('open rooms are public with no bots, and kept apart from bot-filled rooms', async () => {
+    const join = async (guestId: string, open: boolean) => {
+      const c = new TestClient();
+      await c.open();
+      c.send({ type: 'hello', v: PROTOCOL_VERSION, name: 'Opener', guestId, join: { kind: 'quick', mode: 'teamKnockout', open } });
+      return { c, w: await c.waitFor('welcome') };
+    };
+    const a = await join('o1', true);
+    expect(a.w.room.isPrivate).toBe(false);
+    expect(a.w.room.settings.bots).toBe(false);
+    const r = await a.c.waitFor('roster');
+    expect(r.players.some((p) => p.bot)).toBe(false);
+    // A second open-room player lands in the same room, no code needed; a regular player doesn't.
+    const b = await join('o2', true);
+    expect(b.w.room.code).toBe(a.w.room.code);
+    const c = await join('o3', false);
+    expect(c.w.room.code).not.toBe(a.w.room.code);
+    expect(c.w.room.settings.bots).toBe(true);
+    for (const x of [a, b, c]) x.c.ws.close();
+  });
+
   it('challenge links make a private 1v1 that the first visitor joins', async () => {
     const a = new TestClient();
     await a.open();

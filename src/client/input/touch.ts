@@ -34,6 +34,9 @@ export interface TouchState {
   ult: number;
   ultReady: boolean;
   ultIcon: string;
+  /** Whose ult it is (the button says their name) and their photo (shown when it's ready). */
+  ultName: string;
+  ultFace: string | null;
 }
 
 interface ButtonDef {
@@ -291,8 +294,13 @@ export class TouchControls {
     ult.el.style.setProperty('--ult', s.ult.toFixed(2));
     ult.el.classList.toggle('ready', s.ultReady);
     const ul = ult.el.lastElementChild!;
-    const text = s.ultReady ? `${s.ultIcon}` : 'ULT';
+    const text = s.ultName ? s.ultName.toUpperCase() : s.ultReady ? s.ultIcon : 'ULT';
     if (ul.textContent !== text) ul.textContent = text;
+    const face = s.ultReady && s.ultFace ? `url("${s.ultFace}")` : 'none';
+    if (ult.el.dataset.face !== face) {
+      ult.el.dataset.face = face;
+      ult.el.style.setProperty('--ult-face', face);
+    }
   }
 }
 

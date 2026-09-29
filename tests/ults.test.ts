@@ -78,7 +78,6 @@ describe('ult meter', () => {
   });
 
   it('fills from inflation you add to enemies, a little from hits you take, and a chunk per knockout', () => {
-    // (A small hit, so a hit plus a knockout still fits under a full meter.)
     const { sim, ps } = setup([{}, {}, {}]);
     const [a, b, c] = ps;
     sim.applyHit(b, a.id, 0, 0, -1, 1, 0.1, { direct: true, low: false, x: 0, y: 1, z: 0 });
@@ -89,7 +88,7 @@ describe('ult meter', () => {
     c.lastAttacker = a.id;
     c.lastAttackTime = sim.time;
     sim.knockout(c);
-    expect(a.state.ult).toBeCloseTo(0.1 * M.perInflation + M.perKo, 5);
+    expect(a.state.ult).toBeCloseTo(Math.min(1, 0.1 * M.perInflation + M.perKo), 5);
   });
 
   it('keeps its charge through death, resets on a new match, and pauses while an ult runs', () => {

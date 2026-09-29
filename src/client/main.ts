@@ -170,7 +170,7 @@ function rememberMap(m: string | null): void {
 }
 
 /** Quick play for a mode on the picked map. */
-function quickJoin(mode: ModeId): JoinRequest {
+function quickJoin(mode: ModeId): Extract<JoinRequest, { kind: 'quick' }> {
   return lastMap ? { kind: 'quick', mode, map: lastMap } : { kind: 'quick', mode };
 }
 
@@ -206,6 +206,7 @@ function renderMenu(notice?: MenuNotice | string): void {
       onModeChange: rememberMode,
       onMapChange: rememberMap,
       onCreate: (name) => startJoin(name, { kind: 'create' }),
+      onOpen: (name, mode) => startJoin(name, { ...quickJoin(mode), open: true }),
       onJoinCode: (name, code) => startJoin(name, { kind: 'code', code }),
       onSettings: () => setOverlay('settings'),
       onHowTo: () => setOverlay('howto'),

@@ -1409,7 +1409,7 @@ select.field:disabled {
 }
 
 .nametag .pct {
-  font-size: 26px;
+  font-size: 30px;
   color: white;
   -webkit-text-stroke: 4px var(--ink);
   paint-order: stroke fill;
@@ -1417,13 +1417,17 @@ select.field:disabled {
 }
 
 .nametag .nm {
-  font-size: 14px;
+  font-size: 21px;
+  font-weight: 900;
   color: white;
-  text-shadow: 0 2px 0 var(--ink), 0 0 4px var(--ink);
+  -webkit-text-stroke: 3px var(--ink);
+  paint-order: stroke fill;
+  text-shadow: 0 2px 0 var(--ink);
 }
 
 .nametag .bot {
-  font-size: 10px;
+  font-size: 12px;
+  -webkit-text-stroke: 0;
   background: var(--ink);
   color: white;
   border-radius: 5px;
@@ -5683,8 +5687,11 @@ body.touch .inflation .self-gain {
   background: conic-gradient(rgba(255, 214, 10, 0.8) calc(var(--ult, 0) * 360deg), rgba(255, 255, 255, 0.22) 0);
 }
 .touch-controls .ult.ready {
-  font-size: 30px;
-  background: radial-gradient(circle, #fff3a0, #ffb020);
+  font-size: 15px;
+  /* Their face fills the button when it's ready. */
+  background: var(--ult-face, none) center 40% / cover no-repeat, radial-gradient(circle, #fff3a0, #ffb020);
+  text-shadow: 0 2px 0 var(--ink), 0 0 6px var(--ink);
+  color: white;
   border-color: var(--ink);
   box-shadow: 0 0 18px 6px rgba(255, 190, 40, 0.9);
   animation: pulse 0.5s ease-in-out infinite alternate;
@@ -5901,4 +5908,41 @@ body.touch .ult-splash .tag {
 /* A tablet playing with a trackpad or mouse (pointer locked): hide the on-screen sticks and buttons. */
 body.mouse-play .touch-controls {
   display: none;
+}
+
+/* Ult meter: the face of whoever the ult turns you into (their icon as a badge), and their name
+   above it (NAME READY when it's full). */
+.ult-meter .ult-face {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: 50% 40%;
+}
+.ult-meter .ult-badge {
+  position: absolute;
+  right: -4px;
+  top: -4px;
+  font-size: 20px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 0 var(--ink));
+}
+.ult-meter .ult-label {
+  bottom: 86px;
+}
+.ult-meter:not(.ready) .ult-label {
+  font-size: 15px;
+  opacity: 0.9;
+}
+
+/* Menu: OPEN ROOM · PRIVATE ROOM · 1v1 CHALLENGE on one row. */
+.menu-card .row.split.three .btn {
+  font-size: 15px;
+  padding: 11px 4px;
+}
+@media (max-width: 520px) {
+  .menu-card .row.split.three .btn {
+    font-size: 12px;
+    padding: 10px 2px;
+  }
 }

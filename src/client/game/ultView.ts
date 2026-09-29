@@ -672,6 +672,7 @@ export class UltView {
       ready,
       icon: info.icon,
       name: info.name,
+      face: g.charFace(ultOf(p)),
       color: info.color,
       key: g.keyOf(),
       status,
