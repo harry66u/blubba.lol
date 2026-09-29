@@ -15,10 +15,24 @@ import { type Quality, Renderer } from './render/renderer';
 import { isWeakGpu } from './render/gpu';
 import { type Settings, loadIdentity, loadSettings, saveIdentity, saveSettings } from './settings';
 import { clear } from './ui/dom';
-import { type AccountTab, buildAccountChip, buildAccountPanel, buildDailyCard, buildProfile, buildQueue } from './ui/accountUi';
+import { type AccountTab, buildAccountChip, buildAccountPanel, buildDailyCard, buildProfile, buildQueue, updateQueue } from './ui/accountUi';
 import { buildLocker } from './ui/locker';
 import { Hud } from './ui/hud';
-import { type PlayMode, buildClickToPlay, buildHowTo, buildMainMenu, buildPause, buildReplayBanner, buildResults, buildRoomJoin, buildScoreboard, buildSettings } from './ui/menus';
+import {
+  type MenuNotice,
+  type PlayMode,
+  buildClickToPlay,
+  buildConnecting,
+  buildHowTo,
+  buildMainMenu,
+  buildPause,
+  buildReplayBanner,
+  buildResults,
+  buildRoomJoin,
+  buildScoreboard,
+  buildSettings,
+  resultsCountdownText,
+} from './ui/menus';
 import { buildLoadout, loadLoadout, saveLoadout } from './ui/loadout';
 
 const settings = loadSettings();
@@ -120,7 +134,7 @@ function setPath(path: string): void {
 
 // --- Screens -----------------------------------------------------------------------------------
 
-function showMenu(notice?: string): void {
+function showMenu(notice?: MenuNotice | string): void {
   screen = 'menu';
   setOverlay('none');
   setPath('/');
@@ -128,7 +142,7 @@ function showMenu(notice?: string): void {
 }
 
 /** Draws the main menu without touching whatever overlay is open. */
-function renderMenu(notice?: string): void {
+function renderMenu(notice?: MenuNotice | string): void {
   clear(menuLayer);
   menuLayer.append(
     buildMainMenu(identity.name, {
@@ -204,11 +218,24 @@ function startJoin(name: string, join: JoinRequest): void {
     input.exitLock();
     screen = 'queue';
     menuLayer.append(buildQueue(0, 1, account.profile.rating ?? 1000, cancelQueue));
+  } else {
+    menuLayer.append(buildConnecting(join, cancelQueue));
   }
   net.join(name, identity.guestId, join, game.loadout, account.token ?? undefined).catch((err: Error) => {
     input.exitLock();
-    showMenu(err.message || 'Could not connect. Check your Wi-Fi and try again.');
+    showMenu({
+      title: "Can't reach the server",
+      text: err.message || 'Could not connect. Check your Wi-Fi and try again.',
+      action: { label: 'Try again', run: () => startJoin(identity.name, join) },
+    });
   });
+}
+
+/** Joining again after a dropped connection: the same private room, or the same kind of match. */
+function rejoinRequest(): JoinRequest | null {
+  const room = game.room;
+  if (room?.isPrivate && !room.ranked) return { kind: 'code', code: room.code };
+  return pendingJoin;
 }
 
 function goFullscreen(): void {
@@ -223,8 +250,10 @@ function goFullscreen(): void {
   }
 }
 
+/** Backs out of the ranked queue or a join that's still connecting. */
 function cancelQueue(): void {
   net.close();
+  input.exitLock();
   showMenu();
   net.warm().catch(() => undefined);
 }
@@ -232,7 +261,8 @@ function cancelQueue(): void {
 function setOverlay(next: typeof overlay): void {
   // The results screen is redrawn twice a second (for its countdown); keep its scroll position so
   // the rewards and daily challenges at the bottom stay readable on short screens.
-  const resultsScroll = next === 'results' && overlay === 'results' ? (overlayLayer.querySelector('.results .panel')?.scrollTop ?? 0) : 0;
+  const redraw = next === 'results' && overlay === 'results';
+  const resultsScroll = redraw ? (overlayLayer.querySelector('.results .panel')?.scrollTop ?? 0) : 0;
   overlay = next;
   clear(overlayLayer);
   lockerDispose?.();
@@ -347,12 +377,20 @@ function setOverlay(next: typeof overlay): void {
       if (game.match.result) {
         const secondsLeft = Math.max(0, (game.match.endsAtTick - game.clock.tickAt(performance.now())) / 60);
         overlayLayer.append(
-          buildResults(game.match.result, game.roster, game.youId, secondsLeft, game.teamView(), {
-            report: game.lastProgress,
-            guest: !account.account,
-            onSignup: () => openAccount('signup'),
-            ranked: !!game.room?.ranked,
-          }),
+          buildResults(
+            game.match.result,
+            game.roster,
+            game.youId,
+            secondsLeft,
+            game.teamView(),
+            {
+              report: game.lastProgress,
+              guest: !account.account,
+              onSignup: () => openAccount('signup'),
+              ranked: !!game.room?.ranked,
+            },
+            !redraw,
+          ),
         );
         const panel = overlayLayer.querySelector('.results .panel');
         if (panel) panel.scrollTop = resultsScroll;
@@ -433,6 +471,14 @@ function copyInvite(): void {
   else prompt('Copy this link:', link);
 }
 
+/** Ticks "Next match in..." without redrawing the results (so their entrance plays once). */
+function tickResultsCountdown(): void {
+  const countdown = overlayLayer.querySelector<HTMLElement>('.results [data-countdown]');
+  if (!countdown) return;
+  const secondsLeft = Math.max(0, (game.match.endsAtTick - game.clock.tickAt(performance.now())) / 60);
+  countdown.textContent = resultsCountdownText(secondsLeft, !!game.room?.ranked);
+}
+
 function renderScoreboard(): void {
   clear(scoreLayer);
   if (!scoreboardOpen || screen !== 'playing') return;
@@ -508,7 +554,7 @@ net.handlers = {
   onSnapshot: (snap) => game.onSnapshot(snap),
   onMessage: (msg: ServerMessage) => {
     if (msg.type === 'queue') {
-      if (screen === 'queue') {
+      if (screen === 'queue' && !updateQueue(menuLayer, msg.seconds, msg.searching, msg.rating)) {
         clear(menuLayer);
         menuLayer.append(buildQueue(msg.seconds, msg.searching, msg.rating, cancelQueue));
       }
@@ -529,7 +575,7 @@ net.handlers = {
       net.close();
       game.leave();
       input.exitLock();
-      showMenu(msg.message);
+      showMenu({ kind: 'info', text: msg.message, action: { label: 'Queue again', run: () => startJoin(identity.name, { kind: 'ranked' }) } });
       net.warm().catch(() => undefined);
       return;
     }
@@ -566,6 +612,8 @@ net.handlers = {
         game.leave();
         input.exitLock();
         if (msg.code === 'not_found' && link) showRoomJoin(link.code, msg.message, link.challenge);
+        else if (msg.code === 'version') showMenu({ kind: 'update', title: 'Blubba got an update!', text: 'Refresh to get the newest version. It only takes a second.', action: { label: 'Refresh', run: () => location.reload() } });
+        else if (msg.code === 'kicked') showMenu({ kind: 'info', text: msg.message });
         else showMenu(msg.message);
         if (msg.code === 'account_required') openAccount('login');
         return;
@@ -576,9 +624,14 @@ net.handlers = {
   },
   onClose: (reason) => {
     if (screen === 'playing' || screen === 'connecting' || screen === 'queue') {
+      const retry = rejoinRequest();
       game.leave();
       input.exitLock();
-      showMenu(`Disconnected: ${reason}`);
+      showMenu({
+        title: screen === 'playing' ? 'Disconnected' : "Couldn't connect",
+        text: reason,
+        action: retry ? { label: screen === 'playing' ? 'Rejoin' : 'Try again', run: () => startJoin(identity.name, retry) } : undefined,
+      });
     }
   },
 };
@@ -609,7 +662,7 @@ game.onMatchChange = (m) => {
 game.onKicked = (message) => {
   game.leave();
   input.exitLock();
-  showMenu(message);
+  showMenu({ kind: 'info', text: message });
 };
 
 // Warn before closing the tab mid-match (Command+W sits right next to the space bar).
@@ -662,7 +715,7 @@ function loop(now: number): void {
     fpsFrames = 0;
     fpsTime = 0;
   }
-  if (overlay === 'results' && fpsFrames === 0) setOverlay('results');
+  if (overlay === 'results' && fpsFrames === 0) tickResultsCountdown();
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
@@ -676,11 +729,15 @@ const link = roomCodeFromPath();
 if (link) showRoomJoin(link.code, undefined, link.challenge);
 else showMenu();
 
-// Fade out the HTML splash now that the game is ready.
+// Fade out the HTML splash now that the game is ready (and the fonts are in, so nothing jumps;
+// a slow font download doesn't hold it up for long).
 const splash = document.getElementById('splash');
 if (splash) {
-  splash.style.opacity = '0';
-  window.setTimeout(() => splash.remove(), 350);
+  const fonts = document.fonts?.ready ?? Promise.resolve();
+  void Promise.race([fonts, new Promise((r) => window.setTimeout(r, 1200))]).then(() => {
+    splash.classList.add('gone');
+    window.setTimeout(() => splash.remove(), 450);
+  });
 }
 
 // Expose for debugging and automated tests.
