@@ -441,9 +441,12 @@ function setOverlay(next: typeof overlay): void {
           onCopyLink: copyInvite,
           onHost: (action) => {
             if (action === 'restart') net.send({ type: 'host', action: 'restart' });
-            else net.send({ type: 'host', action: 'settings', settings: action });
+            else if (action === 'start') {
+              net.send({ type: 'host', action: 'start' });
+              resume();
+            } else net.send({ type: 'host', action: 'settings', settings: action });
           },
-        }),
+        }, { waiting: game.inLobby, players: game.roster.size }),
       );
       break;
     case 'settings':
@@ -605,6 +608,13 @@ input.onLockError = () => {
     }
   }, 350);
 };
+
+// Private-room lobby: the host presses Enter to start the match.
+window.addEventListener('keydown', (e) => {
+  if (e.code !== 'Enter' || screen !== 'playing' || overlay !== 'none' || !game.inLobby || !game.isHost) return;
+  if ((e.target as HTMLElement | null)?.tagName === 'INPUT') return;
+  game.startMatch();
+});
 
 // Without pointer lock (touch devices with a keyboard, or a refused lock), Esc or P opens the menu.
 window.addEventListener('keydown', (e) => {

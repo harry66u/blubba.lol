@@ -6564,3 +6564,25 @@ body.mouse-play .touch-controls {
     margin: 0;
   }
 }
+
+/* Private-room lobby: the host's START button and team names. */
+.pause-panel .start-match {
+  width: 100%;
+  font-size: 26px;
+  white-space: nowrap;
+  margin-bottom: 8px;
+}
+.host-grid .team-names {
+  grid-column: 1 / -1;
+}
+.host-grid .team-names .row {
+  display: flex;
+  gap: 8px;
+}
+.host-grid .team-names .team-name {
+  flex: 1;
+  min-width: 0;
+}
+.host-grid .team-names .btn {
+  flex: none;
+}

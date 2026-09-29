@@ -1,7 +1,7 @@
 import { INPUT_BYTES, type InputFrame, readInput, writeInput } from './input';
 import { type Features, MODE_DEAD, PLAYER_FIELDS, type PlayerState } from './player';
 import type { GameEvent } from './game/events';
-import type { DynamicSolidInfo, MatchPhase, MatchResult, ModeId, Pickup } from './game/sim';
+import type { DynamicSolidInfo, MatchPhase, MatchResult, ModeId, Pickup, RoundInfo } from './game/sim';
 import type { Loadout } from './loadout';
 import type { ChaosEvent } from './game/chaos';
 import type { ShrinkStage } from './game/shrink';
@@ -9,7 +9,7 @@ import type { Tornado } from './game/loot';
 import type { Cosmetics, ProgressReport, ReportReason } from './economy';
 import { publicUlt } from './game/ults';
 
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 
 // --- Binary message ids -------------------------------------------------------------------
 export const MSG_INPUTS = 1;
@@ -39,6 +39,8 @@ export interface RoomSettings {
   durationSec: number;
   bots: boolean;
   events: EventFrequency;
+  /** Team modes: team names the host picked ('' = the default name). */
+  teamNames?: [string, string];
 }
 
 export type ClientMessage =
@@ -52,6 +54,8 @@ export type ClientMessage =
   | { type: 'host'; action: 'kick'; id: number }
   | { type: 'host'; action: 'settings'; settings: Partial<RoomSettings> }
   | { type: 'host'; action: 'restart' }
+  /** Private rooms wait in the lobby until the host starts the match. */
+  | { type: 'host'; action: 'start' }
   /** Only honored when the server runs with BUBBA_DEBUG=1 (for testing events quickly). */
   | { type: 'debug'; action: 'chaos'; kind: string }
   | { type: 'debug'; action: 'endIn'; seconds: number }
@@ -106,7 +110,7 @@ export type ServerMessage =
   | { type: 'room'; room: RoomInfo }
   | { type: 'roster'; players: RosterEntry[] }
   /** `collapse`: when each part of the map falls away this match, so prediction's world matches the server's. */
-  | { type: 'match'; phase: MatchPhase; endsAtTick: number; number: number; result: MatchResult | null; collapse: ShrinkStage[] }
+  | { type: 'match'; phase: MatchPhase; endsAtTick: number; number: number; result: MatchResult | null; collapse: ShrinkStage[]; round?: RoundInfo | null }
   | { type: 'ev'; list: GameEvent[] }
   | {
       type: 'entities';

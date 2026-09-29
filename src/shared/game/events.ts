@@ -87,7 +87,12 @@ export type GameEvent =
   /** The map is about to shrink: pieces of these collapse orders sink (and/or the deck crumbles) at `startTick`. */
   | { t: 'shrink'; tick: number; startTick: number; sink: number[]; deck: number }
   /** Sudden Death: who is still in after pops or someone leaving; `winner` once it's decided (else -1). */
-  | { t: 'survivors'; tick: number; left: number[]; winner: number }
+  | { t: 'survivors'; tick: number; left: number[] }
+  /**
+   * Sudden Death: round `n` is decided. `winner` gets a round point (-1: nobody); `wins` lists every
+   * player's round wins, best first; `over`: that was the match point.
+   */
+  | { t: 'round'; tick: number; n: number; winner: number; wins: [number, number][]; over: boolean; timeUp: boolean }
   | { t: 'goal'; tick: number; team: 0 | 1; scorer: number; x: number; y: number; z: number }
   | { t: 'ballOut'; tick: number; x: number; y: number; z: number }
   | { t: 'ballReset'; tick: number }

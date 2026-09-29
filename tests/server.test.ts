@@ -171,9 +171,10 @@ describe('server', () => {
     const match = [...a.msgs].reverse().find((m): m is Extract<ServerMessage, { type: 'match' }> => m.type === 'match')!;
     expect(match.phase).toBe('playing');
     expect(match.collapse.filter((s) => s.announce).length).toBeGreaterThanOrEqual(3);
-    // Pretend the match has been going for a while, then a second player arrives.
+    // Pretend the round has been going for a while, then a second player arrives.
     const room = lobby.rooms.get(w.room.code)!;
     room.sim.matchStartedAt -= 20;
+    room.sim.sdRoundStartedAt -= 20;
     const b = new TestClient();
     await b.open();
     b.send({ type: 'hello', v: PROTOCOL_VERSION, name: 'Latey', guestId: 'sd2', join: { kind: 'quick', mode: 'suddenDeath' } });
@@ -183,7 +184,7 @@ describe('server', () => {
     const roster = lastRoster(b).players;
     expect(roster.find((p) => p.id === bw.you)?.out).toBe(true);
     expect(roster.find((p) => p.id === w.you)?.out).toBeFalsy();
-    // Nobody still in the fight was removed to make room: the extra bot waits for the next match.
+    // Nobody still in the fight was removed to make room: the extra bot waits for the next round.
     expect(roster.filter((p) => p.bot).length).toBe(5);
     a.ws.close();
     b.ws.close();
@@ -230,6 +231,41 @@ describe('server', () => {
     expect(c.w.room.code).not.toBe(a.w.room.code);
     expect(c.w.room.settings.bots).toBe(true);
     for (const x of [a, b, c]) x.c.ws.close();
+  });
+
+  it('private rooms wait in the lobby until the host starts, and go back after the match', async () => {
+    const host = new TestClient();
+    await host.open();
+    host.send({ type: 'hello', v: PROTOCOL_VERSION, name: 'Hosty', guestId: 'h1', join: { kind: 'create', settings: { mode: 'teamKnockout', bots: false } } });
+    const hw = await host.waitFor('welcome');
+    const room = lobby.rooms.get(hw.room.code)!;
+    const friend = new TestClient();
+    await friend.open();
+    friend.send({ type: 'hello', v: PROTOCOL_VERSION, name: 'Buddy', guestId: 'h2', join: { kind: 'code', code: hw.room.code } });
+    await friend.waitFor('welcome');
+    await new Promise((r) => setTimeout(r, 300));
+    // Two players in, but nothing starts until the host says so.
+    expect(room.sim.phase).toBe('waiting');
+    friend.send({ type: 'host', action: 'start' });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(room.sim.phase).toBe('waiting');
+    // The host names the teams (rude words are dropped), then starts.
+    host.send({ type: 'host', action: 'settings', settings: { teamNames: ['Gusty Bois', 'fuckers'] } });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(room.settings.teamNames).toEqual(['Gusty Bois', '']);
+    expect(room.sim.phase).toBe('waiting');
+    friend.send({ type: 'host', action: 'settings', settings: { teamNames: ['Nope', 'Nope'] } });
+    host.send({ type: 'host', action: 'start' });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(room.settings.teamNames).toEqual(['Gusty Bois', '']);
+    expect(room.sim.phase).toBe('playing');
+    // After the results the room goes back to the lobby instead of starting another match.
+    room.sim.endMatch();
+    room.sim.phaseEndsAt = room.sim.time;
+    await new Promise((r) => setTimeout(r, 150));
+    expect(room.sim.phase).toBe('waiting');
+    host.ws.close();
+    friend.ws.close();
   });
 
   it('challenge links make a private 1v1 that the first visitor joins', async () => {

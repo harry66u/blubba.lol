@@ -640,14 +640,17 @@ export const BALANCE = {
     duel: { target: 5, durationSec: 180 },
     /** One life each, everyone at 100% inflation, last tube man standing wins. */
     suddenDeath: {
-      /** Hard cap on a match; if it runs out, survivors are ranked by knockouts, then hits. */
-      durationSec: 150,
-      /** People who join this soon after the start still play; later ones watch until the next match. */
+      /** Rounds: last one standing wins a round; the first to this many round wins takes the match. */
+      roundsToWin: 3,
+      /** Hard cap on a round; if it runs out, the survivors are ranked by knockouts that round, then hits. */
+      durationSec: 100,
+      /** People who join this soon after a round starts still play it; later ones watch until the next. */
       joinGrace: 3,
-      /** A little longer than usual: everyone spawns one hit from flying. */
       spawnProtection: 3,
-      /** Pause after the last pop before the results, so everyone sees the winner. */
-      winnerDelay: 2.5,
+      /** Pause after a round is decided (the score shows) before the next one starts. */
+      roundBreak: 4.5,
+      /** Pause after the last round before the results, so everyone sees the winner. */
+      winnerDelay: 3,
       /** Rounds are short, so the results screen (replay included) is too. */
       resultsSec: 18,
       /**
@@ -656,11 +659,11 @@ export const BALANCE = {
        * crumbled away per side once the stage is done (over `deckTime` seconds).
        */
       stages: [
-        { at: 40, sink: [3], deck: 0 },
-        { at: 60, sink: [2], deck: 0 },
-        { at: 80, sink: [1], deck: 0.15 },
-        { at: 100, sink: [], deck: 0.3 },
-        { at: 120, sink: [], deck: 0.45 },
+        { at: 25, sink: [3], deck: 0 },
+        { at: 40, sink: [2], deck: 0 },
+        { at: 55, sink: [1], deck: 0.15 },
+        { at: 70, sink: [], deck: 0.3 },
+        { at: 85, sink: [], deck: 0.45 },
       ] as { at: number; sink: number[]; deck: number }[],
       deckTime: 6,
     },

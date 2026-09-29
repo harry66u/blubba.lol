@@ -88,8 +88,11 @@ describe('accounts in the game', () => {
     expect(roster.players.find((p) => p.id === w.you)?.level).toBe(1);
     expect(roster.players.find((p) => p.bot)?.cos).toBeTruthy();
 
+    // Private rooms wait for the host: start the match.
+    c.send({ type: 'host', action: 'start' });
     // Pretend we played a full match with some knockouts, then end it.
     await new Promise((r) => setTimeout(r, 100));
+    expect(room.sim.phase).toBe('playing');
     room.sim.matchStartedAt = room.sim.time - 200;
     me.joinedAt = room.sim.time - 200;
     me.stats.shots = 20;

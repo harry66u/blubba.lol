@@ -209,6 +209,7 @@ export class Lobby {
       // A private 1v1: the code goes out as a link and the first person to open it is your opponent.
       room = new Room(this.newCode(), true, { mode: 'duel' }, this.store);
       room.challenge = true;
+      room.sim.autoStart = true;
       this.rooms.set(room.code, room);
     } else {
       const mode = typeof join.mode === 'string' && (MODE_IDS as readonly string[]).includes(join.mode) ? join.mode : 'knockout';
@@ -261,6 +262,7 @@ export class Lobby {
   private startRanked(a: Queued, b: Queued): void {
     const room = new Room(this.newCode(), true, { mode: 'duel', bots: false }, this.store);
     room.ranked = true;
+    room.sim.autoStart = true;
     room.sim.fixedLineup = true;
     this.rooms.set(room.code, room);
     for (const q of [a, b]) {

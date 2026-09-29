@@ -1,3 +1,4 @@
+import { BALANCE } from '../src/shared/balance';
 /**
  * Plays full bot-only matches of every mode and prints how they went (scores, goals, pump fill,
  * match length, map shrinks, and for Sudden Death who was left standing). Run with:
@@ -31,7 +32,7 @@ for (const mode of MODE_IDS.filter((m) => !only || m === only)) {
       // Supply drops and the newer gadgets, to see bots use them.
       const extra: Record<string, number> = { loot: 0, lootGrab: 0, mine: 0, helium: 0, tornado: 0 };
       const start = sim.time;
-      while (sim.phase !== 'results' && sim.time - start < 400) {
+      while (sim.phase !== 'results' && sim.time - start < (mode === 'suddenDeath' ? 1600 : 400)) {
         sim.step();
         for (const e of sim.drainEvents()) {
           if (e.t === 'goal') goals++;
@@ -52,13 +53,12 @@ for (const mode of MODE_IDS.filter((m) => !only || m === only)) {
       const pump = sim.pumpGame ? ` fill=${sim.pumpGame.fill.map((f) => Math.round(f * 100)).join('/')}%` : '';
       let sd = '';
       if (mode === 'suddenDeath') {
-        const surv = r?.survivors ?? [];
+        // First to N round wins: the winner must have them.
         const winner = r?.standings[0];
-        const ok = !!r && !!winner && r.winnerId === winner.id && (surv.length <= 1 ? true : len >= sim.durationSec - 1);
+        const target = BALANCE.modes.suddenDeath.roundsToWin;
+        const ok = !!r && !!winner && r.winnerId === winner.id && winner.roundWins === target;
         if (!ok) failures++;
-        sd =
-          ` survivors=${surv.length} winner=${winner?.name}(${winner?.stats.kos} KO)` +
-          ` ${surv.length <= 1 ? 'LAST STANDING' : 'TIME UP (tie-break)'} left=[${left.join(' ')}]${ok ? '' : ' FAILED'}`;
+        sd = ` rounds=${r?.rounds?.played} winner=${winner?.name}(${winner?.roundWins} rounds, ${winner?.stats.kos} KO) left=[${left.slice(-4).join(' ')}]${ok ? '' : ' FAILED'}`;
       }
       console.log(
         `${mode.padEnd(13)} ${mapId.padEnd(12)} ${String(len).padStart(3)}s kos=${kos} falls=${falls} ults=${ults} firstKo=${firstKoAt}s shrinks=[${shrinks.join(',')}]` +

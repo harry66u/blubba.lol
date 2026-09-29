@@ -469,10 +469,28 @@ export interface PauseCallbacks {
   onSettings: () => void;
   onHowTo: () => void;
   onCopyLink: () => void;
-  onHost: (action: 'restart' | { durationSec?: number; bots?: boolean; events?: EventFrequency; mode?: ModeId; mapId?: string }) => void;
+  onHost: (action: 'restart' | 'start' | { durationSec?: number; bots?: boolean; events?: EventFrequency; mode?: ModeId; mapId?: string; teamNames?: [string, string] }) => void;
 }
 
-export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCallbacks): HTMLElement {
+/** Funny team name pairs for the 🎲 button. */
+const TEAM_NAME_PAIRS: [string, string][] = [
+  ['Gusty Bois', 'Air Heads'],
+  ['Big Blowers', 'Hot Air'],
+  ['Floppy Arms', 'Noodle Gang'],
+  ['Puff Daddies', 'Wind Bags'],
+  ['Team Pump', 'Team Pop'],
+  ['Squeakers', 'Wobblers'],
+  ['Balloon Boys', 'Blimp Squad'],
+  ['Jacked', 'Deflated'],
+];
+
+/** The private-room lobby: waiting for the host's START, and how many are in. */
+export interface LobbyState {
+  waiting: boolean;
+  players: number;
+}
+
+export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCallbacks, lobby: LobbyState = { waiting: false, players: 0 }): HTMLElement {
   const panel = el('div', { class: 'panel pause-panel interactive' });
   panel.append(el('h2', { text: 'Paused' }));
   panel.append(el('button', { class: 'btn big', text: 'RESUME', on: { click: cb.onResume } }));
@@ -530,11 +548,59 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
         events.append(o);
       }
       events.addEventListener('change', () => cb.onHost({ events: events.value as EventFrequency }));
+      // Team modes: the host names the teams (the server filters the names).
+      let teamRow: HTMLElement | null = null;
+      if (MODE_INFO[room.settings.mode].teams) {
+        const names = room.settings.teamNames ?? ['', ''];
+        const inputs = [0, 1].map((t) =>
+          el('input', {
+            class: 'field team-name',
+            attrs: { type: 'text', maxlength: '16', value: names[t] ?? '', placeholder: t === 0 ? 'RED' : 'BLUE', 'aria-label': `Team ${t + 1} name`, spellcheck: 'false' },
+          }),
+        ) as HTMLInputElement[];
+        const send = () => cb.onHost({ teamNames: [inputs[0].value, inputs[1].value] });
+        for (const i of inputs) {
+          i.addEventListener('change', send);
+          i.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') i.blur();
+          });
+        }
+        const dice = el('button', {
+          class: 'btn small ghost',
+          text: '🎲',
+          attrs: { title: 'Random team names', 'aria-label': 'Random team names' },
+          on: {
+            click: () => {
+              const pair = TEAM_NAME_PAIRS[Math.floor(Math.random() * TEAM_NAME_PAIRS.length)];
+              inputs[0].value = pair[0];
+              inputs[1].value = pair[1];
+              send();
+            },
+          },
+        });
+        teamRow = el('div', { class: 'host-field team-names' }, el('span', { class: 'label', text: 'Team names' }), el('div', { class: 'row' }, inputs[0], inputs[1], dice));
+      }
+      const top = lobby.waiting
+        ? el('button', {
+            class: 'btn big green start-match',
+            text: lobby.players >= 2 ? `START · ${lobby.players} IN` : 'START MATCH',
+            attrs: lobby.players >= 2 ? {} : { disabled: 'true', title: 'Needs at least 2 players: invite friends or switch bots on.' },
+            on: { click: () => cb.onHost('start') },
+          })
+        : null;
       panel.append(
         el(
           'div',
           { class: 'host-box' },
-          el('div', { class: 'host-head' }, el('span', { text: '👑 Host controls' }), el('button', { class: 'btn small yellow', text: 'Restart match', on: { click: () => cb.onHost('restart') } })),
+          top,
+          lobby.waiting && lobby.players < 2 ? el('div', { class: 'small-note', text: 'Waiting for friends. Share the invite link, or switch bots on to play with bots.' }) : null,
+          el(
+            'div',
+            { class: 'host-head' },
+            el('span', { text: '👑 Host controls' }),
+            lobby.waiting ? null : el('button', { class: 'btn small yellow', text: 'Restart match', on: { click: () => cb.onHost('restart') } }),
+          ),
           el(
             'div',
             { class: 'host-grid' },
@@ -543,6 +609,7 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
             field('Match length', time),
             field('Random events', events),
             el('label', { class: 'host-field toggle-field' }, bots, el('span', { text: 'Fill empty spots with bots' })),
+            teamRow,
           ),
         ),
       );
@@ -767,8 +834,8 @@ export function buildResults(
     }
     const team = roster.get(s.id)?.team ?? -1;
     const color = hexColor(teams && team >= 0 ? teams.colors[team] : (PLAYER_COLORS[roster.get(s.id)?.color ?? 0]?.hex ?? 0xffffff));
-    // Sudden Death ranks by who lasted longest, so the podium shows knockouts instead of points.
-    const line = result.survivors ? (result.survivors.includes(s.id) ? `🏆 ${s.stats.kos} KO${s.stats.kos === 1 ? '' : 's'}` : `${s.stats.kos} KO${s.stats.kos === 1 ? '' : 's'}`) : `${s.score} pts`;
+    // Sudden Death ranks by rounds won, so the podium shows those instead of points.
+    const line = result.rounds ? `${s.roundWins ?? 0} round${s.roundWins === 1 ? '' : 's'} won` : `${s.score} pts`;
     const place = places[i];
     podium.append(
       el(
@@ -794,17 +861,10 @@ export function buildResults(
   let title = won ? 'YOU WIN!' : `${winner?.name ?? 'Nobody'} wins!`;
   let sub = me ? (won ? 'Nobody could keep you on the ground.' : `You finished ${ordinal(myPlace)} of ${result.standings.length}`) : '';
   let teamLine: HTMLElement | null = null;
-  if (result.survivors) {
-    // Sudden Death: say how it was won.
-    const n = result.survivors.length;
-    const how =
-      n === 1
-        ? winner?.id === youId
-          ? "You're the last tube man standing!"
-          : 'Last tube man standing!'
-        : n === 0
-          ? 'The last ones went out together: most knockouts wins.'
-          : `Time's up! Most knockouts of the ${n} still standing wins.`;
+  if (result.rounds) {
+    // Sudden Death: first to N round wins; the score line.
+    const top = result.standings.filter((s) => (s.roundWins ?? 0) > 0).slice(0, 4);
+    const how = `First to ${result.rounds.target} rounds · ${result.rounds.played} played` + (top.length ? ` · ${top.map((s) => `${s.id === youId ? 'You' : s.name} ${s.roundWins}`).join(' · ')}` : '');
     teamLine = el('div', { class: 'team-result', style: 'text-align:center', text: how });
   }
   const tr = result.teams;
@@ -828,11 +888,9 @@ export function buildResults(
     if (animate) countUp(value, v, fmt, 700 + i * 120);
     stats.append(el('div', { class: 'stat' }, el('div', { class: 'ico', text: icon, attrs: { 'aria-hidden': 'true' } }), el('div', {}, value, el('div', { class: 'k', text: k }))));
   };
-  if (me && result.survivors) {
-    // Sudden Death: how far you got.
-    const survived = result.survivors.includes(me.id);
-    const n = result.standings.length;
-    addStat('🏁', 'You finished', result.standings.indexOf(me) + 1, (v) => (survived ? (Math.round(v) === 1 ? '1st 🏆' : 'Still standing') : `#${Math.round(v)} of ${n}`), 0);
+  if (me && result.rounds) {
+    // Sudden Death: rounds you won.
+    addStat('🏁', 'Rounds you won', me.roundWins ?? 0, (v) => `${Math.round(v)} of ${result.rounds!.target}`, 0);
   }
   if (me) {
     const whole = (v: number) => String(Math.round(v));

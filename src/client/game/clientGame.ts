@@ -43,7 +43,7 @@ import {
   type ServerMessage,
   type Snapshot,
 } from '../../shared/protocol';
-import { type MatchPhase, type MatchResult, rayCapsule } from '../../shared/game/sim';
+import { type MatchPhase, type MatchResult, type RoundInfo, rayCapsule } from '../../shared/game/sim';
 import { World } from '../../shared/world';
 import {
   DEFAULT_LOADOUT,
@@ -248,6 +248,9 @@ export class ClientGame {
   private spectateId = -1;
   /** Sudden Death: the winner was already called out this match. */
   private sdWinnerShown = false;
+  /** Sudden Death: the round (from the server) and everyone's round wins so far. */
+  private round: RoundInfo | null = null;
+  private roundWins = new Map<number, number>();
   private lastChaosShown: ChaosEvent | null = null;
   readonly clock = new ServerClock();
   pred: PlayerState = createPlayerState();
@@ -579,21 +582,27 @@ export class ClientGame {
         if (msg.phase === 'playing' && this.match.phase !== 'playing') {
           this.spectateId = -1;
           this.sdWinnerShown = false;
+          this.roundWins.clear();
         }
-        this.match = { phase: msg.phase, endsAtTick: msg.endsAtTick, number: msg.number, result: msg.result };
-        // The server's collapse plan: our world sinks and crumbles exactly like its world.
-        this.world.setCollapse(msg.collapse ?? []);
-        if (msg.phase === 'playing') this.announcer.say(this.mode === 'suddenDeath' ? 'Sudden death! Go!' : 'Go!', 2);
+        {
+          // Sudden Death: a new round starts everyone back in.
+          const next = msg.round ?? null;
+          const newRound = !!next && !next.intermission && (!this.round || this.round.n !== next.n || this.round.intermission);
+          this.round = next;
+          if (newRound) this.spectateId = -1;
+          this.match = { phase: msg.phase, endsAtTick: msg.endsAtTick, number: msg.number, result: msg.result };
+          // The server's collapse plan: our world sinks and crumbles exactly like its world.
+          this.world.setCollapse(msg.collapse ?? []);
+          if (msg.phase === 'playing' && (!next || newRound)) this.announcer.say(next ? `Round ${next.n}! Go!` : 'Go!', 2);
+        }
         if (msg.phase === 'results' && msg.result) {
           const teams = msg.result.teams;
           if (teams) {
             const mine = this.teamOf(this.youId);
             const names = this.teamNames();
             this.announcer.say(teams.winner < 0 ? "It's a draw!" : teams.winner === mine ? 'Your team wins!' : `${names[teams.winner]} team wins!`, 3);
-          } else if (msg.result.survivors) {
-            // Sudden Death: the winner was already called out if they were the last one standing.
-            const w = msg.result.standings[0];
-            if (w && msg.result.survivors.length > 1) this.announcer.say(`Time's up! ${w.id === this.youId ? 'You win!' : `${w.name} wins!`}`, 3);
+          } else if (msg.result.rounds) {
+            // Sudden Death: the last round's callout already named the winner.
           } else {
             const w = msg.result.standings[0];
             this.announcer.say(w ? `Time's up! ${w.id === this.youId ? 'You win!' : `${w.name} wins!`}` : "Time's up!", 3);
@@ -898,7 +907,24 @@ export class ClientGame {
   }
 
   teamNames(): string[] {
-    return this.settings.colorblindTeams ? ['ORANGE', 'BLUE'] : ['RED', 'BLUE'];
+    const def = this.settings.colorblindTeams ? ['ORANGE', 'BLUE'] : ['RED', 'BLUE'];
+    // Private rooms: the host can name the teams.
+    const named = this.room?.settings.teamNames;
+    return def.map((d, i) => named?.[i]?.toUpperCase() || d);
+  }
+
+  /** Private room, waiting for the host to press START (nothing counts yet). */
+  get inLobby(): boolean {
+    return !!this.room?.isPrivate && !this.room.challenge && !this.room.ranked && this.match.phase === 'waiting';
+  }
+
+  get isHost(): boolean {
+    return !!this.room?.isPrivate && this.room.hostId === this.youId;
+  }
+
+  /** Host: start the match from the lobby. */
+  startMatch(): void {
+    if (this.inLobby && this.isHost) this.net.send({ type: 'host', action: 'start' });
   }
 
   private teamHex(team: number): string {
@@ -1300,7 +1326,10 @@ export class ClientGame {
         break;
       }
       case 'survivors':
-        this.survivorsCallout(e.left, e.winner);
+        this.survivorsCallout(e.left);
+        break;
+      case 'round':
+        this.roundCallout(e);
         break;
       case 'fizzle': {
         const localKey = this.localByServer.get(e.id);
@@ -1763,25 +1792,42 @@ export class ClientGame {
   }
 
   /** Sudden Death: players still in after someone went out (and the winner, once it's decided). */
-  private survivorsCallout(left: number[], w: number): void {
+  /**
+   * Sudden Death: a round was decided. The winner gets the round (the last one standing, or the
+   * tie-break when time ran out), everyone sees the score, and the match point wins it all.
+   */
+  private roundCallout(e: Extract<GameEvent, { t: 'round' }>): void {
+    this.roundWins = new Map(e.wins);
+    const you = this.youId;
+    const w = e.winner;
+    const mine = w === you;
+    const who = (id: number) => (id === you ? 'You' : this.nameOf(id));
+    const score = e.wins
+      .filter(([, n]) => n > 0)
+      .slice(0, 4)
+      .map(([id, n]) => `${who(id)} ${n}`)
+      .join(' · ');
+    if (e.over && w >= 0) {
+      this.hud.callout(mine ? 'YOU WIN THE MATCH!' : `${this.nameOf(w).toUpperCase()} WINS!`, score, 4, '#ffd60a');
+      this.announcer.say(mine ? 'You win the match!' : `${this.nameOf(w)} wins the match!`, 5);
+    } else {
+      const title = w < 0 ? `ROUND ${e.n}: NOBODY` : mine ? `ROUND ${e.n} IS YOURS!` : `ROUND ${e.n}: ${this.nameOf(w).toUpperCase()}`;
+      this.hud.callout(title, `${e.timeUp ? "Time's up · " : ''}${score || 'No points yet'}`, 3.5, '#ff5fd2');
+      this.announcer.say(w < 0 ? 'Nobody takes the round!' : mine ? 'You win the round!' : `${this.nameOf(w)} wins the round!`, 4);
+    }
+    this.audio.goalHorn();
+    const p = w >= 0 ? this.posOf(w) : null;
+    if (p) this.effects.confettiBurst(p.x, p.y + 3, p.z, e.over ? 160 : 90);
+    if (mine) this.hud.flash('rgba(255, 214, 10, 0.5)', 600);
+    if (w >= 0) {
+      this.spectateId = w;
+      this.hud.addKill(`🏁 Round ${e.n}: <b style="color:${hexColor(this.colorOf(w))}">${esc(this.nameOf(w))}</b>${e.over ? ' wins the match!' : ''}`, mine);
+    }
+  }
+
+  private survivorsCallout(left: number[]): void {
     const you = this.youId;
     const n = left.length;
-    if (w >= 0) {
-      if (this.sdWinnerShown) return;
-      this.sdWinnerShown = true;
-      const mine = w === you;
-      // Usually the last one standing; rarely the last ones go out together and the tie-break decides.
-      const how = n === 1 ? 'the last tube man standing' : 'the last one out';
-      this.hud.callout(mine ? 'WINNER!' : `${this.nameOf(w).toUpperCase()} WINS!`, mine ? `You're ${how}!` : `${this.nameOf(w)} is ${how}!`, 3.5, '#ffd60a');
-      this.announcer.say(mine ? 'Winner! You are the last one standing!' : `Winner! ${this.nameOf(w)}!`, 5);
-      this.audio.goalHorn();
-      const p = this.posOf(w);
-      if (p) this.effects.confettiBurst(p.x, p.y + 3, p.z, 160);
-      if (mine) this.hud.flash('rgba(255, 214, 10, 0.5)', 600);
-      this.spectateId = w;
-      this.hud.addKill(`🏆 <b style="color:${hexColor(this.colorOf(w))}">${esc(this.nameOf(w))}</b> wins!`, mine);
-      return;
-    }
     if (n === 0) return;
     const youIn = left.includes(you);
     if (n === 2) {
@@ -2884,10 +2930,22 @@ export class ClientGame {
 
     const me = this.roster.get(this.youId);
     let sub = '';
-    if (this.match.phase === 'waiting') sub = 'Waiting for another player...';
+    if (this.inLobby) {
+      const n = this.roster.size;
+      const hostName = this.room ? this.nameOf(this.room.hostId) : 'the host';
+      sub = this.isHost
+        ? n >= 2
+          ? `Lobby · ${n} in · press ENTER (or START in the menu) when everyone's here`
+          : 'Lobby · waiting for friends (or switch bots on in the menu)'
+        : `Lobby · ${n} in · waiting for ${hostName} to start`;
+    } else if (this.match.phase === 'waiting') sub = 'Waiting for another player...';
     else if (this.match.phase === 'results') sub = 'Match over!';
     else if (me && this.mode === 'suddenDeath') {
-      sub = me.out ? 'Spectating' : `One life · ${me.kos} KO${me.kos === 1 ? '' : 's'}`;
+      const r = this.round;
+      const mine = this.roundWins.get(me.id) ?? 0;
+      const target = r?.target ?? BALANCE.modes.suddenDeath.roundsToWin;
+      const pips = '●'.repeat(Math.min(mine, target)) + '○'.repeat(Math.max(0, target - mine));
+      sub = `Round ${r?.n ?? 1} · ${pips} · ${me.out ? 'spectating' : 'one life'}`;
     } else if (me && this.mode === 'duel') {
       const rival = [...this.roster.values()].find((r) => r.id !== me.id);
       sub = rival ? `You ${me.kos} – ${rival.kos} ${rival.name}${rival.bot ? ' (warm-up bot)' : ''} · first to ${BALANCE.modes.duel.target}` : 'Waiting for a rival...';

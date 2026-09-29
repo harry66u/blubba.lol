@@ -39,13 +39,15 @@ function pop(sim: GameSim, ds: Driver[], victim: SimPlayer, by?: SimPlayer): Gam
 const survivorEvents = (ev: GameEvent[]) => ev.filter((e): e is Extract<GameEvent, { t: 'survivors' }> => e.t === 'survivors');
 
 describe('sudden death', () => {
-  it('everyone starts at 100% inflation, and nobody gets a second life', () => {
+  const roundEvents = (ev: GameEvent[]) => ev.filter((e): e is Extract<GameEvent, { t: 'round' }> => e.t === 'round');
+
+  it('players start at normal inflation, and nobody gets a second life in a round', () => {
     const { sim, ps, ds } = setup(3);
-    for (const p of ps) expect(p.state.inflation).toBe(BALANCE.inflation.max);
+    for (const p of ps) expect(p.state.inflation).toBe(0);
     expect(sim.durationSec).toBe(SD.durationSec);
     expect(sim.eventMult > 0 && sim.chaosNext === null).toBe(true);
     const ev = pop(sim, ds, ps[0], ps[1]);
-    expect(survivorEvents(ev).map((e) => [e.left, e.winner])).toEqual([[[ps[1].id, ps[2].id], -1]]);
+    expect(survivorEvents(ev).map((e) => e.left)).toEqual([[ps[1].id, ps[2].id]]);
     // Well past the normal respawn delay: still out.
     run(sim, ds, Math.ceil((BALANCE.match.respawnDelay + 3) * 60));
     expect(ps[0].state.mode).toBe(MODE_DEAD);
@@ -58,36 +60,37 @@ describe('sudden death', () => {
     });
   });
 
-  it('the last one standing wins, and the rest place by how long they lasted', () => {
-    const { sim, ps, ds } = setup(4);
-    const [a, b, c, d] = ps;
-    pop(sim, ds, b, a);
-    run(sim, ds, 30);
-    pop(sim, ds, c); // fell off with nobody's help
-    run(sim, ds, 30);
-    const ev = pop(sim, ds, d, a);
-    const last = survivorEvents(ev).pop()!;
-    expect(last.left).toEqual([a.id]);
-    expect(last.winner).toBe(a.id);
-    // A short victory beat, then the results.
-    expect(sim.phase).toBe('playing');
+  it('the last one standing wins the round, everyone comes back, and the first to 3 rounds wins', () => {
+    const { sim, ps, ds } = setup(3);
+    const [a, b, c] = ps;
+    for (let round = 1; round <= SD.roundsToWin; round++) {
+      expect(sim.roundInfo()).toEqual({ n: round, target: SD.roundsToWin, intermission: false });
+      pop(sim, ds, b, a);
+      run(sim, ds, 20);
+      const ev = pop(sim, ds, c);
+      const r = roundEvents(ev).pop()!;
+      expect(r).toMatchObject({ n: round, winner: a.id, over: round === SD.roundsToWin, timeUp: false });
+      expect(a.roundWins).toBe(round);
+      expect(sim.roundInfo()!.intermission).toBe(true);
+      if (round < SD.roundsToWin) {
+        // A short break, then everyone is back in (at normal inflation) for the next round.
+        run(sim, ds, Math.ceil(SD.roundBreak * 60) + 2);
+        expect(sim.phase).toBe('playing');
+        for (const p of ps) {
+          expect(p.state.mode).not.toBe(MODE_DEAD);
+          expect(sim.isOut(p)).toBe(false);
+        }
+      }
+    }
     run(sim, ds, Math.ceil(SD.winnerDelay * 60) + 2);
     expect(sim.phase).toBe('results');
-    const r = sim.lastResult!;
-    expect(r.winnerId).toBe(a.id);
-    expect(r.survivors).toEqual([a.id]);
-    expect(r.standings.map((s) => s.id)).toEqual([a.id, d.id, c.id, b.id]);
-    // Results are shorter than usual, then everyone is back in, fully inflated.
-    run(sim, ds, Math.ceil(SD.resultsSec * 60) + 2);
-    expect(sim.phase).toBe('playing');
-    for (const p of ps) {
-      expect(p.state.mode).not.toBe(MODE_DEAD);
-      expect(p.state.inflation).toBe(BALANCE.inflation.max);
-      expect(sim.isOut(p)).toBe(false);
-    }
+    const res = sim.lastResult!;
+    expect(res.winnerId).toBe(a.id);
+    expect(res.rounds).toEqual({ target: SD.roundsToWin, played: SD.roundsToWin });
+    expect(res.standings[0]).toMatchObject({ id: a.id, roundWins: SD.roundsToWin });
   });
 
-  it('when time runs out, the most knockouts among the survivors wins', () => {
+  it('when a round runs out of time, the most knockouts that round wins it, then hits', () => {
     const { sim, ps, ds } = setup(4);
     const [a, b, c, d] = ps;
     pop(sim, ds, c, b);
@@ -95,16 +98,17 @@ describe('sudden death', () => {
     b.stats.hits = 9;
     a.stats.hits = 2;
     // Tied on knockouts: more hits landed wins. Keep both safe until the buzzer.
+    const ev: GameEvent[] = [];
     run(sim, ds, Math.ceil((sim.phaseEndsAt - sim.time) * 60) + 2, () => {
-      for (const p of [a, b]) Object.assign(p.state, { px: 0, py: 0.01, pz: 0, vx: 0, vy: 0, vz: 0, onGround: 1, spawnProt: 1 });
+      for (const p of [a, b]) Object.assign(p.state, { px: p.id * 2, py: 0.01, pz: 0, vx: 0, vy: 0, vz: 0, onGround: 1, spawnProt: 1 });
+      ev.push(...sim.drainEvents());
     });
-    expect(sim.phase).toBe('results');
-    const r = sim.lastResult!;
-    expect(r.survivors!.sort()).toEqual([a.id, b.id].sort());
-    expect(r.winnerId).toBe(b.id);
+    expect(roundEvents(ev).pop()).toMatchObject({ n: 1, winner: b.id, timeUp: true, over: false });
+    expect(b.roundWins).toBe(1);
+    expect(sim.phase).toBe('playing');
   });
 
-  it('someone who joins mid-match watches until the next one', () => {
+  it('someone who joins mid-round watches until the next round', () => {
     const { sim, ps, ds } = setup(3);
     run(sim, ds, Math.ceil((SD.joinGrace + 1) * 60));
     const late = sim.addPlayer('late');
@@ -114,14 +118,11 @@ describe('sudden death', () => {
     expect(sim.isOut(late)).toBe(true);
     run(sim, all, 5 * 60);
     expect(late.state.mode).toBe(MODE_DEAD);
-    // The late joiner doesn't count as a survivor: two pops end it.
+    // The late joiner doesn't count as a survivor: two pops decide the round.
     pop(sim, all, ps[1], ps[0]);
     const ev = pop(sim, all, ps[2], ps[0]);
     expect(survivorEvents(ev).pop()!.left).toEqual([ps[0].id]);
-    run(sim, all, Math.ceil(SD.winnerDelay * 60) + 2);
-    expect(sim.phase).toBe('results');
-    expect(sim.lastResult!.standings.map((s) => s.id).pop()).toBe(late.id);
-    run(sim, all, Math.ceil(SD.resultsSec * 60) + 2);
+    run(sim, all, Math.ceil(SD.roundBreak * 60) + 2);
     expect(sim.phase).toBe('playing');
     expect(late.state.mode).not.toBe(MODE_DEAD);
     expect(sim.isOut(late)).toBe(false);
@@ -135,18 +136,17 @@ describe('sudden death', () => {
     expect(sim.isOut(p)).toBe(false);
   });
 
-  it('the map starts shrinking at 40 s and keeps shrinking', () => {
+  it('the map starts shrinking 25 s into a round and keeps shrinking', () => {
     const { sim, ps, ds } = setup(2);
     const t0 = sim.matchStartedAt;
     const ev: GameEvent[] = [];
-    // Keep both players safe in the middle so the match runs to the cap.
+    // Keep both players safe in the middle so the round runs to the cap.
     run(sim, ds, Math.ceil(SD.durationSec * 60) - 30, () => {
       for (const p of ps) Object.assign(p.state, { px: p.id * 2, py: 0.01, pz: 0, vx: 0, vy: 0, vz: 0, onGround: 1, spawnProt: 1 });
       ev.push(...sim.drainEvents());
     });
     const shrinks = ev.filter((e): e is Extract<GameEvent, { t: 'shrink' }> => e.t === 'shrink');
-    // Sky Motors has outer islands (order 3), side islands (order 2) and no order 1.
-    expect(shrinks.map((e) => Math.round(e.startTick * sim.dt - t0))).toEqual([40, 60, 80, 100, 120]);
+    expect(shrinks.map((e) => Math.round(e.startTick * sim.dt - t0))).toEqual(SD.stages.map((st) => st.at));
     for (const e of shrinks) expect(Math.round((e.startTick - e.tick) * sim.dt)).toBe(BALANCE.shrink.warning);
     expect(shrinks[0].sink).toEqual([3]);
     expect(shrinks[1].sink).toEqual([2]);
@@ -156,20 +156,20 @@ describe('sudden death', () => {
     expect(sim.world.solids.filter((s) => s.collapse > 0).every((s) => !s.enabled)).toBe(true);
   });
 
-  it('bots finish a match with a winner on every knockout map', () => {
-    for (const id of KNOCKOUT_MAPS) {
+  it('bots play rounds until someone has 3 round wins', () => {
+    for (const id of ['dealership', 'candy']) {
       const sim = new GameSim({ map: getMap(id), mode: 'suddenDeath' });
-      for (let i = 0; i < 6; i++) sim.addBot(0.5);
+      for (let i = 0; i < 4; i++) sim.addBot(0.6);
       const start = sim.time;
-      while (sim.phase === 'playing' && sim.time - start < SD.durationSec + 5) {
+      while (sim.phase === 'playing' && sim.time - start < 12 * (SD.durationSec + SD.roundBreak)) {
         sim.step();
         sim.drainEvents();
       }
       expect(sim.phase, id).toBe('results');
       const r = sim.lastResult!;
       expect(r.winnerId, id).toBe(r.standings[0].id);
-      // Last one standing (or the last ones went out together), or time ran out.
-      expect(r.survivors!.length <= 1 || sim.time - start >= SD.durationSec - 0.1, id).toBe(true);
+      expect(r.standings[0].roundWins, id).toBe(SD.roundsToWin);
+      expect(KNOCKOUT_MAPS).toContain(id);
     }
   });
 

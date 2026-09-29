@@ -126,10 +126,14 @@ export interface SimPlayer {
   /** Looks only; never read by the simulation. */
   cos: Cosmetics;
   /**
-   * Sudden Death: when this player was popped out of the match (Infinity while still in;
+   * Sudden Death: when this player was popped out of the current round (Infinity while still in;
    * -Infinity when they joined after it started and wait for the next one).
    */
   outAt: number;
+  /** Sudden Death: rounds won this match (first to BALANCE.modes.suddenDeath.roundsToWin takes it). */
+  roundWins: number;
+  /** Sudden Death: knockouts and hits at the start of this round (the round's time-limit tie-break). */
+  roundBase: { kos: number; hits: number };
 }
 
 /** Thrown or fired objects. Kind 0 is a weapon shot; the rest are utilities. */
@@ -256,12 +260,23 @@ export interface MatchResult {
   mode: ModeId;
   /** Team modes: final team scores (goals, knockouts, or pump fill %) and the winning team (-1 = draw). */
   teams: { scores: [number, number]; winner: number } | null;
-  standings: { id: number; name: string; score: number; stats: MatchStats; isBot: boolean }[];
+  /** Sudden Death standings also carry each player's round wins. */
+  standings: { id: number; name: string; score: number; stats: MatchStats; isBot: boolean; roundWins?: number }[];
   longestLaunch: { id: number; distance: number } | null;
   awards: MatchAward[];
   replay: ReplayData | null;
-  /** Sudden Death: who was still standing when the match ended (one id = last one standing). */
-  survivors?: number[];
+  /** Sudden Death: round wins needed to take the match, and how many rounds were played. */
+  rounds?: { target: number; played: number };
+}
+
+/** Sudden Death round state for clients (sent with the match message). */
+export interface RoundInfo {
+  /** Current round (1 = first). */
+  n: number;
+  /** Round wins needed to take the match. */
+  target: number;
+  /** The round is decided and the next one (or the results) is coming up. */
+  intermission: boolean;
 }
 
 /**
@@ -296,6 +311,12 @@ export class GameSim {
   mode: ModeId;
   durationSec: number;
   phase: MatchPhase = 'waiting';
+  /**
+   * Starts a match by itself once two players are in, and the next one after the results (public
+   * rooms). Private rooms turn this off: they sit in the lobby ('waiting', where nothing counts)
+   * until the host calls startMatch, and go back there after every match.
+   */
+  autoStart = true;
   /** Ranked: one match with the same two players, no joining, leaving forfeits. */
   fixedLineup = false;
   matchStartedAt = 0;
@@ -344,9 +365,16 @@ export class GameSim {
   private pendingEnd = false;
   /** Next stage of the world's collapse plan to announce. */
   private shrinkNext = 0;
-  /** Sudden Death: players still in (for "N left" events) and when the match wraps up. */
+  /** Sudden Death: players still in (for "N left" events) and when the current round wraps up. */
   private sdAlive = 0;
   private sdEndAt = Infinity;
+  /** Sudden Death: the current round (1 = first; 0 before a match) and when it started. */
+  sdRound = 0;
+  sdRoundStartedAt = 0;
+  /** Sudden Death: the round is decided; the next round (or the results) starts at sdEndAt. */
+  sdIntermission = false;
+  /** Sudden Death: someone reached the round wins needed, so the results follow this round. */
+  private sdMatchOver = false;
   private readonly env: Environment = { ...NORMAL_ENV };
   /** Rolling recording of the last few seconds (for the longest-launch replay). */
   private replayBuf: number[][] = [];
@@ -427,12 +455,14 @@ export class GameSim {
       savedInflation: -1,
       cos: { ...(opts.cos ?? DEFAULT_COSMETICS) },
       outAt: Infinity,
+      roundWins: 0,
+      roundBase: { kos: 0, hits: 0 },
     };
     p.weapon = computeWeaponStats(p.loadout.weapon, p.loadout.parts);
     if (this.teams) p.team = opts.team ?? this.smallerTeam();
     this.players.set(id, p);
-    if (this.suddenDeath && this.phase === 'playing' && this.time > this.matchStartedAt + BALANCE.modes.suddenDeath.joinGrace) {
-      // Sudden Death is one life per match: late arrivals watch until the next one.
+    if (this.suddenDeath && this.phase === 'playing' && (this.sdIntermission || this.time > this.sdRoundStartedAt + BALANCE.modes.suddenDeath.joinGrace)) {
+      // Sudden Death is one life per round: late arrivals watch until the next round.
       p.outAt = -Infinity;
       p.respawnAt = Infinity;
     } else this.respawn(p);
@@ -528,9 +558,20 @@ export class GameSim {
     return this.mode === 'suddenDeath';
   }
 
-  /** Sudden Death: popped out of this match, or waiting for the next one. */
+  /** Sudden Death: popped out of this round, or waiting for the next one. */
   isOut(p: SimPlayer): boolean {
     return this.suddenDeath && p.outAt !== Infinity;
+  }
+
+  /** Sudden Death round state for clients (null in other modes or outside a match). */
+  roundInfo(): RoundInfo | null {
+    if (!this.suddenDeath || this.phase === 'waiting' || this.sdRound === 0) return null;
+    return { n: this.sdRound, target: BALANCE.modes.suddenDeath.roundsToWin, intermission: this.sdIntermission || this.phase === 'results' };
+  }
+
+  /** The host can start a match: the room is in the lobby and there's someone to play against. */
+  canStart(): boolean {
+    return this.phase === 'waiting' && this.players.size >= 2;
   }
 
   private smallerTeam(): number {
@@ -2193,8 +2234,14 @@ export class GameSim {
   // --- Modes -----------------------------------------------------------------------------
 
   private stepModes(): void {
-    if (this.phase !== 'playing') return;
     const ball = this.ballGame;
+    if (ball && this.phase === 'waiting') {
+      // In the lobby the ball can be knocked around, but a goal doesn't count: it just goes back.
+      const ev = ball.step(this.dt, this.time, this.players.values());
+      if (ev?.kind === 'goal') this.onBallEvent({ kind: 'out' });
+      else if (ev) this.onBallEvent(ev);
+    }
+    if (this.phase !== 'playing') return;
     if (ball) {
       const ev = ball.step(this.dt, this.time, this.players.values());
       if (ev) this.onBallEvent(ev);
@@ -2633,9 +2680,12 @@ export class GameSim {
       p.nemesis = killer.id;
     }
     if (killer && p.launchBy === killer.id) this.finishLaunch(p, true);
-    p.stats.deaths++;
-    p.stats.timesPopped++;
-    if (!killer) p.stats.falls++;
+    // In the lobby (waiting for the host, or for a second player) knockouts aren't recorded.
+    if (this.phase !== 'waiting') {
+      p.stats.deaths++;
+      p.stats.timesPopped++;
+      if (!killer) p.stats.falls++;
+    }
     p.streak = 0;
     this.events.push({
       t: 'ko',
@@ -2662,7 +2712,7 @@ export class GameSim {
     p.chainBy = -1;
     p.savedInflation = -1;
     if (this.suddenDeath && this.phase === 'playing' && p.outAt === Infinity) {
-      // One life: out until the next match.
+      // One life per round: out (spectating) until the next round.
       p.outAt = this.time;
       p.respawnAt = Infinity;
     }
@@ -2670,28 +2720,73 @@ export class GameSim {
   }
 
   /**
-   * Sudden Death: tells everyone how many are left after someone goes out, and wraps the match up
-   * (after a short victory beat) once one player or nobody is left.
+   * Sudden Death: tells everyone how many are left after someone goes out, and decides the round
+   * once one player (or nobody, if the last ones went out together) is left.
    */
   private checkSurvivors(): void {
-    if (!this.suddenDeath || this.phase !== 'playing') return;
+    if (!this.suddenDeath || this.phase !== 'playing' || this.sdIntermission) return;
     const alive = [...this.players.values()].filter((p) => p.outAt === Infinity);
     const dropped = alive.length < this.sdAlive;
     this.sdAlive = alive.length;
     if (!dropped) return;
-    // Decided once one (or nobody, if the last ones went out together) is left.
-    const decided = alive.length <= 1 && this.sdEndAt === Infinity;
-    const winner = decided ? ([...this.players.values()].sort((a, b) => this.sdOrder(a, b))[0]?.id ?? -1) : -1;
-    this.events.push({ t: 'survivors', tick: this.tick, left: alive.map((p) => p.id), winner });
-    if (decided) this.sdEndAt = this.time + BALANCE.modes.suddenDeath.winnerDelay;
+    this.events.push({ t: 'survivors', tick: this.tick, left: alive.map((p) => p.id) });
+    if (alive.length <= 1) this.decideRound(false);
   }
 
   /**
-   * Sudden Death placing: whoever lasted longest; if time runs out with several still in (or the
-   * last ones go out together), most knockouts, then most hits landed.
+   * Sudden Death round placing: whoever lasted longest. If the round's time runs out with several
+   * still in (or the last ones go out together): most knockouts this round, then most hits landed
+   * this round, then fewest knockouts taken this match.
    */
-  private sdOrder(a: { id: number; outAt: number; stats: MatchStats }, b: { id: number; outAt: number; stats: MatchStats }): number {
-    return order(a.outAt, b.outAt) || b.stats.kos - a.stats.kos || b.stats.hits - a.stats.hits || a.id - b.id;
+  private roundOrder(a: SimPlayer, b: SimPlayer): number {
+    const kos = (p: SimPlayer) => p.stats.kos - p.roundBase.kos;
+    const hits = (p: SimPlayer) => p.stats.hits - p.roundBase.hits;
+    return order(a.outAt, b.outAt) || kos(b) - kos(a) || hits(b) - hits(a) || a.stats.deaths - b.stats.deaths || a.id - b.id;
+  }
+
+  /**
+   * Sudden Death: the round is over. Its winner gets a round point, everyone sees the score, and
+   * after a short beat the next round starts (or the results, once someone has enough wins).
+   */
+  private decideRound(timeUp: boolean): void {
+    const SD = BALANCE.modes.suddenDeath;
+    const winner = [...this.players.values()].sort((a, b) => this.roundOrder(a, b))[0];
+    if (winner) winner.roundWins++;
+    this.sdMatchOver = !!winner && winner.roundWins >= SD.roundsToWin;
+    this.sdIntermission = true;
+    this.sdEndAt = this.time + (this.sdMatchOver ? SD.winnerDelay : SD.roundBreak);
+    // The clock counts down to the next round.
+    this.phaseEndsAt = this.sdEndAt;
+    const wins = [...this.players.values()]
+      .sort((a, b) => b.roundWins - a.roundWins || (a === winner ? -1 : b === winner ? 1 : a.id - b.id))
+      .map((p): [number, number] => [p.id, p.roundWins]);
+    this.events.push({ t: 'round', tick: this.tick, n: this.sdRound, winner: winner?.id ?? -1, wins, over: this.sdMatchOver, timeUp });
+    this.onPhaseChange?.();
+  }
+
+  /** Sudden Death: everyone back in, the map back in one piece, and a fresh round clock. */
+  private startRound(): void {
+    this.sdRound++;
+    this.sdRoundStartedAt = this.time;
+    this.sdIntermission = false;
+    this.sdMatchOver = false;
+    this.sdEndAt = Infinity;
+    this.phaseEndsAt = this.time + this.durationSec;
+    this.world.setCollapse(collapsePlan(this.mode, this.map, this.phaseEndsAt, this.durationSec));
+    this.shrinkNext = 0;
+    this.world.setTime(this.time);
+    this.finalAnnounced = false;
+    this.pendingEnd = false;
+    this.sdAlive = this.players.size;
+    for (const p of this.players.values()) {
+      p.outAt = Infinity;
+      p.roundBase = { kos: p.stats.kos, hits: p.stats.hits };
+      p.savedInflation = -1;
+      this.respawn(p);
+    }
+    this.projectiles.length = 0;
+    this.ults.reset();
+    this.resetEntities();
   }
 
   private updateCrown(): void {
@@ -2709,7 +2804,7 @@ export class GameSim {
   }
 
   isFinal(): boolean {
-    return this.phase === 'playing' && this.time >= this.phaseEndsAt - BALANCE.final.seconds;
+    return this.phase === 'playing' && !this.sdIntermission && this.time >= this.phaseEndsAt - BALANCE.final.seconds;
   }
 
   // --- Chaos ---------------------------------------------------------------------------------
@@ -2856,12 +2951,6 @@ export class GameSim {
     s.onGround = 1;
     s.spawnProt = BALANCE.match.spawnProtection;
     s.ammo = p.weapon.ammo;
-    if (this.suddenDeath) {
-      // Everyone starts fully inflated: one solid hit sends you flying.
-      s.inflation = BALANCE.inflation.max;
-      s.spawnProt = BALANCE.modes.suddenDeath.spawnProtection;
-      depenetrate(s, this.world);
-    }
     p.lastAttacker = -1;
     p.launchBy = -1;
     this.events.push({ t: 'spawn', tick: this.tick, id: p.id, x: s.px, y: s.py, z: s.pz });
@@ -2894,15 +2983,12 @@ export class GameSim {
   // --- Match flow --------------------------------------------------------------------------
 
   private updatePhase(): void {
-    if (this.phase === 'waiting' && this.players.size >= 2) this.startMatch();
+    if (this.phase === 'waiting' && this.autoStart && this.players.size >= 2) this.startMatch();
     else if (this.phase === 'playing' && this.players.size < 2 && this.fixedLineup) {
       // Ranked: someone left, so whoever is still here wins.
       this.endMatch();
     } else if (this.phase === 'playing' && this.players.size < 2) {
-      this.phase = 'waiting';
-      this.world.setCollapse(null);
-      this.freeTheOut();
-      this.onPhaseChange?.();
+      this.toLobby();
     }
   }
 
@@ -2912,6 +2998,43 @@ export class GameSim {
       if (p.outAt === Infinity) continue;
       p.outAt = Infinity;
       if (p.state.mode === MODE_DEAD) p.respawnAt = this.time;
+    }
+  }
+
+  /**
+   * Back to the lobby ('waiting'): no match running, nothing counts, and the map is whole again.
+   * Whatever match was running is dropped without results.
+   */
+  toLobby(): void {
+    this.phase = 'waiting';
+    this.world.setCollapse(null);
+    this.world.setTime(this.time);
+    this.freeTheOut();
+    this.resetMatchState();
+    this.pendingEnd = false;
+    this.sdRound = 0;
+    this.sdIntermission = false;
+    this.sdMatchOver = false;
+    this.sdEndAt = Infinity;
+    this.onPhaseChange?.();
+  }
+
+  /** Scores, stats and per-match mode state back to zero (a new match, or the lobby). */
+  private resetMatchState(): void {
+    this.crownId = -1;
+    this.finalAnnounced = false;
+    this.firstKo = false;
+    this.teamScores = [0, 0];
+    this.ballGame?.reset();
+    this.pumpGame?.reset();
+    for (const p of this.players.values()) {
+      p.score = 0;
+      p.stats = newStats();
+      p.streak = 0;
+      p.nemesis = -1;
+      p.koTimes = [];
+      p.roundWins = 0;
+      p.roundBase = { kos: 0, hits: 0 };
     }
   }
 
@@ -2927,47 +3050,49 @@ export class GameSim {
     this.chaosNext = null;
     this.lastChaosKind = null;
     this.scheduleChaos(true);
-    this.crownId = -1;
-    this.finalAnnounced = false;
-    this.firstKo = false;
     this.bestReplay = null;
     this.replayPostRoll = 0;
-    this.teamScores = [0, 0];
-    this.ballGame?.reset();
-    this.pumpGame?.reset();
     this.pendingEnd = false;
-    this.sdEndAt = Infinity;
-    this.sdAlive = this.players.size;
+    this.resetMatchState();
+    // Team modes: teams are evened out as the match starts (people may have joined in the lobby).
     this.balanceTeams();
-    for (const p of this.players.values()) {
-      p.score = 0;
-      p.stats = newStats();
-      p.streak = 0;
-      p.nemesis = -1;
-      p.koTimes = [];
-      p.savedInflation = -1;
-      p.outAt = Infinity;
-      p.state.ult = 0;
-      this.respawn(p);
+    for (const p of this.players.values()) p.state.ult = 0;
+    if (this.suddenDeath) {
+      this.sdRound = 0;
+      this.startRound();
+    } else {
+      for (const p of this.players.values()) {
+        p.savedInflation = -1;
+        p.outAt = Infinity;
+        this.respawn(p);
+      }
+      this.projectiles.length = 0;
+      this.ults.reset();
+      this.resetEntities();
     }
-    this.projectiles.length = 0;
-    this.ults.reset();
-    this.resetEntities();
     this.onPhaseChange?.();
   }
 
   private stepMatch(): void {
-    if (this.phase === 'playing' && (this.time >= this.phaseEndsAt || this.pendingEnd || this.time >= this.sdEndAt)) {
+    if (this.phase === 'playing' && this.suddenDeath) {
+      // Sudden Death runs rounds: the clock running out decides a round, not the match.
+      if (!this.sdIntermission && this.time >= this.phaseEndsAt) this.decideRound(true);
+      if (this.sdIntermission && this.time >= this.sdEndAt) {
+        if (this.sdMatchOver) this.endMatch();
+        else {
+          this.startRound();
+          this.onPhaseChange?.();
+        }
+      }
+    } else if (this.phase === 'playing' && (this.time >= this.phaseEndsAt || this.pendingEnd)) {
       this.pendingEnd = false;
       this.endMatch();
     } else if (this.phase === 'results' && this.time >= this.phaseEndsAt && !this.fixedLineup) {
-      this.world.setCollapse(null);
-      if (this.players.size >= 2) this.startMatch();
-      else {
-        this.phase = 'waiting';
-        this.freeTheOut();
-        this.onPhaseChange?.();
-      }
+      // Public rooms roll straight into the next match; private rooms go back to the lobby.
+      if (this.autoStart && this.players.size >= 2) {
+        this.world.setCollapse(null);
+        this.startMatch();
+      } else this.toLobby();
     }
   }
 
@@ -3002,11 +3127,12 @@ export class GameSim {
   }
 
   endMatch(): void {
-    const outAt = (id: number) => this.players.get(id)?.outAt ?? -Infinity;
+    const sd = this.suddenDeath;
+    // Sudden Death: most round wins, then most knockouts, fewest times popped, most hits.
+    const sdOrder = (a: SimPlayer, b: SimPlayer) => b.roundWins - a.roundWins || b.stats.kos - a.stats.kos || a.stats.deaths - b.stats.deaths || b.stats.hits - a.stats.hits || a.id - b.id;
     const standings = [...this.players.values()]
-      .map((p) => ({ id: p.id, name: p.name, score: p.score, stats: { ...p.stats }, isBot: p.isBot, outAt: p.outAt }))
-      .sort((a, b) => (this.suddenDeath ? this.sdOrder(a, b) : b.score - a.score || b.stats.kos - a.stats.kos || a.stats.deaths - b.stats.deaths))
-      .map(({ outAt: _, ...s }) => s);
+      .sort((a, b) => (sd ? sdOrder(a, b) : b.score - a.score || b.stats.kos - a.stats.kos || a.stats.deaths - b.stats.deaths))
+      .map((p) => ({ id: p.id, name: p.name, score: p.score, stats: { ...p.stats }, isBot: p.isBot, ...(sd ? { roundWins: p.roundWins } : {}) }));
     let longest: MatchResult['longestLaunch'] = null;
     for (const s of standings) {
       if (s.stats.longestLaunch > 0 && (!longest || s.stats.longestLaunch > longest.distance)) longest = { id: s.id, distance: s.stats.longestLaunch };
@@ -3032,9 +3158,11 @@ export class GameSim {
     }
     const winnerId = teams ? (standings.find((s) => this.players.get(s.id)?.team === teams!.winner)?.id ?? -1) : (standings[0]?.id ?? -1);
     this.lastResult = { winnerId, mode: this.mode, teams, standings, longestLaunch: longest, awards, replay: this.bestReplay };
-    if (this.suddenDeath) this.lastResult.survivors = standings.filter((s) => outAt(s.id) === Infinity).map((s) => s.id);
+    if (sd) this.lastResult.rounds = { target: BALANCE.modes.suddenDeath.roundsToWin, played: this.sdRound };
     this.phase = 'results';
-    this.phaseEndsAt = this.time + (this.suddenDeath ? BALANCE.modes.suddenDeath.resultsSec : BALANCE.match.resultsSec);
+    this.sdIntermission = false;
+    this.sdEndAt = Infinity;
+    this.phaseEndsAt = this.time + (sd ? BALANCE.modes.suddenDeath.resultsSec : BALANCE.match.resultsSec);
     this.onPhaseChange?.();
   }
 

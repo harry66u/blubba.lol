@@ -8,7 +8,7 @@ import { ULT_IDS, ultIndex } from '../shared/game/ults';
 import { type Loadout, sanitizeLoadout, weaponIndex } from '../shared/loadout';
 import { MODE_DEAD } from '../shared/player';
 import { DEFAULT_COSMETICS, QUICK_CHAT, REPORT_REASONS, levelForXp, unlockedAt } from '../shared/economy';
-import { randomGuestName } from '../shared/names';
+import { randomGuestName, isNameBlocked } from '../shared/names';
 import { allowedLoadout, applyRanked, awardMatch } from './progress';
 import { type Store, accountKey } from './store';
 import {
@@ -123,6 +123,8 @@ export class Room {
       durationSec: this.settings.durationSec,
     });
     sim.eventMult = EVENT_MULT[this.settings.events];
+    // Private rooms wait in the lobby for the host's START (challenges and ranked start by themselves).
+    sim.autoStart = !this.isPrivate || this.challenge || this.ranked;
     sim.onPhaseChange = () => {
       this.broadcastJson(this.matchMessage());
       this.rosterDirty = true;
@@ -187,7 +189,7 @@ export class Room {
     this.rosterDirty = true;
     this.balanceBots();
     // A real opponent arrived for a 1v1 that was warming up against a bot: start fresh.
-    if (this.mode === 'duel' && this.humanCount === 2) this.sim.startMatch();
+    if (this.mode === 'duel' && this.humanCount === 2 && this.sim.autoStart) this.sim.startMatch();
     this.broadcastJson({ type: 'room', room: this.info() });
     return conn;
   }
@@ -343,6 +345,7 @@ export class Room {
         if (msg.action === 'kick' && typeof msg.id === 'number') this.kick(msg.id);
         else if (msg.action === 'settings' && msg.settings && typeof msg.settings === 'object') this.applySettings(msg.settings);
         else if (msg.action === 'restart') this.sim.startMatch();
+        else if (msg.action === 'start' && this.sim.canStart()) this.sim.startMatch();
         break;
       default:
         break;
@@ -362,7 +365,13 @@ export class Room {
   private applySettings(raw: Partial<RoomSettings>): void {
     const next = fitMap({ ...this.settings, ...sanitizeSettings(raw) });
     const needNewSim = next.mapId !== this.settings.mapId || next.mode !== this.settings.mode;
+    // Renaming the teams doesn't touch the match.
+    const onlyNames = !needNewSim && next.durationSec === this.settings.durationSec && next.bots === this.settings.bots && next.events === this.settings.events;
     this.settings = next;
+    if (onlyNames) {
+      this.broadcastJson({ type: 'room', room: this.info() });
+      return;
+    }
     if (needNewSim) this.rebuild();
     else {
       // Sudden Death always runs its own fixed length.
@@ -371,7 +380,9 @@ export class Room {
     }
     this.balanceBots();
     this.broadcastJson({ type: 'room', room: this.info() });
-    this.sim.startMatch();
+    // Private rooms go back to the lobby until the host starts; others start right away.
+    if (this.sim.autoStart) this.sim.startMatch();
+    else this.sim.toLobby();
   }
 
   /** Swaps in a fresh match on the current map and mode, carrying the humans over. */
@@ -618,6 +629,7 @@ export class Room {
       number: s.matchNumber,
       result: s.phase === 'results' ? s.lastResult : null,
       collapse: [...s.world.plan],
+      round: s.roundInfo(),
     };
   }
 
@@ -655,5 +667,18 @@ export function sanitizeSettings(raw: Partial<RoomSettings>): Partial<RoomSettin
   }
   if (typeof raw.bots === 'boolean') out.bots = raw.bots;
   if (typeof raw.events === 'string' && raw.events in EVENT_MULT) out.events = raw.events;
+  if (Array.isArray(raw.teamNames) && raw.teamNames.length === 2) out.teamNames = [cleanTeamName(raw.teamNames[0]), cleanTeamName(raw.teamNames[1])];
   return out;
+}
+
+/** A team name the host typed: up to 16 plain characters, nothing rude ('' = the default name). */
+export function cleanTeamName(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  const s = raw
+    .replace(/[^\p{L}\p{N} '!?.&\-]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 16)
+    .trim();
+  return s && !isNameBlocked(s) ? s : '';
 }
