@@ -4,6 +4,7 @@ import { GameSim } from '../shared/game/sim';
 import { emptyInput } from '../shared/input';
 import { KNOCKOUT_MAPS, MAPS, getMap, mapForMode } from '../shared/maps';
 import { MODE_IDS, type ModeId } from '../shared/game/modes';
+import { ULT_IDS, ultIndex } from '../shared/game/ults';
 import { type Loadout, sanitizeLoadout, weaponIndex } from '../shared/loadout';
 import { MODE_DEAD } from '../shared/player';
 import { DEFAULT_COSMETICS, QUICK_CHAT, REPORT_REASONS, levelForXp, unlockedAt } from '../shared/economy';
@@ -281,6 +282,34 @@ export class Room {
           if (p) {
             p.streak = msg.count;
             this.sim.streakReward(p);
+          }
+        } else if (msg.action === 'ult') {
+          // Fill ult meters (yours, or everyone's), optionally switching your ult first.
+          const kind = ULT_IDS.find((u) => u === msg.kind);
+          for (const p of this.sim.players.values()) {
+            if (!msg.all && p.id !== conn.playerId) continue;
+            if (kind && p.id === conn.playerId) {
+              p.loadout = { ...p.loadout, ult: kind };
+              if (p.pendingLoadout) p.pendingLoadout = { ...p.pendingLoadout, ult: kind };
+              p.state.ultKind = ultIndex(kind);
+            }
+            p.state.ult = 1;
+          }
+        } else if (msg.action === 'gather') {
+          // Line the bots up in front of you (to try ults on them).
+          const me = this.sim.players.get(conn.playerId);
+          let i = 0;
+          for (const id of this.sim.bots.keys()) {
+            const b = this.sim.players.get(id);
+            if (!me || !b || b.state.mode === MODE_DEAD) continue;
+            const a = me.state.yaw + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * 0.3;
+            const d = 6 + (i % 3) * 2.5;
+            const x = me.state.px - Math.sin(a) * d;
+            const z = me.state.pz - Math.cos(a) * d;
+            const ground = this.sim.world.groundBelow(x, me.state.py + 3, z, 10);
+            if (ground === null) continue;
+            Object.assign(b.state, { px: x, py: ground + 0.01, pz: z, vx: 0, vy: 0, vz: 0, onGround: 1, launchTimer: 0 });
+            i++;
           }
         } else if (msg.action === 'endIn' && typeof msg.seconds === 'number') {
           // Jump the match clock forward (to see the final 30 seconds).

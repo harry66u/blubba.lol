@@ -7,6 +7,7 @@
  */
 import type { DailyView } from './daily';
 import { MOD_IDS, type ModId, UTILITY_IDS, type UtilityId } from './loadout';
+import { ULT_IDS, type UltId } from './game/ults';
 
 // --- Cosmetics -------------------------------------------------------------------------------
 
@@ -180,27 +181,33 @@ export function levelForXp(xp: number): { level: number; into: number; next: num
   return { level, into: rest, next: xpToNext(level) };
 }
 
-/** Mods and utilities unlock by level. Weapons are all available from the start. */
-export const UNLOCKS: { level: number; kind: 'mod' | 'utility'; id: ModId | UtilityId }[] = [
+/** Mods, utilities and ults unlock by level. Weapons are all available from the start. */
+export const UNLOCKS: { level: number; kind: 'mod' | 'utility' | 'ult'; id: ModId | UtilityId | UltId }[] = [
   { level: 1, kind: 'utility', id: 'bouncePad' },
   { level: 1, kind: 'utility', id: 'airGrenade' },
+  { level: 1, kind: 'ult', id: 'bigBlow' },
   { level: 2, kind: 'mod', id: 'wideNozzle' },
+  { level: 2, kind: 'ult', id: 'juice' },
   { level: 3, kind: 'utility', id: 'inflatableWall' },
   { level: 4, kind: 'mod', id: 'quickValve' },
+  { level: 4, kind: 'ult', id: 'cropDuster' },
   { level: 5, kind: 'utility', id: 'vacuumGrenade' },
   { level: 6, kind: 'mod', id: 'bigTank' },
   { level: 7, kind: 'mod', id: 'chargeValve' },
+  { level: 7, kind: 'ult', id: 'chase' },
   { level: 8, kind: 'mod', id: 'longBarrel' },
+  { level: 10, kind: 'ult', id: 'robot' },
 ];
 
 export function unlockLevel(id: string): number {
   return UNLOCKS.find((u) => u.id === id)?.level ?? 1;
 }
 
-export function unlockedAt(level: number): { mods: ModId[]; utils: UtilityId[] } {
+export function unlockedAt(level: number): { mods: ModId[]; utils: UtilityId[]; ults: UltId[] } {
   return {
     mods: MOD_IDS.filter((m) => unlockLevel(m) <= level),
     utils: UTILITY_IDS.filter((u) => unlockLevel(u) <= level),
+    ults: ULT_IDS.filter((u) => unlockLevel(u) <= level),
   };
 }
 

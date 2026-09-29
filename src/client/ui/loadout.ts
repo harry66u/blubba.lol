@@ -15,7 +15,9 @@ import {
   sanitizeLoadout,
 } from '../../shared/loadout';
 import { unlockLevel } from '../../shared/economy';
+import { ULT_IDS } from '../../shared/game/ults';
 import { clear, el } from './dom';
+import { buildUltPicker } from './ultPicker';
 
 const KEY = 'bubba.loadout.v1';
 
@@ -75,6 +77,7 @@ function ratings(id: WeaponId, mods: ModId[]): [string, number][] {
 export interface LoadoutLocks {
   mods: readonly string[];
   utils: readonly string[];
+  ults?: readonly string[];
 }
 
 /**
@@ -82,8 +85,9 @@ export interface LoadoutLocks {
  * utilities. `locks` (from account progression) lists what's still locked.
  */
 export function buildLoadout(current: Loadout, onChange: (l: Loadout) => void, onClose: () => void, locked: LoadoutLocks = { mods: [], utils: [] }, note = ''): HTMLElement {
-  let l: Loadout = { weapon: current.weapon, mods: [...current.mods], utils: [...current.utils] as [UtilityId, UtilityId] };
+  let l: Loadout = { weapon: current.weapon, mods: [...current.mods], utils: [...current.utils] as [UtilityId, UtilityId], ult: current.ult };
   const body = el('div');
+  const ultBox = el('div');
   const draw = () => {
     clear(body);
     const weapons = el('div', { class: 'loadout-grid' });
@@ -172,9 +176,16 @@ export function buildLoadout(current: Loadout, onChange: (l: Loadout) => void, o
       el('div', { class: 'label', style: 'margin-top:14px', text: 'Utilities (pick 2)' }),
       utils,
     );
+    clear(ultBox);
+    ultBox.append(
+      buildUltPicker(l.ult, locked.ults ?? [], (id) => {
+        l.ult = id;
+        commit();
+      }),
+    );
   };
   const commit = () => {
-    l = sanitizeLoadout(l, { mods: MOD_IDS.filter((m) => !locked.mods.includes(m)), utils: UTILITY_IDS.filter((u) => !locked.utils.includes(u)) });
+    l = sanitizeLoadout(l, { mods: MOD_IDS.filter((m) => !locked.mods.includes(m)), utils: UTILITY_IDS.filter((u) => !locked.utils.includes(u)), ults: ULT_IDS.filter((u) => !locked.ults?.includes(u)) });
     onChange(l);
     draw();
   };
@@ -188,6 +199,7 @@ export function buildLoadout(current: Loadout, onChange: (l: Loadout) => void, o
       el('h2', { text: 'Loadout' }),
       note ? el('div', { class: 'note', text: note }) : null,
       body,
+      ultBox,
       el('div', { style: 'text-align:center;margin-top:16px' }, el('button', { class: 'btn', text: 'DONE', on: { click: onClose } })),
     ),
   );

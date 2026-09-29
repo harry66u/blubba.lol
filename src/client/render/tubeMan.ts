@@ -46,6 +46,10 @@ export interface TubeManPose {
   powered: boolean;
   /** This player last knocked you out (drawn with a red revenge glow). */
   nemesis: boolean;
+  /** Ults: Juice bulks you up, Crop Duster bends you over, Robot Mode turns your eyes red. */
+  jacked: boolean;
+  bentOver: boolean;
+  robot: boolean;
 }
 
 export function defaultPose(): TubeManPose {
@@ -73,6 +77,9 @@ export function defaultPose(): TubeManPose {
     crowned: false,
     powered: false,
     nemesis: false,
+    jacked: false,
+    bentOver: false,
+    robot: false,
   };
 }
 
@@ -175,6 +182,7 @@ const sharedGeo = {
   base: new THREE.CylinderGeometry(0.4, 0.46, BASE_H, 20),
   baseRing: new THREE.TorusGeometry(0.34, 0.05, 8, 24),
   bubble: new THREE.SphereGeometry(1, 24, 16),
+  visor: new THREE.BoxGeometry(0.44, 0.13, 0.05),
 };
 
 const sharedMat = {
@@ -183,6 +191,8 @@ const sharedMat = {
   mouth: new THREE.MeshStandardMaterial({ color: 0x3a0f22, roughness: 0.6 }),
   base: new THREE.MeshStandardMaterial({ color: 0x3b3f55, roughness: 0.55, metalness: 0.2 }),
   baseRing: new THREE.MeshStandardMaterial({ color: 0xc9d2e8, roughness: 0.35, metalness: 0.4 }),
+  robotEye: new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 1.3, roughness: 0.3 }),
+  visor: new THREE.MeshStandardMaterial({ color: 0x1d1b3a, roughness: 0.25, metalness: 0.5 }),
   bubble: new THREE.MeshStandardMaterial({
     color: 0x9fe8ff,
     transparent: true,
@@ -232,6 +242,16 @@ export class TubeMan {
   private faceExtras: THREE.Group;
   private tauntStyle = '';
   private tauntT = 0;
+  /** Ult poses, eased in and out (0..1): Juice's bulk, Crop Duster's bend. */
+  private bulk = 0;
+  private bend = 0;
+  /** Juice: the syringe jab, then a double-biceps flex (seconds left of each). */
+  private jabT = 0;
+  private flexT = 0;
+  private syringe: THREE.Group | null = null;
+  private robotEyes = false;
+  /** Robot Mode: a dark visor with the eyes glowing red through it. */
+  private readonly visor = new THREE.Mesh(sharedGeo.visor, sharedMat.visor);
 
   constructor(colorHex: number, opts: { physical?: boolean; seed?: number; pattern?: Pattern; look?: Partial<Look> } = {}) {
     this.seed = opts.seed ?? Math.random() * 100;
@@ -283,6 +303,9 @@ export class TubeMan {
     this.mouthO.position.set(0, -0.2, 0.0);
     this.mouthO.visible = false;
     this.face.add(this.mouthSmile, this.mouthO);
+    this.visor.position.set(0, 0, 0.035);
+    this.visor.visible = false;
+    this.face.add(this.visor);
 
     this.hat = buildHat(this.look.hat, colorHex);
     this.hair.add(this.hat);
@@ -366,6 +389,21 @@ export class TubeMan {
     this.impactT = 0.1;
   }
 
+  /** Juice: jab the giant syringe into your arm, then flex. */
+  jab(): void {
+    this.jabT = JAB_TIME;
+    this.flexT = JAB_TIME + FLEX_TIME;
+    if (!this.syringe) {
+      this.syringe = makeSyringe();
+      this.rig.add(this.syringe);
+    }
+  }
+
+  /** World position of the face (Robot Mode's laser comes out of the eyes). */
+  eyeWorld(out: THREE.Vector3): THREE.Vector3 {
+    return this.face.getWorldPosition(out);
+  }
+
   /** Plays a taunt animation (visual only). */
   taunt(style: string): void {
     this.tauntStyle = style;
@@ -407,6 +445,10 @@ export class TubeMan {
     const dt = Math.min(0.05, p.dt);
     const t = p.time;
     let s = inflationScale(p.inflation);
+    this.bulk += ((p.jacked ? 1 : 0) - this.bulk) * Math.min(1, dt * (p.jacked ? 3.5 : 2));
+    this.bend += ((p.bentOver ? 1 : 0) - this.bend) * Math.min(1, dt * 14);
+    this.jabT = Math.max(0, this.jabT - dt);
+    this.flexT = Math.max(0, this.flexT - dt);
     // Taunts are pure animation: spin, flex, wave, go floppy.
     let tauntSpin = 0;
     let flop = 0;
@@ -507,13 +549,17 @@ export class TubeMan {
       // Doubled over: fold forward sharply above the waist.
       let fold = 0;
       if (p.doubled) fold = Math.max(0, u - 0.35) * 1.3;
+      // Crop Duster: bent over at the waist, butt out.
+      if (this.bend > 0) fold = Math.max(fold, Math.max(0, u - 0.3) * 1.35 * this.bend);
+      const buttOut = this.bend * 0.2 * Math.min(1, u / 0.3);
       const x = (this.leanX * bend + wob1 * u) * BODY_LEN;
-      const z = (this.leanZ * bend * (p.doubled ? 0.4 : 1) + wob2 * u) * BODY_LEN + fold * 0.9;
+      const z = (this.leanZ * bend * (p.doubled ? 0.4 : 1) + wob2 * u) * BODY_LEN + fold * 0.9 - buttOut;
       const y = BASE_H + sArc - (Math.abs(x) + Math.abs(z)) * 0.18 * u - fold * 0.8;
       spine[i * 3] = x;
       spine[i * 3 + 1] = y;
       spine[i * 3 + 2] = z;
-      radii[i] = r * radScale;
+      // Juice: a big V-shaped chest.
+      radii[i] = r * radScale * (1 + this.bulk * 0.45 * Math.max(0, 1 - Math.abs(u - 0.55) / 0.3));
     }
     this.body.update(0, 0, 1);
 
@@ -599,8 +645,21 @@ export class TubeMan {
       let py = sy0 + by * sr * sgn;
       let pz = sz0 + bz * sr * sgn;
       // Base direction: out and up.
-      let ang = 0.5 + noise1(t * 2.2, this.seed + side * 11) * 0.7 * this.flail;
-      let yaw = noise1(t * 1.6, this.seed + side * 17) * 0.8 * this.flail;
+      // Robot Mode: the arms move in stiff little steps.
+      const ta = p.robot ? Math.floor(t * 7) / 7 : t;
+      let ang = 0.5 + noise1(ta * 2.2, this.seed + side * 11) * 0.7 * this.flail;
+      let yaw = noise1(ta * 1.6, this.seed + side * 17) * 0.8 * this.flail;
+      // Juice: a double-biceps flex (after the jab, and now and then while jacked).
+      const flex = this.flexT > 0 && this.jabT <= 0 ? Math.min(1, this.flexT * 4, (FLEX_TIME - this.flexT) * 5) : this.bulk > 0.9 ? Math.max(0, Math.sin(t * 2.1 + this.seed) * 3 - 2) : 0;
+      if (flex > 0) {
+        ang = ang * (1 - flex) + 0.1 * flex;
+        yaw = yaw * (1 - flex) + 0.2 * flex;
+      }
+      if (this.bend > 0.3) {
+        // Hands on knees.
+        ang = ang * (1 - this.bend) - 0.9 * this.bend;
+        yaw = yaw * (1 - this.bend) + 0.9 * this.bend;
+      }
       if (wave > 0 && side === 0) {
         // Big friendly wave.
         ang = 1.2 * wave + ang * (1 - wave);
@@ -620,9 +679,12 @@ export class TubeMan {
         as[i * 3 + 1] = py;
         as[i * 3 + 2] = pz;
         const fi = i / (ARM_RINGS - 1);
-        arm.radii[i] = i === ARM_RINGS - 1 ? 0.02 : i === ARM_RINGS - 2 ? ARM_R * 0.8 : ARM_R * (1.15 - fi * 0.25);
-        ang += noise1(t * 3.4 + i * 0.45, this.seed + side * 23) * 0.42 * this.flail;
-        yaw += noise1(t * 2.9 + i * 0.4, this.seed + side * 29) * 0.3 * this.flail;
+        // Juice: huge biceps (and forearms), cartoon style.
+        const pump = 1 + this.bulk * (0.45 + 1.5 * Math.max(0, 1 - Math.abs(fi - 0.33) / 0.2) + 0.6 * Math.max(0, 1 - Math.abs(fi - 0.72) / 0.15));
+        arm.radii[i] = (i === ARM_RINGS - 1 ? 0.02 : i === ARM_RINGS - 2 ? ARM_R * 0.8 : ARM_R * (1.15 - fi * 0.25)) * pump;
+        const wig = 1 - flex;
+        ang += noise1(ta * 3.4 + i * 0.45, this.seed + side * 23) * 0.42 * this.flail * wig + (i >= 4 && i <= 7 ? 0.42 * flex : 0);
+        yaw += noise1(ta * 2.9 + i * 0.4, this.seed + side * 29) * 0.3 * this.flail * wig;
         if (p.doubled) ang -= 0.2;
         // Direction = out (binormal) / up / forward (ring normal) mix.
         const ca = Math.cos(ang);
@@ -660,6 +722,15 @@ export class TubeMan {
       glow = Math.max(glow, 0.9 * (this.impactT / 0.1));
     }
     this.bodyMat.emissiveIntensity = glow;
+    // Robot Mode: red slit eyes glowing through a visor.
+    if (p.robot !== this.robotEyes) {
+      this.robotEyes = p.robot;
+      for (const e of this.eyes) e.material = p.robot ? sharedMat.robotEye : sharedMat.eye;
+      for (const pu of this.pupils) pu.visible = !p.robot && this.eyes[0].visible;
+      this.visor.visible = p.robot;
+    }
+    if (p.robot) for (const e of this.eyes) e.scale.set(1.2, 0.38, 0.8);
+    this.updateSyringe(spine, radii, N, B, shoulderRing - 1);
     this.crown.visible = p.crowned;
     if (p.crowned) {
       this.crown.position.set(spine[(n - 1) * 3], spine[(n - 1) * 3 + 1] + 0.1, spine[(n - 1) * 3 + 2]);
@@ -689,6 +760,26 @@ export class TubeMan {
     }
   }
 
+  /** The Juice syringe: jabs into the front of the shoulder, the plunger pushes the air in, then it's gone. */
+  private updateSyringe(spine: Float32Array, radii: Float32Array, N: Float32Array, B: Float32Array, ring: number): void {
+    const g = this.syringe;
+    if (!g) return;
+    g.visible = this.jabT > 0;
+    if (!g.visible) return;
+    const k = 1 - this.jabT / JAB_TIME;
+    // Out of the chest, toward one shoulder (where everyone in front can see it).
+    const out = SV1.set(N[ring * 3] * 0.7 + B[ring * 3], N[ring * 3 + 1] * 0.7 + B[ring * 3 + 1] - 0.15, N[ring * 3 + 2] * 0.7 + B[ring * 3 + 2]).normalize();
+    // Approach, hold (needle in) while pushing the plunger, pull back out.
+    const away = 0.05 + (k < 0.3 ? (0.3 - k) * 2 : k > 0.8 ? (k - 0.8) * 2.5 : 0);
+    const r = radii[ring];
+    g.position.set(spine[ring * 3] + out.x * (r + away), spine[ring * 3 + 1] + out.y * (r + away), spine[ring * 3 + 2] + out.z * (r + away));
+    // The needle end (-y) points into the body.
+    g.quaternion.setFromUnitVectors(Y_UP, out);
+    const plunger = g.userData.plunger as THREE.Object3D;
+    plunger.position.y = 0.95 - 0.45 * Math.min(1, Math.max(0, (k - 0.3) / 0.45));
+    g.scale.setScalar(k > 0.85 ? Math.max(0.01, (1 - k) / 0.15) : Math.min(1, k * 6));
+  }
+
   setVisible(v: boolean): void {
     this.group.visible = v;
   }
@@ -699,7 +790,44 @@ export class TubeMan {
     this.bodyMat.dispose();
     disposeGroup(this.hat);
     disposeGroup(this.faceExtras);
+    if (this.syringe) disposeGroup(this.syringe);
   }
+}
+
+const JAB_TIME = 0.9;
+const FLEX_TIME = 1.3;
+
+/**
+ * Juice's giant syringe (full of air, not anything else): a see-through barrel with a puff of air
+ * inside, a plunger and a needle. Points along +y with the needle at the bottom.
+ */
+function makeSyringe(): THREE.Group {
+  const g = new THREE.Group();
+  const glass = new THREE.MeshStandardMaterial({ color: 0xcff4ff, transparent: true, opacity: 0.55, roughness: 0.05, emissive: 0x6fd8ff, emissiveIntensity: 0.25, depthWrite: false });
+  const metal = new THREE.MeshStandardMaterial({ color: 0xdfe6f3, metalness: 0.8, roughness: 0.2 });
+  const red = new THREE.MeshStandardMaterial({ color: 0xff3b5c, roughness: 0.4 });
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.62, 16), glass);
+  barrel.position.y = 0.52;
+  const air = new THREE.Mesh(new THREE.SphereGeometry(0.075, 12, 8), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x9fe8ff, emissiveIntensity: 0.6, roughness: 0.3 }));
+  air.scale.set(1, 3, 1);
+  air.position.y = 0.5;
+  const needle = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.004, 0.3, 6), metal);
+  needle.position.y = 0.06;
+  const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.11, 0.08, 12), metal);
+  tip.position.y = 0.2;
+  const flange = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.03, 0.1), red);
+  flange.position.y = 0.83;
+  const plunger = new THREE.Group();
+  const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.5, 8), red);
+  rod.position.y = -0.1;
+  const thumb = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.035, 14), red);
+  thumb.position.y = 0.16;
+  plunger.add(rod, thumb);
+  plunger.position.y = 0.95;
+  g.add(barrel, air, needle, tip, flange, plunger);
+  g.userData.plunger = plunger;
+  g.visible = false;
+  return g;
 }
 
 /** A giant sewing pin that floats over whoever is carrying one. */

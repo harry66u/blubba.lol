@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-interface Particle {
+export interface Particle {
   x: number;
   y: number;
   z: number;
@@ -177,6 +177,21 @@ export interface Projectile3D {
   lx: number;
   ly: number;
   lz: number;
+  /** A registered look (see registerProjectile), or null for the built-in ones. */
+  style?: ProjectileStyle | null;
+}
+
+/** A custom projectile look (ult rockets, the Big Blow). */
+export interface ProjectileStyle {
+  geo: THREE.BufferGeometry;
+  mat: THREE.Material;
+  /** Scale the mesh by the projectile's radius. */
+  scale: boolean;
+  /** Stretch along the flight direction with speed (like air shots). */
+  stretch: boolean;
+  /** Trail puff colors (empty = no trail) and how big they are relative to the radius. */
+  trail: number[];
+  trailSize: number;
 }
 
 const AIR_VERT = /* glsl */ `
@@ -230,6 +245,7 @@ export class Effects {
   private time = 0;
   /** Camera position, so particles right in front of the lens can fade out. */
   camPos: THREE.Vector3 | null = null;
+  private readonly styles = new Map<number, ProjectileStyle>();
 
   constructor() {
     const puffMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, emissive: 0x333333, transparent: true, opacity: 0.6, depthWrite: false });
@@ -517,13 +533,28 @@ export class Effects {
 
   // --- Projectiles ------------------------------------------------------------------------
 
+  /** Registers a look for a projectile kind the built-in ones don't cover. */
+  registerProjectile(kind: number, style: ProjectileStyle): void {
+    this.styles.set(kind, style);
+  }
+
+  /** Spawns one puff or confetti particle (for effects built outside this class). */
+  puff(p: Partial<Particle> & { x: number; y: number; z: number }, color: number | THREE.Color): void {
+    this.puffs.spawn(p, color);
+  }
+
+  confetto(p: Partial<Particle> & { x: number; y: number; z: number }, color: number | THREE.Color): void {
+    this.confetti.spawn(p, color);
+  }
+
   addProjectile(id: number, x: number, y: number, z: number, vx: number, vy: number, vz: number, r: number, muzzle?: THREE.Vector3, kind = 0): Projectile3D {
-    const mesh = kind > 0 ? new THREE.Mesh(this.utilGeos[kind]!, this.utilMats[kind]!) : new THREE.Mesh(this.airGeo, this.airMat);
-    if (kind === 0) mesh.scale.setScalar(r);
-    mesh.castShadow = kind > 0;
+    const style = this.styles.get(kind) ?? null;
+    const mesh = style ? new THREE.Mesh(style.geo, style.mat) : kind > 0 ? new THREE.Mesh(this.utilGeos[kind]!, this.utilMats[kind]!) : new THREE.Mesh(this.airGeo, this.airMat);
+    if (kind === 0 || style?.scale) mesh.scale.setScalar(r);
+    mesh.castShadow = kind > 0 && !style;
     mesh.renderOrder = 2;
     this.root.add(mesh);
-    const p: Projectile3D = { id, mesh, x, y, z, vx, vy, vz, r, ox: 0, oy: 0, oz: 0, trail: 0, lx: x, ly: y, lz: z };
+    const p: Projectile3D = { id, mesh, x, y, z, vx, vy, vz, r, ox: 0, oy: 0, oz: 0, trail: 0, lx: x, ly: y, lz: z, style };
     if (muzzle) {
       p.ox = muzzle.x - x;
       p.oy = muzzle.y - y;
@@ -554,7 +585,8 @@ export class Effects {
     const my = y + p.oy;
     const mz = z + p.oz;
     p.mesh.position.set(mx, my, mz);
-    if (p.mesh.material !== this.airMat) {
+    const style = p.style;
+    if (p.mesh.material !== this.airMat && !style) {
       p.mesh.rotation.y += dt * 8;
       p.mesh.rotation.x += dt * 5;
       return;
@@ -564,15 +596,18 @@ export class Effects {
     if (sp > 1) {
       tmpDirV.set(p.vx / sp, p.vy / sp, p.vz / sp);
       p.mesh.quaternion.setFromUnitVectors(Z_AXIS, tmpDirV);
-      p.mesh.scale.set(p.r, p.r, p.r * (1 + Math.min(2.2, sp * 0.03)));
+      const k = style && !style.scale ? 1 : p.r;
+      p.mesh.scale.set(k, k, k * (style && !style.stretch ? 1 : 1 + Math.min(2.2, sp * 0.03)));
     }
     // Trail puffs every ~0.8 m travelled, so it stays continuous at any speed.
     const moved = Math.hypot(mx - p.lx, my - p.ly, mz - p.lz);
     p.trail += moved;
-    const n = Math.min(6, Math.floor(p.trail / 0.8));
+    const colors = style ? style.trail : [0xe8fbff];
+    const n = colors.length ? Math.min(6, Math.floor(p.trail / 0.8)) : 0;
     for (let i = 0; i < n; i++) {
       const f = (i + 1) / (n + 1);
-      this.puffs.spawn({ x: p.lx + (mx - p.lx) * f, y: p.ly + (my - p.ly) * f, z: p.lz + (mz - p.lz) * f, size: p.r * 0.3, grow: 0.9, max: 0.3, drag: 5, vx: Math.random() - 0.5, vy: Math.random() * 0.5, vz: Math.random() - 0.5 }, 0xe8fbff);
+      const c = colors[Math.floor(Math.random() * colors.length)];
+      this.puffs.spawn({ x: p.lx + (mx - p.lx) * f, y: p.ly + (my - p.ly) * f, z: p.lz + (mz - p.lz) * f, size: p.r * (style ? style.trailSize : 0.3), grow: 0.9, max: style ? 0.45 : 0.3, drag: 5, vx: Math.random() - 0.5, vy: Math.random() * 0.5, vz: Math.random() - 0.5 }, c);
     }
     if (n > 0) p.trail = 0;
     p.lx = mx;

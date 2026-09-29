@@ -1,7 +1,8 @@
 import { BALANCE } from '../balance';
 import { BTN_FIRE, type InputFrame, emptyInput } from '../input';
-import { MODE_DEAD, MODE_HANG, MODE_HELD, eyeHeight, playerHeight } from '../player';
+import { MODE_DEAD, MODE_HANG, MODE_HELD, MODE_NORMAL, eyeHeight, playerHeight } from '../player';
 import type { GameSim, SimPlayer } from './sim';
+import { ultOf, ultReady } from './ults';
 
 export const BOT_NAMES = [
   'Floppy Frank',
@@ -80,8 +81,10 @@ export class BotBrain {
   /** What this bot will try while recovering, decided once per trip off the stage. */
   private recovery = { grapple: false, wall: false, steer: 1, dash: false };
   private bracedFor = new Set<number>();
+  /** When a full ult meter was first noticed (bots don't pop it the very same instant). */
+  private ultSeenAt = -1;
 
-  private press(key: 'jump' | 'dash' | 'brace' | 'grab' | 'grapple' | 'util1' | 'util2'): void {
+  private press(key: 'jump' | 'dash' | 'brace' | 'grab' | 'grapple' | 'util1' | 'util2' | 'ult'): void {
     this.input[key] = (this.input[key] + 1) & 255;
   }
 
@@ -183,6 +186,11 @@ export class BotBrain {
         kind === 'cone' ? 2.5 + rnd() * 2.5 : kind === 'stream' ? 4 + rnd() * 3 : kind === 'hitscan' ? 14 + rnd() * 12 : 6 + rnd() * 9;
       this.aimFeet = rnd() < 0.35;
     }
+    // The Chase: the nose decides who we're after, and we want to get close enough to grab.
+    if (s.chaseTimer > 0 && s.chaseTarget >= 0 && this.validTarget(sim, s.chaseTarget)) {
+      this.targetId = s.chaseTarget;
+      this.desiredDist = 1.5;
+    }
     const target = sim.players.get(this.targetId);
     const obj = this.objective(sim, me, target);
 
@@ -276,7 +284,8 @@ export class BotBrain {
     }
 
     // --- Close range: grab and throw, or stomp hands on a ledge. ---
-    if (target && sim.features.grab && s.grabCool <= 0 && s.onGround && dist < 2.2 && rnd() < 0.02 + this.skill * 0.03) {
+    const hunting = s.chaseTimer > 0 && this.targetId === s.chaseTarget;
+    if (target && sim.features.grab && s.grabCool <= 0 && s.onGround && dist < 2.2 && rnd() < (hunting ? 0.12 : 0.02 + this.skill * 0.03)) {
       this.press('grab');
     }
     if (sim.features.ledge && s.onGround) {
@@ -339,10 +348,24 @@ export class BotBrain {
       }
     }
 
+    // --- Ultimate: pop it once it's full and the moment is right. ---
+    if (ultReady(s) && target && this.wantsUlt(sim, me, target, dist)) {
+      if (this.ultSeenAt < 0) this.ultSeenAt = sim.time;
+      if (sim.time - this.ultSeenAt > 0.4 + (1 - this.skill) * 1.2) {
+        this.press('ult');
+        this.ultSeenAt = -1;
+      }
+    } else if (!ultReady(s)) {
+      this.ultSeenAt = -1;
+    }
+
     // --- Shoot: hold to charge, release when charged and on target. ---
     const range = me.weapon.kind === 'projectile' ? me.weapon.projSpeed * me.weapon.projLifetime : me.weapon.range;
     const hasTarget = obj?.aim ? obj.shoot && dist < Math.min(40, range + 1) : !!target && dist < Math.min(40, range + 1);
-    if (!hasTarget) {
+    if (s.ultArmed > 0 && target) {
+      // A loaded Big Blow goes the moment we're lined up.
+      f.buttons = aimError < 0.08 + (1 - this.skill) * 0.08 && dist < 40 ? BTN_FIRE : 0;
+    } else if (!hasTarget) {
       f.buttons = 0;
     } else if (me.weapon.kind === 'stream') {
       f.buttons = aimError < 0.25 && s.ammo > 0 && s.reloadTimer <= 0 ? BTN_FIRE : 0;
@@ -360,6 +383,33 @@ export class BotBrain {
       f.buttons = s.ammo > 0 && s.reloadTimer <= 0 && sim.time >= this.nextShotAt ? BTN_FIRE : 0;
     }
     return { ...f };
+  }
+
+  /** Is now a good time for this bot's ult? */
+  private wantsUlt(sim: GameSim, me: SimPlayer, target: SimPlayer, dist: number): boolean {
+    const s = me.state;
+    if (s.mode !== MODE_NORMAL || s.launchTimer > 0) return false;
+    const near = (r: number) => {
+      let n = 0;
+      for (const o of sim.players.values()) {
+        if (o === me || o.state.mode === MODE_DEAD || !sim.isEnemy(me.id, o.id)) continue;
+        if (Math.hypot(o.state.px - s.px, o.state.py - s.py, o.state.pz - s.pz) < r) n++;
+      }
+      return n;
+    };
+    switch (ultOf(s)) {
+      case 'bigBlow':
+        return dist > 4 && dist < 28;
+      case 'juice':
+        return dist < 14;
+      case 'chase':
+        return dist < 26;
+      case 'cropDuster':
+        // Best with a crowd around, but one enemy right on top of us will do.
+        return near(7) >= 2 || (dist < 4.5 && s.onGround === 1);
+      case 'robot':
+        return dist < 35 && target.state.mode !== MODE_DEAD;
+    }
   }
 
   private validTarget(sim: GameSim, id: number): boolean {

@@ -27,13 +27,15 @@ export interface InputFrame {
   util1: number;
   util2: number;
   taunt: number;
+  /** Ultimate ability. */
+  ult: number;
 }
 
 export const BTN_FIRE = 1;
 export const BTN_JUMP = 2;
 export const BTN_GRAB = 4;
 
-export const PRESS_KEYS = ['jump', 'dash', 'brace', 'grab', 'grapple', 'reload', 'util1', 'util2', 'taunt'] as const;
+export const PRESS_KEYS = ['jump', 'dash', 'brace', 'grab', 'grapple', 'reload', 'util1', 'util2', 'taunt', 'ult'] as const;
 export type PressKey = (typeof PRESS_KEYS)[number];
 
 export function emptyInput(): InputFrame {
@@ -55,6 +57,7 @@ export function emptyInput(): InputFrame {
     util1: 0,
     util2: 0,
     taunt: 0,
+    ult: 0,
   };
 }
 

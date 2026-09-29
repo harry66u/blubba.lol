@@ -920,6 +920,298 @@ export class Audio {
     osc.stop(t + 0.8);
   }
 
+  // --- Ults (every one of these has a visual too: see game/ultView.ts) ---------------------
+
+  /** Your ult meter just filled: a sparkly rising chime. */
+  ultReady(): void {
+    const out = this.out(null, 0.32);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    [523, 784, 1047, 1568, 2093].forEach((f, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = i % 2 ? 'sine' : 'triangle';
+      osc.frequency.value = f;
+      const g = ctx.createGain();
+      const t0 = t + i * 0.06;
+      this.env(g, t0, 0.005, 0.45, 0.5);
+      osc.connect(g).connect(out);
+      osc.start(t0);
+      osc.stop(t0 + 0.6);
+    });
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 5000;
+    const ng = ctx.createGain();
+    this.env(ng, t + 0.2, 0.05, 0.25, 0.5);
+    hp.connect(ng).connect(out);
+    this.noise(hp, t + 0.2, 0.6);
+  }
+
+  /** The sound of popping an ult, one per kind. */
+  ultGo(kind: string, pos: [number, number, number] | null): void {
+    switch (kind) {
+      case 'bigBlow':
+        this.chargeUp(pos);
+        break;
+      case 'juice':
+        this.syringe(pos);
+        break;
+      case 'chase':
+        this.sniff(pos);
+        break;
+      case 'cropDuster':
+        this.rumble(pos);
+        break;
+      case 'robot':
+        this.robotVoice(pos, [0, 7, 3, 10, 12]);
+        break;
+    }
+  }
+
+  /** Big Blow loading up: a clunk, then a rising whirr. */
+  private chargeUp(pos: [number, number, number] | null): void {
+    const out = this.out(pos, 0.5);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(90, t);
+    osc.frequency.exponentialRampToValueAtTime(900, t + 0.6);
+    const lp = ctx.createBiquadFilter();
+    lp.frequency.setValueAtTime(400, t);
+    lp.frequency.exponentialRampToValueAtTime(3000, t + 0.6);
+    const g = ctx.createGain();
+    this.env(g, t, 0.05, 0.4, 0.65);
+    osc.connect(lp).connect(g).connect(out);
+    osc.start(t);
+    osc.stop(t + 0.75);
+    this.thudAt(out, t, 70, 0.9);
+  }
+
+  /** Juice: the syringe's "tsss", a squeaky plunger, then a big straining "HNNNG!". */
+  private syringe(pos: [number, number, number] | null): void {
+    const out = this.out(pos, 0.7);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 6500;
+    bp.Q.value = 2;
+    const ng = ctx.createGain();
+    this.env(ng, t + 0.25, 0.02, 0.5, 0.35);
+    bp.connect(ng).connect(out);
+    this.noise(bp, t + 0.25, 0.4);
+    const sq = ctx.createOscillator();
+    sq.type = 'square';
+    sq.frequency.setValueAtTime(1300, t + 0.3);
+    sq.frequency.exponentialRampToValueAtTime(700, t + 0.7);
+    const sg = ctx.createGain();
+    this.env(sg, t + 0.3, 0.02, 0.08, 0.4);
+    sq.connect(sg).connect(out);
+    sq.start(t + 0.3);
+    sq.stop(t + 0.75);
+    // A cartoon strongman grunt: a buzzy low voice through a vowel-ish filter, rising as he bulks up.
+    const voice = ctx.createOscillator();
+    voice.type = 'sawtooth';
+    voice.frequency.setValueAtTime(85, t + 0.6);
+    voice.frequency.linearRampToValueAtTime(130, t + 1.3);
+    const f1 = ctx.createBiquadFilter();
+    f1.type = 'bandpass';
+    f1.frequency.value = 550;
+    f1.Q.value = 3;
+    const vg = ctx.createGain();
+    vg.gain.setValueAtTime(0.0001, t + 0.6);
+    vg.gain.exponentialRampToValueAtTime(0.9, t + 0.7);
+    vg.gain.setValueAtTime(0.9, t + 1.15);
+    vg.gain.exponentialRampToValueAtTime(0.0001, t + 1.4);
+    voice.connect(f1).connect(vg).connect(out);
+    voice.start(t + 0.6);
+    voice.stop(t + 1.45);
+  }
+
+  /** The Chase: two quick sniffs, up in pitch. */
+  sniff(pos: [number, number, number] | null): void {
+    const out = this.out(pos, 0.75);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    for (let i = 0; i < 2; i++) {
+      const t0 = t + i * 0.2;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.Q.value = 4;
+      bp.frequency.setValueAtTime(1800 + i * 500, t0);
+      bp.frequency.exponentialRampToValueAtTime(3800 + i * 600, t0 + 0.13);
+      const g = ctx.createGain();
+      this.env(g, t0, 0.03, 0.9, 0.11);
+      bp.connect(g).connect(out);
+      this.noise(bp, t0, 0.16);
+    }
+  }
+
+  /** Crop Duster winding up: a low, worrying gurgle. */
+  private rumble(pos: [number, number, number] | null): void {
+    const out = this.out(pos, 0.7);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(70, t);
+    const wob = ctx.createOscillator();
+    wob.frequency.value = 11;
+    const wg = ctx.createGain();
+    wg.gain.value = 25;
+    wob.connect(wg).connect(osc.frequency);
+    const g = ctx.createGain();
+    this.env(g, t, 0.05, 0.8, 0.3);
+    osc.connect(g).connect(out);
+    osc.start(t);
+    wob.start(t);
+    osc.stop(t + 0.4);
+    wob.stop(t + 0.4);
+  }
+
+  /** Crop Duster: the biggest fart in the game, with a rumble underneath. */
+  megaFart(pos: [number, number, number] | null): void {
+    this.playSample('fartLong', pos, 1.4, 0.55 + Math.random() * 0.08);
+    this.playSample('fart', pos, 1, 0.7);
+    const out = this.out(pos, 0.9);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    this.thudAt(out, t, 55, 1);
+    const lp = ctx.createBiquadFilter();
+    lp.frequency.setValueAtTime(900, t);
+    lp.frequency.exponentialRampToValueAtTime(120, t + 1.2);
+    const g = ctx.createGain();
+    this.env(g, t, 0.02, 0.7, 1.2);
+    lp.connect(g).connect(out);
+    this.noise(lp, t, 1.3);
+  }
+
+  /** Robot Mode: bleep-bloop "voice" (semitone steps above a base note). */
+  robotVoice(pos: [number, number, number] | null, notes: number[]): void {
+    const out = this.out(pos, 0.3);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    notes.forEach((semi, i) => {
+      const t0 = t + i * 0.085;
+      const osc = ctx.createOscillator();
+      osc.type = 'square';
+      osc.frequency.value = 440 * 2 ** (semi / 12);
+      // A fast tremolo makes it sound like a cheap robot voice.
+      const trem = ctx.createOscillator();
+      trem.frequency.value = 60;
+      const tg = ctx.createGain();
+      tg.gain.value = 0.5;
+      const g = ctx.createGain();
+      this.env(g, t0, 0.005, 0.5, 0.07);
+      trem.connect(tg).connect(g.gain);
+      const lp = ctx.createBiquadFilter();
+      lp.frequency.value = 2400;
+      osc.connect(lp).connect(g).connect(out);
+      osc.start(t0);
+      trem.start(t0);
+      osc.stop(t0 + 0.09);
+      trem.stop(t0 + 0.09);
+    });
+  }
+
+  /** Robot Mode's scanning laser sweep. */
+  laser(pos: [number, number, number] | null): void {
+    const out = this.out(pos, 0.22);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(2400, t);
+    osc.frequency.linearRampToValueAtTime(3400, t + 0.25);
+    osc.frequency.linearRampToValueAtTime(2400, t + 0.5);
+    const g = ctx.createGain();
+    this.env(g, t, 0.02, 0.4, 0.5);
+    osc.connect(g).connect(out);
+    osc.start(t);
+    osc.stop(t + 0.55);
+  }
+
+  /** A mini-rocket leaving the launcher. */
+  rocket(pos: [number, number, number] | null): void {
+    if (!this.throttle('rocket', 60)) return;
+    const out = this.out(pos, 0.45);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 1.5;
+    bp.frequency.setValueAtTime(600, t);
+    bp.frequency.exponentialRampToValueAtTime(3200, t + 0.25);
+    const g = ctx.createGain();
+    this.env(g, t, 0.01, 0.8, 0.3);
+    bp.connect(g).connect(out);
+    this.noise(bp, t, 0.35);
+  }
+
+  /** The Big Blow leaving the barrel: a huge, deep air-cannon boom. */
+  bigBlowShot(pos: [number, number, number] | null): void {
+    this.shoot(1, pos);
+    const out = this.out(pos, 1);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    this.thudAt(out, t, 60, 1.2);
+    const lp = ctx.createBiquadFilter();
+    lp.frequency.setValueAtTime(3000, t);
+    lp.frequency.exponentialRampToValueAtTime(200, t + 0.7);
+    const g = ctx.createGain();
+    this.env(g, t, 0.01, 0.9, 0.7);
+    lp.connect(g).connect(out);
+    this.noise(lp, t, 0.8);
+  }
+
+  /** The Big Blow bursting. */
+  bigBoom(pos: [number, number, number] | null): void {
+    this.bigPop(pos);
+    const out = this.out(pos, 1);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    this.thudAt(out, t, 45, 1.3);
+    const lp = ctx.createBiquadFilter();
+    lp.frequency.setValueAtTime(2200, t);
+    lp.frequency.exponentialRampToValueAtTime(150, t + 1);
+    const g = ctx.createGain();
+    this.env(g, t, 0.01, 1, 1);
+    lp.connect(g).connect(out);
+    this.noise(lp, t, 1.1);
+  }
+
+  /** The Chase caught up: a slide whistle up and a big boing. */
+  gotcha(pos: [number, number, number] | null): void {
+    this.slideWhistle(pos);
+    window.setTimeout(() => this.boing(pos, true), 350);
+  }
+
+  /** A deep sub thump into `out` starting at `t`. */
+  private thudAt(out: AudioNode, t: number, freq: number, peak: number): void {
+    const ctx = this.ctx!;
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq * 2.2, t);
+    osc.frequency.exponentialRampToValueAtTime(freq * 0.6, t + 0.45);
+    const g = ctx.createGain();
+    this.env(g, t, 0.004, peak, 0.5);
+    osc.connect(g).connect(out);
+    osc.start(t);
+    osc.stop(t + 0.6);
+  }
+
   /** Rising whine while charging a shot (only for your own weapon). */
   setCharge(charge: number): void {
     if (!this.ctx) return;

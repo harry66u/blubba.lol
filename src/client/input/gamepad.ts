@@ -34,6 +34,8 @@ export const DEFAULT_PAD_BINDINGS: Record<PadAction, number> = {
   util1: PAD.Y,
   util2: PAD.UP,
   taunt: PAD.DOWN,
+  // Click the left stick: it was free, and your thumb is already on it.
+  ult: PAD.LS,
   camera: PAD.RS,
   chat: PAD.RIGHT,
   scoreboard: PAD.VIEW,

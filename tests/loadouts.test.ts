@@ -48,7 +48,7 @@ describe('loadouts', () => {
     expect(lb.projLifetime).toBeGreaterThan(base.projLifetime);
     expect(lb.blastRadius).toBeLessThan(base.blastRadius);
     expect(sanitizeLoadout({ weapon: 'airHorn', mods: ['chargeValve', 'quickValve', 'bigTank'] }).mods).toEqual(['chargeValve', 'bigTank']);
-    expect(sanitizeLoadout({ weapon: 'bogus', mods: ['x'], utils: ['airGrenade', 'airGrenade'] })).toEqual({ weapon: 'airCannon', mods: [], utils: ['airGrenade', 'bouncePad'] });
+    expect(sanitizeLoadout({ weapon: 'bogus', mods: ['x'], utils: ['airGrenade', 'airGrenade'] })).toEqual({ weapon: 'airCannon', mods: [], utils: ['airGrenade', 'bouncePad'], ult: 'bigBlow' });
   });
 
   it('Leaf Blower pushes whoever is in the stream', () => {

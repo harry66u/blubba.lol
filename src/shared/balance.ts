@@ -368,6 +368,79 @@ export const BALANCE = {
     bothAt: 8,
   },
 
+  /**
+   * Ultimate abilities (see game/ults.ts): a meter that fills as you play, then one big move picked
+   * in the loadout. Each should be worth about 0-2 knockouts in a busy fight, never an instant win.
+   */
+  ults: {
+    meter: {
+      /** Fill per second while alive (under three minutes on its own). */
+      perSecond: 1 / 165,
+      /** Fill per 100% of inflation you pump into enemies (shots, streams, throws, chains). */
+      perInflation: 0.42,
+      perKo: 0.18,
+      /** Fill per 100% of inflation you take: a little help when you're the one getting blasted. */
+      perInflationTaken: 0.15,
+    },
+    /** Big Blow: the next trigger pull fires one giant air blast at full power, with any weapon. */
+    bigBlow: { projSpeed: 58, radius: 1.35, lifetime: 0.95, blastRadius: 5.4, knockback: 1.9, inflation: 0.24, fireCooldown: 0.5 },
+    /** Juice: jacked for a while. Heavier (knockback divides by mass), faster, harder-hitting shots and throws. */
+    juice: { duration: 8, massMult: 2, powerMult: 1.3, speedMult: 1.15 },
+    /**
+     * The Chase: lock on to the nearest enemy (in front if anyone is) and hunt them. Faster, dashes
+     * recharge instantly, shots curve toward the target and grabbing them throws extra hard.
+     */
+    chase: {
+      duration: 6,
+      speedMult: 1.4,
+      range: 45,
+      /** Half-angle (radians) counted as "in front" when picking who to sniff out. */
+      frontCone: 0.8,
+      /** How fast shots turn toward the target (radians per second). */
+      homingTurn: 2.6,
+      /** Cone and hitscan shots bend toward the target by up to this much (radians). */
+      aimBend: 0.2,
+      throwMult: 1.7,
+      /** Seconds between tries to sniff out a new target after losing one. */
+      resniff: 0.5,
+    },
+    /** Crop Duster: bend over, then a huge fart: a green shockwave plus a cloud that inflates and slows. */
+    cropDuster: {
+      /** Seconds bent over before it lets rip, and how long the pose lasts in all. */
+      windup: 0.25,
+      poseTime: 0.9,
+      radius: 9,
+      knockback: 1.6,
+      inflation: 0.16,
+      /** Strength at the edge of the shockwave relative to point-blank. */
+      edge: 0.4,
+      /** The fart jump: upward speed it gives you. */
+      selfLaunch: 12,
+      cloudTime: 5,
+      cloudRadius: 6,
+      /** Inflation per second while you stand in the cloud. */
+      cloudInflation: 0.05,
+      cloudSlow: 0.6,
+    },
+    /** Robot Mode: scan and lock on to up to 3 enemies in view, then a barrage of homing mini-rockets. */
+    robot: {
+      scanTime: 0.6,
+      barrageTime: 1.5,
+      rockets: 6,
+      maxTargets: 3,
+      range: 45,
+      /** Half-angle (radians) of "in view" when locking on. */
+      viewCone: 0.75,
+      rocketSpeed: 30,
+      rocketTurn: 5,
+      rocketLifetime: 3,
+      rocketRadius: 0.35,
+      blastRadius: 2.2,
+      knockback: 0.75,
+      inflation: 0.08,
+    },
+  },
+
   crown: {
     /** Knockouts in a row (without being knocked out) needed to wear the crown. */
     minStreak: 2,

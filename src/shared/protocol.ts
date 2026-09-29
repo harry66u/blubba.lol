@@ -5,8 +5,9 @@ import type { DynamicSolidInfo, MatchPhase, MatchResult, ModeId, Pickup } from '
 import type { Loadout } from './loadout';
 import type { ChaosEvent } from './game/chaos';
 import type { Cosmetics, ProgressReport, ReportReason } from './economy';
+import { publicUlt } from './game/ults';
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 // --- Binary message ids -------------------------------------------------------------------
 export const MSG_INPUTS = 1;
@@ -49,7 +50,11 @@ export type ClientMessage =
   | { type: 'debug'; action: 'chaos'; kind: string }
   | { type: 'debug'; action: 'endIn'; seconds: number }
   | { type: 'debug'; action: 'bots'; count: number }
-  | { type: 'debug'; action: 'streak'; count: number };
+  | { type: 'debug'; action: 'streak'; count: number }
+  /** Fills your ult meter (optionally switching to `kind` first); `all` fills everyone's. */
+  | { type: 'debug'; action: 'ult'; kind?: string; all?: boolean }
+  /** Lines the bots up in front of you. */
+  | { type: 'debug'; action: 'gather' };
 
 export interface RosterEntry {
   id: number;
@@ -171,6 +176,10 @@ export interface PublicPlayer {
   dashCharges: number;
   hangAngle: number;
   weapon: number;
+  /** Ult state bits (see publicUlt in game/ults.ts). */
+  ult: number;
+  /** Who The Chase is locked on to (-1 = nobody). */
+  ultTarget: number;
 }
 
 /** Per-mode state that changes every tick (team scores, the ball, pump fill). */
@@ -189,7 +198,7 @@ export interface Snapshot {
   mode: ModeState | null;
 }
 
-const PUBLIC_BYTES = 1 + 12 + 6 + 2 + 2 + 2 + 1 + 2 + 1 + 1 + 1 + 1 + 1 + 1;
+const PUBLIC_BYTES = 1 + 12 + 6 + 2 + 2 + 2 + 1 + 2 + 1 + 1 + 1 + 1 + 1 + 1 + 2;
 const TWO_PI = Math.PI * 2;
 
 export function publicFlags(s: PlayerState): number {
@@ -280,6 +289,9 @@ export function encodeSnapshot(
     o += 1;
     v.setUint8(o, weapon & 255);
     o += 1;
+    v.setUint8(o, publicUlt(s));
+    v.setUint8(o + 1, (s.chaseTimer > 0 ? s.chaseTarget + 1 : 0) & 255);
+    o += 2;
   }
   if (mode) writeMode(v, o, mode);
   return buf;
@@ -394,6 +406,8 @@ export function decodeSnapshot(v: DataView): Snapshot {
       dashCharges: v.getUint8(o + 31),
       hangAngle: (v.getUint8(o + 32) / 255) * TWO_PI,
       weapon: v.getUint8(o + 33),
+      ult: v.getUint8(o + 34),
+      ultTarget: v.getUint8(o + 35) - 1,
     };
     o += PUBLIC_BYTES;
     players.push(p);

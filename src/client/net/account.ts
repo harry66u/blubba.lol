@@ -1,4 +1,5 @@
 import { type Cosmetics, DEFAULT_COSMETICS, type ProfileView, emptyStats, unlockedAt } from '../../shared/economy';
+import { ULT_IDS } from '../../shared/game/ults';
 
 const TOKEN_KEY = 'bubba.token.v1';
 
@@ -47,11 +48,12 @@ export class AccountClient {
   }
 
   /** What's locked in the loadout screen at the current level. */
-  get locked(): { mods: string[]; utils: string[] } {
+  get locked(): { mods: string[]; utils: string[]; ults: string[] } {
     const u = unlockedAt(this.profile.level);
     return {
       mods: ['wideNozzle', 'bigTank', 'chargeValve', 'quickValve', 'longBarrel'].filter((m) => !u.mods.includes(m as never)),
       utils: ['bouncePad', 'airGrenade', 'inflatableWall', 'vacuumGrenade'].filter((x) => !u.utils.includes(x as never)),
+      ults: ULT_IDS.filter((x) => !u.ults.includes(x)),
     };
   }
 

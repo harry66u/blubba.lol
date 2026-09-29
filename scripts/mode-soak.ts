@@ -16,12 +16,14 @@ for (const mode of MODE_IDS) {
     let outs = 0;
     let kos = 0;
     let falls = 0;
+    let ults = 0;
     const start = sim.time;
     while (sim.phase !== 'results' && sim.time - start < 400) {
       sim.step();
       for (const e of sim.drainEvents()) {
         if (e.t === 'goal') goals++;
         if (e.t === 'ballOut') outs++;
+        if (e.t === 'ult') ults++;
         if (e.t === 'ko') {
           if (e.killer >= 0) kos++;
           else falls++;
@@ -32,7 +34,7 @@ for (const mode of MODE_IDS) {
     const len = Math.round(sim.time - start);
     const pump = sim.pumpGame ? ` fill=${sim.pumpGame.fill.map((f) => Math.round(f * 100)).join('/')}%` : '';
     console.log(
-      `${mode.padEnd(13)} ${mapId.padEnd(12)} ${len}s kos=${kos} falls=${falls}` +
+      `${mode.padEnd(13)} ${mapId.padEnd(12)} ${len}s kos=${kos} falls=${falls} ults=${ults}` +
         (sim.ballGame ? ` goals=${goals} outs=${outs}` : '') +
         pump +
         (r?.teams ? ` teams=${r.teams.scores.join('-')} winner=${r.teams.winner}` : ` top=${r?.standings[0]?.name}:${r?.standings[0]?.score}`),

@@ -2797,3 +2797,347 @@ body.touch .inflation .self-gain {
   left: 40px;
   font-size: 24px;
 }
+
+/* --- Ults: meter, READY pulse, status, full-screen splash, screen tints, loadout picker, touch button --- */
+.ult-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.ult-meter {
+  --ult: #ffd60a;
+  position: absolute;
+  left: calc(50% + 196px);
+  bottom: 14px;
+  width: 78px;
+  height: 78px;
+  transition: opacity 0.2s, filter 0.2s;
+}
+.ult-meter svg {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+.ult-meter .ult-icon {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+  filter: grayscale(0.6) opacity(0.75);
+  transition: transform 0.2s, filter 0.2s;
+}
+.ult-meter .ult-key {
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  transform: translateX(-50%);
+  margin: 0;
+  font-size: 12px;
+  line-height: 15px;
+}
+.ult-meter .ult-label {
+  position: absolute;
+  left: 50%;
+  bottom: 84px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 17px;
+  letter-spacing: 1px;
+  color: var(--ult);
+  -webkit-text-stroke: 4px var(--ink);
+  paint-order: stroke fill;
+}
+.ult-meter.ready {
+  filter: drop-shadow(0 0 10px var(--ult)) drop-shadow(0 0 22px var(--ult));
+  animation: ult-ready 0.7s ease-in-out infinite alternate;
+}
+.ult-meter.ready .ult-icon {
+  filter: none;
+  transform: scale(1.18);
+}
+.ult-meter.ready .ult-label {
+  animation: ult-label 0.7s ease-in-out infinite alternate;
+}
+.ult-meter.dead {
+  opacity: 0.45;
+}
+.ult-meter.ready.pop {
+  animation: ult-pop 0.7s cubic-bezier(0.3, 1.8, 0.5, 1), ult-ready 0.7s ease-in-out 0.7s infinite alternate;
+}
+@keyframes ult-ready {
+  to {
+    transform: scale(1.1);
+  }
+}
+@keyframes ult-label {
+  to {
+    transform: translateX(-50%) translateY(-4px) scale(1.08);
+  }
+}
+@keyframes ult-pop {
+  0% {
+    transform: scale(2.2) rotate(-12deg);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.ult-status {
+  --ult: #ffd60a;
+  position: absolute;
+  left: 50%;
+  bottom: 136px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  background: var(--ult);
+  color: var(--ink);
+  border: 3px solid var(--ink);
+  border-radius: 12px;
+  padding: 3px 12px;
+  font-size: 16px;
+  box-shadow: 0 3px 0 var(--ink), 0 0 16px var(--ult);
+}
+.ult-status.warn {
+  background: #ff5fd2;
+  color: white;
+  text-shadow: 0 2px 0 var(--ink);
+  animation: pulse 0.35s ease-in-out infinite alternate;
+}
+
+/* Your ult: its name fills the screen for a moment. */
+.ult-splash {
+  --ult: #ffd60a;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  opacity: 0;
+}
+.ult-splash.go {
+  animation: ult-splash 1.6s ease-out forwards;
+}
+.ult-splash .rays {
+  position: absolute;
+  inset: -60%;
+  background: repeating-conic-gradient(from 0deg, color-mix(in srgb, var(--ult) 45%, transparent) 0deg 7deg, transparent 7deg 18deg);
+  -webkit-mask-image: radial-gradient(circle, #000 0 18%, transparent 55%);
+  mask-image: radial-gradient(circle, #000 0 18%, transparent 55%);
+  animation: ult-rays 1.6s linear forwards;
+}
+.ult-splash .ico {
+  position: relative;
+  font-size: 84px;
+  line-height: 1;
+  filter: drop-shadow(0 6px 0 var(--ink));
+}
+.ult-splash .nm {
+  position: relative;
+  font-size: 92px;
+  line-height: 1;
+  color: var(--ult);
+  -webkit-text-stroke: 9px var(--ink);
+  paint-order: stroke fill;
+  text-shadow: 0 8px 0 var(--ink), 0 0 40px var(--ult);
+  white-space: nowrap;
+}
+.ult-splash .tag {
+  position: relative;
+  margin-top: 8px;
+  font-size: 26px;
+  color: white;
+  text-shadow: 0 3px 0 var(--ink);
+}
+.ult-splash .by {
+  position: relative;
+  margin-top: 4px;
+  font-size: 15px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--ult);
+  text-shadow: 0 2px 0 var(--ink);
+}
+@keyframes ult-splash {
+  0% {
+    opacity: 0;
+    transform: scale(0.3) rotate(-8deg);
+  }
+  12% {
+    opacity: 1;
+    transform: scale(1.12) rotate(2deg);
+  }
+  22% {
+    transform: scale(1) rotate(0deg);
+  }
+  75% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+@keyframes ult-rays {
+  to {
+    transform: rotate(40deg);
+  }
+}
+
+/* Screen tints: in a Crop Duster cloud, Robot Mode scanning, and being chased. */
+.ult-gas,
+.ult-scan,
+.ult-chased {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.ult-gas {
+  box-shadow: inset 0 0 180px 70px rgba(130, 205, 40, 0.6);
+  background: radial-gradient(circle, transparent 35%, rgba(150, 210, 60, 0.28));
+}
+.ult-gas.on {
+  opacity: 1;
+  animation: ult-gas 1.4s ease-in-out infinite alternate;
+}
+@keyframes ult-gas {
+  to {
+    filter: hue-rotate(-18deg) saturate(1.4);
+    transform: scale(1.03);
+  }
+}
+.ult-scan {
+  background: repeating-linear-gradient(0deg, rgba(255, 32, 48, 0.14) 0 2px, transparent 2px 6px);
+  box-shadow: inset 0 0 140px 30px rgba(255, 32, 48, 0.45);
+}
+.ult-scan::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 18%;
+  background: linear-gradient(transparent, rgba(255, 60, 70, 0.35), transparent);
+  animation: ult-scanbar 0.6s linear infinite;
+}
+.ult-scan.on {
+  opacity: 1;
+}
+@keyframes ult-scanbar {
+  from {
+    top: -18%;
+  }
+  to {
+    top: 100%;
+  }
+}
+.ult-chased {
+  box-shadow: inset 0 0 120px 26px rgba(255, 95, 210, 0.55);
+}
+.ult-chased.on {
+  opacity: 1;
+  animation: ult-chased 0.5s ease-in-out infinite alternate;
+}
+@keyframes ult-chased {
+  to {
+    box-shadow: inset 0 0 160px 44px rgba(255, 95, 210, 0.75);
+  }
+}
+
+/* Loadout: the Ultimate picker. */
+.ult-section {
+  margin-top: 14px;
+}
+.ult-picker {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+}
+.loadout .ult-card {
+  --ult: #ffd60a;
+  font-family: var(--font);
+  text-align: left;
+  color: var(--ink);
+  background: white;
+  border: 4px solid var(--ink);
+  border-radius: 18px;
+  padding: 10px 12px;
+  cursor: pointer;
+  box-shadow: 0 5px 0 var(--ink);
+  transition: transform 0.08s;
+}
+.loadout .ult-card:hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+.loadout .ult-card.selected {
+  background: color-mix(in srgb, var(--ult) 22%, white);
+  box-shadow: 0 5px 0 var(--ink), 0 0 0 4px var(--ult);
+}
+.loadout .ult-card:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.loadout .ult-card .ico {
+  font-size: 30px;
+}
+.loadout .ult-card .title {
+  font-size: 17px;
+  margin: 2px 0;
+}
+.loadout .ult-card .by {
+  display: inline-block;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  background: var(--ult);
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+  padding: 0 6px;
+  margin-bottom: 4px;
+}
+.loadout .ult-card .blurb {
+  font-size: 12px;
+  min-height: 0;
+}
+@media (max-width: 760px) {
+  .ult-picker {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Touch: a big round ULT button that fills with the meter and glows when it's ready. */
+.touch-controls .ult {
+  right: 238px;
+  bottom: 156px;
+  font-size: 15px;
+  background: conic-gradient(rgba(255, 214, 10, 0.8) calc(var(--ult, 0) * 360deg), rgba(255, 255, 255, 0.22) 0);
+}
+.touch-controls .ult.ready {
+  font-size: 30px;
+  background: radial-gradient(circle, #fff3a0, #ffb020);
+  border-color: var(--ink);
+  box-shadow: 0 0 18px 6px rgba(255, 190, 40, 0.9);
+  animation: pulse 0.5s ease-in-out infinite alternate;
+}
+body.touch .ult-meter {
+  display: none;
+}
+body.touch .ult-status {
+  bottom: auto;
+  top: 124px;
+  font-size: 12px;
+}
+body.touch .ult-splash .nm {
+  font-size: 54px;
+  -webkit-text-stroke: 6px var(--ink);
+}
+body.touch .ult-splash .ico {
+  font-size: 50px;
+}
+body.touch .ult-splash .tag {
+  font-size: 17px;
+}

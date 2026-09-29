@@ -20,6 +20,10 @@ export interface TouchState {
   reloading: boolean;
   features: { brace: boolean; grab: boolean; grapple: boolean };
   utilIcons: [string, string];
+  /** Ult meter 0..1, whether it's ready, and your ult's icon. */
+  ult: number;
+  ultReady: boolean;
+  ultIcon: string;
 }
 
 interface ButtonDef {
@@ -38,6 +42,7 @@ const BUTTONS: ButtonDef[] = [
   { act: 'reload', label: '↻', cls: 'reload small' },
   { act: 'util1', label: '?', cls: 'util1 small' },
   { act: 'util2', label: '?', cls: 'util2 small' },
+  { act: 'ult', label: 'ULT', cls: 'ult mid' },
   { act: 'camera', label: '🎥', cls: 'camera tiny' },
   { act: 'taunt', label: '😜', cls: 'taunt tiny' },
   { act: 'score', label: '🏆', cls: 'score tiny' },
@@ -271,6 +276,13 @@ export class TouchControls {
     const u2 = this.buttons.get('util2')!.el.lastElementChild!;
     if (u1.textContent !== s.utilIcons[0]) u1.textContent = s.utilIcons[0];
     if (u2.textContent !== s.utilIcons[1]) u2.textContent = s.utilIcons[1];
+    // The ULT button fills up with the meter and glows when it's ready.
+    const ult = this.buttons.get('ult')!;
+    ult.el.style.setProperty('--ult', s.ult.toFixed(2));
+    ult.el.classList.toggle('ready', s.ultReady);
+    const ul = ult.el.lastElementChild!;
+    const text = s.ultReady ? `${s.ultIcon}` : 'ULT';
+    if (ul.textContent !== text) ul.textContent = text;
   }
 }
 
@@ -285,6 +297,7 @@ export const TOUCH_LABELS: Partial<Record<Action, string>> = {
   reload: '↻',
   util1: 'left gadget',
   util2: 'right gadget',
+  ult: 'ULT',
   camera: '🎥',
   forward: 'stick',
   back: 'stick',

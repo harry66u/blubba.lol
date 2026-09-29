@@ -1,4 +1,5 @@
 import { BALANCE } from './balance';
+import { DEFAULT_ULT, ULT_IDS, type UltId } from './game/ults';
 
 export const WEAPON_IDS = ['airCannon', 'leafBlower', 'airHorn', 'pumpRifle'] as const;
 export type WeaponId = (typeof WEAPON_IDS)[number];
@@ -13,9 +14,11 @@ export interface Loadout {
   weapon: WeaponId;
   mods: ModId[];
   utils: [UtilityId, UtilityId];
+  /** Ultimate ability (game/ults.ts). */
+  ult: UltId;
 }
 
-export const DEFAULT_LOADOUT: Loadout = { weapon: 'airCannon', mods: [], utils: ['bouncePad', 'airGrenade'] };
+export const DEFAULT_LOADOUT: Loadout = { weapon: 'airCannon', mods: [], utils: ['bouncePad', 'airGrenade'], ult: DEFAULT_ULT };
 
 export const MAX_MODS = 2;
 /** Mods that pull in opposite directions can't be combined. */
@@ -139,7 +142,7 @@ export function computeWeaponStats(id: WeaponId, mods: readonly ModId[]): Weapon
 }
 
 /** Cleans up an untrusted loadout (from the network or storage). */
-export function sanitizeLoadout(raw: unknown, allowed?: { mods?: readonly string[]; utils?: readonly string[] }): Loadout {
+export function sanitizeLoadout(raw: unknown, allowed?: { mods?: readonly string[]; utils?: readonly string[]; ults?: readonly string[] }): Loadout {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<Loadout>;
   const weapon = WEAPON_IDS.includes(r.weapon as WeaponId) ? (r.weapon as WeaponId) : DEFAULT_LOADOUT.weapon;
   const mods: ModId[] = [];
@@ -157,7 +160,8 @@ export function sanitizeLoadout(raw: unknown, allowed?: { mods?: readonly string
   }
   for (const d of DEFAULT_LOADOUT.utils) if (utils.length < 2 && !utils.includes(d)) utils.push(d);
   for (const u of UTILITY_IDS) if (utils.length < 2 && !utils.includes(u)) utils.push(u);
-  return { weapon, mods, utils: [utils[0], utils[1]] };
+  const ult = ULT_IDS.includes(r.ult as UltId) && (!allowed?.ults || allowed.ults.includes(r.ult as UltId)) ? (r.ult as UltId) : DEFAULT_ULT;
+  return { weapon, mods, utils: [utils[0], utils[1]], ult };
 }
 
 export function utilityCooldown(id: UtilityId): number {

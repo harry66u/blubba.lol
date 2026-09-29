@@ -69,6 +69,8 @@ import { CHASE, aimFromCamera, chaseCamera, rebaseMove } from './chaseCam';
 import { ServerClock } from './clock';
 import { TipCoach } from '../ui/tips';
 import { TOUCH_LABELS, type TouchControls } from '../input/touch';
+import { PROJ_BIG_BLOW, ULT_INFO, isUltProjectile, publicUlt, steerToward, ultOf, ultReady } from '../../shared/game/ults';
+import { type UltPlayerView, UltView } from './ultView';
 
 interface HistoryEntry {
   seq: number;
@@ -119,6 +121,10 @@ interface RemoteShot {
   vy: number;
   vz: number;
   p3: Projectile3D;
+  /** Homing (ult rockets, Chase shots): target and turn rate; flown step by step from `at` (seconds). */
+  home?: number;
+  turn?: number;
+  at?: number;
 }
 
 interface LocalShot {
@@ -127,6 +133,8 @@ interface LocalShot {
   life: number;
   exploded: boolean;
   boomAt: THREE.Vector3 | null;
+  /** Fired during The Chase: curves toward this player. */
+  home?: number;
 }
 
 export interface MatchInfo {
@@ -254,6 +262,8 @@ export class ClientGame {
   /** Players whose quick chat you've hidden (this session). */
   readonly muted = new Set<number>();
   showChat = true;
+  /** Ult visuals, sounds and HUD (ultView.ts). */
+  readonly ultView: UltView;
 
   constructor(
     readonly r: Renderer,
@@ -275,6 +285,48 @@ export class ClientGame {
     r.setTheme(this.map.theme);
     input.onAnyPress = (a) => this.tips.used(a);
     this.effects.camPos = r.camera.position;
+    this.ultView = new UltView({
+      youId: () => this.youId,
+      pred: () => this.pred,
+      alive: () => this.havePred && this.pred.mode !== MODE_DEAD,
+      effects: this.effects,
+      hud,
+      audio,
+      camera: r.camera,
+      scene: r.scene,
+      tick: () => this.clock.tickAt(performance.now()),
+      lowQuality: () => r.quality === 'low',
+      players: () => this.ultPlayers(),
+      nameOf: (id) => this.nameOf(id),
+      colorOf: (id) => this.colorOf(id),
+      eyeOf: (id, out) => {
+        // In first person your own laser would start inside the camera: only draw it in third person.
+        if (id === this.youId) return this.selfMan?.group.visible ? this.selfMan.eyeWorld(out) : null;
+        const rv = this.remotes.get(id);
+        return rv?.man.group.visible ? rv.man.eyeWorld(out) : null;
+      },
+      jab: (id) => (id === this.youId ? this.selfMan?.jab() : this.remotes.get(id)?.man.jab()),
+      keyOf: () => this.key('ult'),
+      shake: (amount, fov) => {
+        this.trauma = Math.min(1, this.trauma + amount);
+        this.fovKick += fov;
+      },
+    });
+  }
+
+  /** Everyone as the ult visuals see them. */
+  private ultPlayers(): UltPlayerView[] {
+    const out: UltPlayerView[] = [];
+    if (this.havePred && this.pred.mode !== MODE_DEAD) {
+      const p = this.pred;
+      out.push({ id: this.youId, ult: publicUlt(p), ultTarget: p.chaseTimer > 0 ? p.chaseTarget : -1, x: p.px, y: p.py, z: p.pz, head: p.py + BALANCE.player.height * inflationScale(p.inflation) + 0.3 });
+    }
+    for (const rv of this.remotes.values()) {
+      const c = rv.cur;
+      if (!c || c.mode === MODE_DEAD || !rv.man.group.visible) continue;
+      out.push({ id: rv.id, ult: c.ult, ultTarget: c.ultTarget, x: c.px, y: c.py, z: c.pz, head: c.py + rv.man.headHeight(c.inflation) });
+    }
+    return out;
   }
 
   private makeCtx(features: StepContext['features']): StepContext {
@@ -376,7 +428,7 @@ export class ClientGame {
     this.seq = 0;
     this.pred = createPlayerState();
     this.pred.mode = MODE_DEAD;
-    this.input.syncCounters({ jump: 0, dash: 0, brace: 0, grab: 0, grapple: 0, reload: 0, util1: 0, util2: 0, taunt: 0 });
+    this.input.syncCounters({ jump: 0, dash: 0, brace: 0, grab: 0, grapple: 0, reload: 0, util1: 0, util2: 0, taunt: 0, ult: 0 });
     this.active = true;
     this.viewModel.root.visible = true;
     this.hud.show(true);
@@ -406,6 +458,7 @@ export class ClientGame {
     this.audio.setCharge(0);
     this.audio.setBlower(0);
     this.entities.clear();
+    this.ultView.clear();
   }
 
   // --- Network -----------------------------------------------------------------------------
@@ -574,7 +627,7 @@ export class ClientGame {
     const you = this.youId;
     switch (e.t) {
       case 'shot':
-        return e.owner === you && e.w === 0;
+        return e.owner === you && (e.w === 0 || e.w === PROJ_BIG_BLOW);
       case 'boom':
       case 'fizzle':
         return this.localByServer.has(e.id);
@@ -622,6 +675,12 @@ export class ClientGame {
       case 'escapeFail':
       case 'grapple':
         return e.id === you;
+      case 'ult':
+      case 'fart':
+        return e.id === you;
+      case 'sniff':
+      case 'gotcha':
+        return e.id === you || e.target === you;
       default:
         return false;
     }
@@ -690,22 +749,32 @@ export class ClientGame {
     const fx = this.effects;
     switch (e.t) {
       case 'shot': {
-        if (e.owner === you && e.w === 0) {
+        if (e.owner === you && (e.w === 0 || e.w === PROJ_BIG_BLOW)) {
           // Link the server's projectile to the one we already drew.
-          const local = e.cs !== undefined ? this.localShots.get(-e.cs) : undefined;
+          let local = e.cs !== undefined ? this.localShots.get(-e.cs) : undefined;
+          if (local && e.w === PROJ_BIG_BLOW && !local.p3.style) {
+            // The server had loaded a Big Blow we didn't know about yet: draw that instead.
+            fx.removeProjectile(-e.cs!);
+            this.localShots.delete(-e.cs!);
+            local = undefined;
+          }
           if (local) {
             local.serverId = e.id;
             this.localByServer.set(e.id, -e.cs!);
           } else {
             const key = -100000 - e.id;
-            const p3 = fx.addProjectile(key, e.x, e.y, e.z, e.vx, e.vy, e.vz, e.r);
-            this.localShots.set(key, { p3, serverId: e.id, life: this.weapon.projLifetime, exploded: false, boomAt: null });
+            const big = e.w === PROJ_BIG_BLOW;
+            const p3 = fx.addProjectile(key, e.x, e.y, e.z, e.vx, e.vy, e.vz, e.r, undefined, e.w);
+            this.localShots.set(key, { p3, serverId: e.id, life: big ? BALANCE.ults.bigBlow.lifetime : this.weapon.projLifetime, exploded: false, boomAt: null });
             this.localByServer.set(e.id, key);
+            if (big) this.ultView.onShot(e);
           }
         } else {
           const p3 = fx.addProjectile(e.id, e.x, e.y, e.z, e.vx, e.vy, e.vz, e.r, undefined, e.w);
-          this.remoteShots.set(e.id, { id: e.id, g: e.g ?? 0, tick: e.tick, x: e.x, y: e.y, z: e.z, vx: e.vx, vy: e.vy, vz: e.vz, p3 });
-          if (e.w === 0) {
+          this.remoteShots.set(e.id, { id: e.id, g: e.g ?? 0, tick: e.tick, x: e.x, y: e.y, z: e.z, vx: e.vx, vy: e.vy, vz: e.vz, p3, home: e.home, turn: e.turn });
+          if (isUltProjectile(e.w)) {
+            this.ultView.onShot(e);
+          } else if (e.w === 0) {
             a.shoot(e.power, [e.x, e.y, e.z]);
             const sp = Math.hypot(e.vx, e.vy, e.vz) || 1;
             fx.muzzleFlash(e.x, e.y, e.z, e.vx / sp, e.vy / sp, e.vz / sp, e.power);
@@ -726,6 +795,7 @@ export class ClientGame {
             fx.removeProjectile(localKey);
             this.localShots.delete(localKey);
           }
+          if (isUltProjectile(e.k)) this.ultView.onBoom(e);
         } else {
           const rs = this.remoteShots.get(e.id);
           if (rs) {
@@ -733,7 +803,9 @@ export class ClientGame {
             this.remoteShots.delete(e.id);
           }
           this.showBlast(e.x, e.y, e.z, e.r, e.power);
-          if (e.k) {
+          if (isUltProjectile(e.k)) {
+            this.ultView.onBoom(e);
+          } else if (e.k) {
             fx.confettiBurst(e.x, e.y, e.z, 25, [0x2ec5ff, 0xffffff, 0x9fe8ff]);
             this.hud.popup(tmpV.set(e.x, e.y + 1.5, e.z), 'KA-WHOOSH!', '#2ec5ff', 1.2, 1, e.owner !== you);
           }
@@ -744,7 +816,13 @@ export class ClientGame {
         const rs = this.remoteShots.get(e.id);
         if (rs) {
           Object.assign(rs, { tick: e.tick, x: e.x, y: e.y, z: e.z, vx: e.vx, vy: e.vy, vz: e.vz });
-          a.thud([e.x, e.y, e.z], 3);
+          if (e.home !== undefined) {
+            // A rocket locked on to someone mid-flight: fly on from here.
+            rs.home = e.home;
+            rs.at = undefined;
+          } else {
+            a.thud([e.x, e.y, e.z], 3);
+          }
         }
         break;
       }
@@ -1102,6 +1180,12 @@ export class ClientGame {
         if (e.target === you) this.hud.callout('STOMPED!', '', 1.2, '#ff9f1c');
         break;
       }
+      case 'ult':
+      case 'fart':
+      case 'sniff':
+      case 'gotcha':
+        this.ultView.onEvent(e);
+        break;
       case 'grapple': {
         const from = () => this.handPos(e.id);
         const fixed = new THREE.Vector3(e.x, e.y, e.z);
@@ -1381,6 +1465,7 @@ export class ClientGame {
       this.viewModel.startReload(BALANCE.weapons.airCannon.reloadTime);
     }
     if (out.fired) this.fireLocal(out);
+    if (out.ult || out.fartBlast) this.ultView.localStep(out.ult, out.fartBlast);
     if (out.taunt) {
       a.burp(null);
     }
@@ -1389,6 +1474,19 @@ export class ClientGame {
   private fireLocal(out: StepResult): void {
     const f = out.fired!;
     const w = this.weapon;
+    if (f.ult) {
+      // Big Blow: one giant air ball, whatever you carry.
+      const B = BALANCE.ults.bigBlow;
+      this.viewModel.kick(2.4);
+      this.punchV += 4;
+      this.muzzlePos(tmpV);
+      this.ultView.localBigBlow(tmpV.x, tmpV.y, tmpV.z, f.dx, f.dy, f.dz);
+      this.localBlast = B.blastRadius;
+      const key = -this.seq;
+      const p3 = this.effects.addProjectile(key, f.ox, f.oy, f.oz, f.dx * B.projSpeed, f.dy * B.projSpeed, f.dz * B.projSpeed, B.radius, tmpV, PROJ_BIG_BLOW);
+      this.localShots.set(key, { p3, serverId: -1, life: B.lifetime, exploded: false, boomAt: null });
+      return;
+    }
     if (w.kind === 'cone') {
       this.viewModel.kick(f.power * 1.5);
       this.audio.airBlast(f.power, null);
@@ -1425,7 +1523,8 @@ export class ClientGame {
     const r = w.projRadius * (0.75 + 0.25 * f.power) * (f.mega ? M.megaRadius : 1);
     this.localBlast = w.blastRadius * (f.mega ? M.megaBlast : 1);
     const p3 = this.effects.addProjectile(key, f.ox, f.oy, f.oz, f.dx * w.projSpeed, f.dy * w.projSpeed, f.dz * w.projSpeed, r, tmpV);
-    this.localShots.set(key, { p3, serverId: -1, life: w.projLifetime, exploded: false, boomAt: null });
+    const home = this.pred.chaseTimer > 0 && this.pred.chaseTarget >= 0 ? this.pred.chaseTarget : undefined;
+    this.localShots.set(key, { p3, serverId: -1, life: w.projLifetime, exploded: false, boomAt: null, home });
     this.effects.airPuff(tmpV.x, tmpV.y, tmpV.z, 5, 2, 0.12);
   }
 
@@ -1495,6 +1594,7 @@ export class ClientGame {
     this.updateLocalFeedback(dt);
     this.updateAimAssist(dt);
     this.updateChaos(dt);
+    this.ultView.update(dt);
     this.mapView.update(dt, this.time);
     for (const v of this.entities.vacuums) this.effects.vacuumSwirl(v.x, v.y, v.z, BALANCE.utilities.vacuumGrenade.radius, dt);
     this.entities.update(dt, this.clock.tickAt(performance.now()));
@@ -1568,6 +1668,8 @@ export class ClientGame {
           cur.holding = src.holding;
           cur.dashCharges = src.dashCharges;
           cur.hangAngle = src.hangAngle;
+          cur.ult = src.ult;
+          cur.ultTarget = src.ultTarget;
         } else {
           const src = b && alpha >= 0.5 ? b : a;
           Object.assign(cur, src);
@@ -1707,6 +1809,7 @@ export class ClientGame {
     rv.man.setWeapon(WEAPON_IDS[c.weapon] ?? 'airCannon');
     p.dashing = (c.flags & FLAG_DASHING) !== 0;
     p.protected = (c.flags & FLAG_PROTECTED) !== 0;
+    this.ultView.pose(p, c.ult);
     rv.man.update(p);
     if (p.streaming && rv.man.muzzleWorld(tmpV3)) {
       const d = lookDir(c.yaw, c.pitch, tmpDir);
@@ -1727,7 +1830,7 @@ export class ClientGame {
     const scale = Math.max(0.55, Math.min(1.1, 14 / Math.max(1, dist)));
     rv.tag.el.style.transform = `translate(-50%, -100%) translate(${x}px, ${y}px) scale(${scale})`;
     const pct = Math.round(c.inflation * 100);
-    const text = `${p.crowned ? '👑 ' : ''}${pct}%${p.nemesis ? ' ⚔️' : ''}`;
+    const text = `${p.crowned ? '👑 ' : ''}${pct}%${p.nemesis ? ' ⚔️' : ''}${this.ultView.tagSuffix(c.ult)}`;
     if (text !== rv.lastTagText) {
       rv.lastTagText = text;
       rv.tag.pct.textContent = text;
@@ -1741,7 +1844,11 @@ export class ClientGame {
     // Remote shots follow the interpolated timeline.
     for (const s of this.remoteShots.values()) {
       const t = Math.max(0, (this.renderTick - s.tick) * DT);
-      this.effects.placeProjectile(s.p3, s.x + s.vx * t, s.y + s.vy * t - 0.5 * s.g * t * t, s.z + s.vz * t, dt);
+      if (s.home !== undefined && s.home >= 0 && s.turn) {
+        this.flyHoming(s, t);
+      } else {
+        this.effects.placeProjectile(s.p3, s.x + s.vx * t, s.y + s.vy * t - 0.5 * s.g * t * t, s.z + s.vz * t, dt);
+      }
       if (t > (s.g > 0 ? 7 : 2.5)) {
         this.effects.removeProjectile(s.id);
         this.remoteShots.delete(s.id);
@@ -1758,6 +1865,9 @@ export class ClientGame {
         continue;
       }
       const p = s.p3;
+      // The Chase: our shot curves toward the target like the server's does.
+      const aim = s.home !== undefined ? this.targetCenter(s.home) : null;
+      if (aim) steerToward(p, p.x, p.y, p.z, aim.x, aim.y, aim.z, BALANCE.ults.chase.homingTurn * dt);
       const nx = p.x + p.vx * dt;
       const ny = p.y + p.vy * dt;
       const nz = p.z + p.vz * dt;
@@ -1792,6 +1902,44 @@ export class ClientGame {
       }
       this.effects.placeProjectile(p, nx, ny, nz, dt);
     }
+  }
+
+  /** Middle of a player's body as you see them (for drawing homing shots), or null if they're gone. */
+  private targetCenter(id: number): THREE.Vector3 | null {
+    if (id === this.youId) {
+      if (this.pred.mode === MODE_DEAD) return null;
+      return tmpV3.set(this.pred.px, this.pred.py + playerHeight(this.pred) * 0.5, this.pred.pz);
+    }
+    const c = this.remotes.get(id)?.cur;
+    if (!c || c.mode === MODE_DEAD) return null;
+    return tmpV3.set(c.px, c.py + BALANCE.player.height * inflationScale(c.inflation) * 0.5, c.pz);
+  }
+
+  /** Steps a homing remote shot along from where it was last drawn, turning toward its target. */
+  private flyHoming(s: RemoteShot, t: number): void {
+    const p = s.p3;
+    if (s.at === undefined) {
+      s.at = 0;
+      p.vx = s.vx;
+      p.vy = s.vy;
+      p.vz = s.vz;
+      p.x = s.x;
+      p.y = s.y;
+      p.z = s.z;
+    }
+    let x = p.x;
+    let y = p.y;
+    let z = p.z;
+    while (s.at < t) {
+      const h = Math.min(DT, t - s.at);
+      const aim = this.targetCenter(s.home!);
+      if (aim) steerToward(p, x, y, z, aim.x, aim.y, aim.z, s.turn! * h);
+      x += p.vx * h;
+      y += p.vy * h;
+      z += p.vz * h;
+      s.at += h;
+    }
+    this.effects.placeProjectile(p, x, y, z, DT);
   }
 
   /**
@@ -1945,6 +2093,7 @@ export class ClientGame {
     pose.nemesis = false;
     pose.dashing = p.dashTimer > 0;
     pose.protected = p.spawnProt > 0;
+    this.ultView.pose(pose, publicUlt(p));
     man.setWeapon(this.weapon.id);
     man.update(pose);
   }
@@ -2126,6 +2275,9 @@ export class ClientGame {
       reloading: p.reloadTimer > 0,
       features: this.ctx.features,
       utilIcons: [UTIL_ICONS[UTILITY_INFO[this.loadout.utils[0]].name] ?? '?', UTIL_ICONS[UTILITY_INFO[this.loadout.utils[1]].name] ?? '?'],
+      ult: alive ? Math.min(1, p.ult) : 0,
+      ultReady: alive && ultReady(p),
+      ultIcon: ULT_INFO[ultOf(p)].icon,
     });
     const k = (a: Action) => this.key(a);
     this.hud.setKeys(

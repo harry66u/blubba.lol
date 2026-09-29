@@ -546,6 +546,7 @@ export function buildHowTo(onClose: () => void, bindings: Record<Action, string[
     row(['🪝'], 'Grapple');
     row(['↻'], 'Reload');
     row(['🟣 💥'], 'Your two gadgets');
+    row(['ULT'], 'Ultimate ability (glows when the meter is full)');
     row(['🎥'], 'First / third person');
     row(['💬'], 'Quick chat');
     row(['🏆'], 'Scoreboard (hold)');
@@ -553,7 +554,7 @@ export function buildHowTo(onClose: () => void, bindings: Record<Action, string[
   } else {
     row(['W', 'A', 'S', 'D'], 'Move');
     row(['Trackpad'], 'Aim (or mouse)');
-    for (const a of ['fire', 'jump', 'dash', 'brace', 'grapple', 'grab', 'reload', 'util1', 'util2', 'camera', 'taunt', 'chat', 'scoreboard'] as Action[]) {
+    for (const a of ['fire', 'jump', 'dash', 'brace', 'grapple', 'grab', 'reload', 'util1', 'util2', 'ult', 'camera', 'taunt', 'chat', 'scoreboard'] as Action[]) {
       row(bindings[a].slice(0, 2).map(codeLabel), ACTION_LABELS[a]);
     }
     row(['Esc'], 'Menu');
@@ -696,6 +697,7 @@ const PAD_ACTION_LABELS: Record<string, string> = {
   util1: 'Utility 1',
   util2: 'Utility 2',
   taunt: 'Taunt',
+  ult: 'Ultimate ability',
   camera: 'Camera: first / third person',
   chat: 'Quick chat (hold, aim with R-stick)',
   scoreboard: 'Scoreboard',

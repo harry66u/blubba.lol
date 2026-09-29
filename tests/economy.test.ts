@@ -33,7 +33,7 @@ describe('economy rules', () => {
   });
 
   it('unlocks mods and utilities by level, never weapons', () => {
-    expect(unlockedAt(1)).toEqual({ mods: [], utils: ['bouncePad', 'airGrenade'] });
+    expect(unlockedAt(1)).toEqual({ mods: [], utils: ['bouncePad', 'airGrenade'], ults: ['bigBlow'] });
     expect(unlockedAt(8).mods.length).toBe(5);
     expect(unlockedAt(8).utils.length).toBe(4);
   });
