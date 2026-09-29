@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ITEM_BY_ID, type ProfileView, levelForXp, sanitizeCosmetics } from '../shared/economy';
 import { checkName } from '../shared/names';
 import { type Account, type ImageKind, type Store, accountKey, guestKey, validGuestId } from './store';
+import type { Presence } from './lobby';
 
 const MAX_BODY = 4096;
 /** Face scans are small square photos (the client sends about 160 px, well under this). */
@@ -59,6 +60,18 @@ export interface Caller {
   key: string | null;
 }
 
+/** A friend (or request) as the friends list shows it. `playing.code` is only given when you can join. */
+export interface FriendView {
+  id: number;
+  name: string;
+  status: 'friends' | 'incoming' | 'outgoing';
+  online: boolean;
+  playing: { code: string; mode: string; joinable: boolean; private: boolean } | null;
+}
+
+/** Someone who opened the game this recently counts as online. */
+const ONLINE_WINDOW_MS = 90_000;
+
 /** Account, profile, store and leaderboard endpoints under /api/. All JSON. */
 export class Api {
   private readonly authLimiter = new RateLimiter(10, 10 / 60);
@@ -66,6 +79,10 @@ export class Api {
   private readonly logLimiter = new RateLimiter(10, 10 / 60);
   /** Lets the lobby hear about purchases/equips so in-match players update right away. */
   onProfileChange: ((key: string) => void) | null = null;
+  /** Which of these accounts are in a match, and where (the lobby answers). */
+  presence: ((ids: Set<number>) => Map<number, Presence>) | null = null;
+  /** When each account last had the game open (menus poll /api/friends), for "online". */
+  private readonly lastSeen = new Map<number, number>();
 
   constructor(private readonly store: Store) {}
 
@@ -81,6 +98,23 @@ export class Api {
   view(c: Caller): ProfileView | null {
     if (!c.key) return null;
     return this.store.view(c.key, c.account?.name ?? null, !!c.account);
+  }
+
+  private seen(id: number): void {
+    this.lastSeen.set(id, Date.now());
+    if (this.lastSeen.size > 20000) this.lastSeen.delete(this.lastSeen.keys().next().value!);
+  }
+
+  /** Your friends and requests, with who's online and which match they're in. */
+  private friendsOf(id: number): FriendView[] {
+    const list = this.store.friends(id);
+    const where = this.presence?.(new Set(list.filter((f) => f.status === 'friends').map((f) => f.id))) ?? new Map<number, Presence>();
+    const now = Date.now();
+    return list.map((f) => {
+      const p = f.status === 'friends' ? where.get(f.id) : undefined;
+      const online = f.status === 'friends' && (!!p || now - (this.lastSeen.get(f.id) ?? 0) < ONLINE_WINDOW_MS);
+      return { id: f.id, name: f.name, status: f.status, online, playing: p ? { code: p.joinable ? p.code : '', mode: p.queue ? 'ranked' : p.mode, joinable: p.joinable, private: p.isPrivate } : null };
+    });
   }
 
   /** True when the request carries the admin token (set BUBBA_ADMIN_TOKEN, 12+ characters). */
@@ -162,6 +196,7 @@ export class Api {
       case '/api/me': {
         const c = this.caller(req);
         if (c.key) this.store.markActive(c.key);
+        if (c.account) this.seen(c.account.id);
         return {
           active: this.store.activeToday(),
           account: c.account ? { name: c.account.name, id: c.account.id } : null,
@@ -334,6 +369,30 @@ export class Api {
         this.store.saveProfile(c.key);
         this.onProfileChange?.(c.key);
         return { profile: this.view(c) };
+      }
+      case '/api/friends':
+      case '/api/friends/add':
+      case '/api/friends/accept':
+      case '/api/friends/remove': {
+        const b = req.method === 'POST' ? await this.body(req) : {};
+        const c = this.caller(req);
+        if (!c.account) throw new ApiError(401, 'account_required', 'Make a free account to add friends.');
+        const me = c.account.id;
+        this.seen(me);
+        let added: string | undefined;
+        if (path !== '/api/friends') {
+          if (!this.writeLimiter.take(ip)) throw new ApiError(429, 'slow_down', 'Slow down a little.');
+          const other = Number(b.id);
+          if (path === '/api/friends/add') {
+            const r = this.store.requestFriend(me, String(b.name ?? '').slice(0, 20));
+            if (!r.ok) throw new ApiError(400, 'friend', r.message);
+            added = r.status;
+          } else if (!Number.isInteger(other) || other <= 0) throw new ApiError(400, 'bad_id', 'Bad id.');
+          else if (path === '/api/friends/accept') {
+            if (!this.store.acceptFriend(me, other)) throw new ApiError(404, 'no_request', 'That request is gone.');
+          } else this.store.removeFriend(me, other);
+        }
+        return { friends: this.friendsOf(me), added };
       }
       case '/api/leaderboard':
         return { players: this.store.leaderboard(20) };

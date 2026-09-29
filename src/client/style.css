@@ -6646,3 +6646,94 @@ body.mouse-play .touch-controls {
   font-weight: 700;
   text-align: left;
 }
+
+/* Friends. */
+.nav-btn {
+  position: relative;
+}
+.nav-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 999px;
+  border: 2px solid var(--ink);
+  background: var(--pink);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 16px;
+  text-align: center;
+}
+.overlay .panel.friends-panel {
+  width: min(460px, 96vw);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.friends-add {
+  gap: 8px;
+}
+.friends-add input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 3px solid var(--ink);
+  border-radius: var(--r-md);
+  font: inherit;
+  font-weight: 800;
+  color: var(--ink);
+  background: #fff;
+}
+.friends-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(52vh, 420px);
+  overflow-y: auto;
+}
+.friend-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 2px solid var(--line);
+  border-radius: var(--r-md);
+  background: #fff;
+}
+.friend-row .dot {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #c5c2d4;
+}
+.friend-row.online .dot {
+  background: #2fd35f;
+  box-shadow: 0 0 0 3px rgba(47, 211, 95, 0.25);
+}
+.friend-row.incoming {
+  border-color: var(--pink);
+}
+.friend-row .who {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+.friend-row .nm {
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.friend-row .what {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.friend-row .acts {
+  display: flex;
+  gap: 6px;
+}

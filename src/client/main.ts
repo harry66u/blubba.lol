@@ -21,6 +21,7 @@ import { clear } from './ui/dom';
 import { buildReconnecting } from './ui/reconnect';
 import { type AccountTab, buildAccountChip, buildAccountPanel, buildDailyCard, buildProfile, buildQueue, updateQueue } from './ui/accountUi';
 import { buildFaceScan } from './ui/faceScan';
+import { buildFriends } from './ui/friends';
 import { buildLocker } from './ui/locker';
 import { Hud } from './ui/hud';
 import {
@@ -31,6 +32,7 @@ import {
   buildHowTo,
   buildMainMenu,
   setActiveCount,
+  setFriendBadge,
   buildPause,
   buildReplayBanner,
   buildResults,
@@ -102,7 +104,7 @@ uiRoot.append(hud.root, ...(touch ? [touch.root] : []), scoreLayer, menuLayer, o
 
 type Screen = 'menu' | 'room-join' | 'connecting' | 'queue' | 'playing' | 'reconnecting';
 let screen: Screen = 'menu';
-let overlay: 'none' | 'pause' | 'settings' | 'howto' | 'click' | 'results' | 'loadout' | 'replay' | 'locker' | 'profile' | 'account' | 'face' = 'none';
+let overlay: 'none' | 'pause' | 'settings' | 'howto' | 'click' | 'results' | 'loadout' | 'replay' | 'locker' | 'profile' | 'account' | 'face' | 'friends' = 'none';
 let accountTab: AccountTab = 'signup';
 let lockerDispose: (() => void) | null = null;
 let pendingJoin: JoinRequest | null = null;
@@ -201,8 +203,14 @@ function setPath(path: string): void {
 
 // --- Screens -----------------------------------------------------------------------------------
 
+/** Friend requests show up on the menu within half a minute (accounts only). */
+window.setInterval(() => {
+  if (screen === 'menu' && account.account && overlay !== 'friends') void account.loadFriends().catch(() => undefined);
+}, 30_000);
+
 function showMenu(notice?: MenuNotice | string): void {
   stopReconnecting();
+  if (account.account) void account.loadFriends().catch(() => undefined);
   screen = 'menu';
   setOverlay('none');
   setPath('/');
@@ -218,6 +226,7 @@ function renderMenu(notice?: MenuNotice | string): void {
       onLoadout: () => setOverlay('loadout'),
       onLocker: () => setOverlay('locker'),
       onProfile: () => setOverlay('profile'),
+      onFriends: () => (account.account ? setOverlay('friends') : openAccount('signup')),
       onPlay: (name, mode) => {
         if (mode !== 'ranked') return startJoin(name, quickJoin(mode));
         if (!account.account) return openAccount('signup');
@@ -246,6 +255,7 @@ function openAccount(tab: AccountTab): void {
 let lastAccountName: string | null = null;
 account.onChange(() => {
   setActiveCount(account.active);
+  setFriendBadge(account.friendRequests);
   // Drop anything the saved loadout has that isn't unlocked yet.
   const allowed = unlockedAt(unlockLevelOf(account.profile));
   const clean = sanitizeLoadout(game.loadout, allowed);
@@ -254,6 +264,8 @@ account.onChange(() => {
   if (name !== lastAccountName) {
     lastAccountName = name;
     if (name) rememberName(name);
+    // Just logged in: fetch friends so waiting requests show on the menu.
+    if (name) void account.loadFriends().catch(() => undefined);
     if (screen === 'menu') renderMenu();
   }
 });
@@ -421,6 +433,21 @@ function setOverlay(next: typeof overlay): void {
         ),
       );
       break;
+    case 'friends': {
+      const friends = buildFriends({
+        account,
+        onJoin: (code) => {
+          setOverlay('none');
+          if (screen === 'playing') leaveMatch();
+          startJoin(identity.name, { kind: 'code', code });
+        },
+        onSignup: () => openAccount('signup'),
+        onClose: back,
+      });
+      lockerDispose = friends.dispose;
+      overlayLayer.append(friends.root);
+      break;
+    }
     case 'face': {
       const scan = buildFaceScan(account, () => setOverlay('profile'));
       lockerDispose = scan.dispose;
@@ -748,6 +775,18 @@ function renderScoreboard(): void {
             },
             muted: game.muted,
             reported,
+            onFriend: account.account
+              ? (r) => {
+                  void account.addFriend(r.name).then(
+                    (st) => {
+                      hud.toast(st === 'friends' ? `You and ${r.name} are friends now!` : `Friend request sent to ${r.name}.`);
+                      renderScoreboard();
+                    },
+                    (err: Error) => hud.toast(err.message),
+                  );
+                }
+              : null,
+            friendState: (acc) => account.friends.find((f) => f.id === acc)?.status ?? '',
           },
       game.teamView(),
     ),
@@ -825,6 +864,8 @@ net.handlers = {
       return;
     }
     if (msg.type === 'welcome') {
+      // The scoreboard's add-friend buttons need to know who's a friend already.
+      if (account.account) void account.loadFriends().catch(() => undefined);
       if (msg.room.ranked) padPlay = padPlay || input.lastDevice === 'pad';
       stopReconnecting();
       lastRoom = { code: msg.room.code, isPrivate: msg.room.isPrivate, mode: msg.room.settings.mode, ranked: msg.room.ranked };

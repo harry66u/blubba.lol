@@ -655,6 +655,7 @@ export class Room {
       level: profile ? levelForXp(profile.xp).level : p.isBot ? 0 : 1,
       face: this.faceOf(conn),
       decal: this.faceOf(conn, 'decal'),
+      acc: conn?.accountId ?? undefined,
       rating: this.ranked && profile ? profile.rating : undefined,
       out: this.sim.isOut(p) || undefined,
       score: p.score,

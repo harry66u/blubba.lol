@@ -85,6 +85,8 @@ export interface RosterEntry {
   level: number;
   /** Their face scan's version (image at /api/face/<account>?v=<face>), if they have one showing. */
   face?: { account: number; v: number };
+  /** Their account id, for players with an account (to add them as a friend). */
+  acc?: number;
   /** Their custom decal (image at /api/decal/<account>?v=<decal>), if they have one showing. */
   decal?: { account: number; v: number };
   /** Ranked rooms only. */

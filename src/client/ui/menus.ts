@@ -19,6 +19,7 @@ export interface MenuCallbacks {
   onLoadout: () => void;
   onLocker: () => void;
   onProfile: () => void;
+  onFriends: () => void;
   onPlay: (name: string, mode: PlayMode) => void;
   onChallenge: (name: string) => void;
   onModeChange: (mode: PlayMode) => void;
@@ -117,7 +118,21 @@ function noticeBox(notice: MenuNotice | string | undefined): HTMLElement | null 
 
 /** A nav button with an icon (menu side column, pause menu). */
 function navButton(icon: string, label: string, onClick: () => void, extra = ''): HTMLButtonElement {
-  return el('button', { class: `btn small ghost nav-btn ${extra}`, on: { click: onClick } }, el('span', { class: 'ico', text: icon, attrs: { 'aria-hidden': 'true' } }), el('span', { text: label }));
+  return el(
+    'button',
+    { class: `btn small ghost nav-btn ${extra}`, on: { click: onClick } },
+    el('span', { class: 'ico', text: icon, attrs: { 'aria-hidden': 'true' } }),
+    el('span', { text: label }),
+    el('span', { class: 'nav-badge hidden' }),
+  );
+}
+
+/** Friend requests waiting: a number on the menu's Friends button. */
+export function setFriendBadge(n: number): void {
+  for (const b of document.querySelectorAll<HTMLElement>('.friends-btn .nav-badge')) {
+    b.textContent = String(n);
+    b.classList.toggle('hidden', n <= 0);
+  }
 }
 
 /** Colors and names for team scoreboards and results. */
@@ -364,6 +379,7 @@ export function buildMainMenu(
     navButton('🎯', 'Loadout', cb.onLoadout),
     navButton('👕', 'Locker', cb.onLocker),
     navButton('🏆', 'Profile', cb.onProfile),
+    navButton('👥', 'Friends', cb.onFriends, 'friends-btn'),
     navButton('❓', 'How to play', cb.onHowTo),
     navButton('⚙️', 'Settings', cb.onSettings),
   );
@@ -641,6 +657,10 @@ export interface ScoreActions {
   onMute: (id: number) => void;
   muted: Set<number>;
   reported: Set<number>;
+  /** Add someone with an account as a friend (null for guests: you need an account too). */
+  onFriend: ((r: RosterEntry) => void) | null;
+  /** Where you stand with an account ('' = not friends yet). */
+  friendState: (acc: number) => '' | 'friends' | 'incoming' | 'outgoing';
 }
 
 export function buildScoreboard(
@@ -736,6 +756,16 @@ function scoreTable(rows: RosterEntry[], youId: number, hostId: number, isPrivat
           },
         },
       }),
+      r.acc && actions.onFriend && actions.friendState(r.acc) !== 'friends'
+        ? actions.friendState(r.acc) === 'outgoing'
+          ? el('span', { class: 'small-note', text: ' sent ' })
+          : el('button', {
+              class: 'btn small ghost icon-btn',
+              text: '👥',
+              attrs: { title: actions.friendState(r.acc) === 'incoming' ? 'Accept their friend request' : 'Add as a friend', 'aria-label': 'Add as a friend' },
+              on: { click: () => actions.onFriend?.(r) },
+            })
+        : null,
       actions.reported.has(r.id)
         ? el('span', { class: 'small-note', text: ' reported' })
         : el('button', { class: 'btn small ghost icon-btn', text: '⚑', attrs: { title: 'Report', 'aria-label': 'Report' }, on: { click: () => reportMenu(r, actions, cell) } }),

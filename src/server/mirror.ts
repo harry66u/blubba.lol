@@ -80,6 +80,14 @@ const SCHEMA = `
     at BIGINT NOT NULL,
     PRIMARY KEY (account_id, reporter)
   );
+  CREATE TABLE IF NOT EXISTS blubba_friends (
+    a BIGINT NOT NULL,
+    b BIGINT NOT NULL,
+    status TEXT NOT NULL,
+    requested_by BIGINT NOT NULL,
+    at BIGINT NOT NULL,
+    PRIMARY KEY (a, b)
+  );
   CREATE TABLE IF NOT EXISTS blubba_daily_active (
     day TEXT NOT NULL,
     key TEXT NOT NULL,
@@ -102,6 +110,7 @@ const TABLES: readonly { local: string; remote: string; cols: readonly string[];
   { local: 'face_reports', remote: 'blubba_face_reports', cols: ['account_id', 'reporter', 'at'], pk: ['account_id', 'reporter'] },
   { local: 'decals', remote: 'blubba_decals', cols: ['account_id', 'mime', 'data', 'updated_at', 'hidden', 'reports', 'banned'], pk: ['account_id'] },
   { local: 'decal_reports', remote: 'blubba_decal_reports', cols: ['account_id', 'reporter', 'at'], pk: ['account_id', 'reporter'] },
+  { local: 'friends', remote: 'blubba_friends', cols: ['a', 'b', 'status', 'requested_by', 'at'], pk: ['a', 'b'] },
   { local: 'daily_active', remote: 'blubba_daily_active', cols: ['day', 'key'], pk: ['day', 'key'] },
   { local: 'character_faces', remote: 'blubba_character_faces', cols: ['account_id', 'char_key', 'approved', 'at'], pk: ['account_id'] },
 ];

@@ -19,6 +19,16 @@ export interface LeaderboardRow {
   level: number;
 }
 
+/** A friend or request (see the server's FriendView). */
+export interface Friend {
+  id: number;
+  name: string;
+  status: 'friends' | 'incoming' | 'outgoing';
+  online: boolean;
+  /** In a match (code set when you can join it), or the ranked queue. */
+  playing: { code: string; mode: string; joinable: boolean; private: boolean } | null;
+}
+
 export interface FaceStatus {
   version: number | null;
   hidden: boolean;
@@ -34,6 +44,8 @@ export class AccountClient {
   account: { name: string; id?: number } | null = null;
   /** Your face scan: its version (null = none), and whether reports or a moderator hid it. */
   face: FaceStatus | null = null;
+  /** Your friends and requests (accounts only; loaded by loadFriends). */
+  friends: Friend[] = [];
   /** Your custom decal (same states as a face scan). */
   decal: FaceStatus | null = null;
   /** How many different players opened the game today (shown as "active" on the menu). */
@@ -154,6 +166,7 @@ export class AccountClient {
     this.account = null;
     this.face = null;
     this.decal = null;
+    this.friends = [];
     this.character = null;
     await this.refresh().catch(() => this.apply({ account: null, profile: AccountClient.blankProfile() }));
   }
@@ -190,6 +203,40 @@ export class AccountClient {
     const r = await this.call<{ character: { character: string; approved: boolean } | null }>('/api/face/character', { character });
     this.character = r.character;
     this.emit();
+  }
+
+  async loadFriends(): Promise<Friend[]> {
+    if (!this.account) {
+      this.friends = [];
+      return this.friends;
+    }
+    this.friends = (await this.call<{ friends: Friend[] }>('/api/friends')).friends;
+    this.emit();
+    return this.friends;
+  }
+
+  /** Sends a request by name. Returns 'sent', or 'friends' when they had already asked you. */
+  async addFriend(name: string): Promise<string> {
+    const r = await this.call<{ friends: Friend[]; added?: string }>('/api/friends/add', { name });
+    this.friends = r.friends;
+    this.emit();
+    return r.added ?? 'sent';
+  }
+
+  async acceptFriend(id: number): Promise<void> {
+    this.friends = (await this.call<{ friends: Friend[] }>('/api/friends/accept', { id })).friends;
+    this.emit();
+  }
+
+  /** Unfriend, decline, or cancel a request. */
+  async removeFriend(id: number): Promise<void> {
+    this.friends = (await this.call<{ friends: Friend[] }>('/api/friends/remove', { id })).friends;
+    this.emit();
+  }
+
+  /** Requests waiting for your answer (the menu badge). */
+  get friendRequests(): number {
+    return this.friends.filter((f) => f.status === 'incoming').length;
   }
 
   async buy(itemId: string): Promise<void> {

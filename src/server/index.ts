@@ -83,6 +83,7 @@ await connectDatabase(store);
 const api = new Api(store);
 const lobby = new Lobby(store);
 api.onProfileChange = (key) => lobby.profileChanged(key);
+api.presence = (ids) => lobby.presence(ids);
 lobby.start();
 
 function serveStatic(req: IncomingMessage, res: ServerResponse): void {

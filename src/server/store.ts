@@ -54,6 +54,9 @@ export function validGuestId(id: unknown): id is string {
 }
 
 const SESSION_DAYS = 90;
+/** Most friends (and open requests) an account can have. */
+export const MAX_FRIENDS = 100;
+
 /** Face scans go on the head, decals on the chest; both are pictures players upload. */
 export type ImageKind = 'face' | 'decal';
 const IMAGE_TABLES: Record<ImageKind, [table: string, reports: string]> = { face: ['faces', 'face_reports'], decal: ['decals', 'decal_reports'] };
@@ -208,6 +211,14 @@ export class Store {
         reporter TEXT NOT NULL,
         at INTEGER NOT NULL,
         PRIMARY KEY (account_id, reporter)
+      );
+      CREATE TABLE IF NOT EXISTS friends (
+        a INTEGER NOT NULL,
+        b INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        requested_by INTEGER NOT NULL,
+        at INTEGER NOT NULL,
+        PRIMARY KEY (a, b)
       );
       CREATE TABLE IF NOT EXISTS daily_active (
         day TEXT NOT NULL,
@@ -593,6 +604,67 @@ export class Store {
       .prepare(`SELECT f.account_id AS id, a.name AS name, f.updated_at AS at, f.hidden AS hidden, f.banned AS banned, f.reports AS reports FROM ${IMAGE_TABLES[kind][0]} f LEFT JOIN accounts a ON a.id = f.account_id ORDER BY f.updated_at DESC`)
       .all() as { id: number; name: string | null; at: number; hidden: number; banned: number; reports: number }[];
     return rows.map((r) => ({ id: Number(r.id), name: r.name ?? '?', updatedAt: Number(r.at), hidden: !!Number(r.hidden), banned: !!Number(r.banned), reports: Number(r.reports) }));
+  }
+
+  // --- Friends ----------------------------------------------------------------------------------
+  // Accounts add each other by name: a request, then the other side accepts. Each pair is one row
+  // (a < b) that is 'pending' until accepted, then 'friends'.
+
+  /**
+   * Sends a friend request to an account by name. If they already asked you, you're now friends.
+   * Returns what happened, or an error message.
+   */
+  requestFriend(fromId: number, toName: string, now = Date.now()): { ok: true; status: 'sent' | 'friends'; id: number } | { ok: false; message: string } {
+    const to = this.accountByName(toName.trim());
+    if (!to) return { ok: false, message: 'No account with that name.' };
+    if (to.id === fromId) return { ok: false, message: "That's you!" };
+    const [a, b] = fromId < to.id ? [fromId, to.id] : [to.id, fromId];
+    const row = this.db.prepare('SELECT status, requested_by FROM friends WHERE a = ? AND b = ?').get(a, b) as { status: string; requested_by: number } | undefined;
+    if (row?.status === 'friends') return { ok: true, status: 'friends', id: to.id };
+    if (row && Number(row.requested_by) === fromId) return { ok: true, status: 'sent', id: to.id };
+    if (row) {
+      // They asked first: that's a yes.
+      this.db.prepare("UPDATE friends SET status = 'friends', at = ? WHERE a = ? AND b = ?").run(now, a, b);
+      this.mirror?.row('friends', { a, b });
+      return { ok: true, status: 'friends', id: to.id };
+    }
+    const count = Number((this.db.prepare('SELECT COUNT(*) AS n FROM friends WHERE a = ? OR b = ?').get(fromId, fromId) as { n: number }).n);
+    if (count >= MAX_FRIENDS) return { ok: false, message: `You can have up to ${MAX_FRIENDS} friends and requests.` };
+    this.db.prepare("INSERT INTO friends (a, b, status, requested_by, at) VALUES (?, ?, 'pending', ?, ?)").run(a, b, fromId, now);
+    this.mirror?.row('friends', { a, b });
+    return { ok: true, status: 'sent', id: to.id };
+  }
+
+  /** Accepts a request someone sent you. False if there isn't one. */
+  acceptFriend(id: number, otherId: number, now = Date.now()): boolean {
+    const [a, b] = id < otherId ? [id, otherId] : [otherId, id];
+    const res = this.db.prepare("UPDATE friends SET status = 'friends', at = ? WHERE a = ? AND b = ? AND status = 'pending' AND requested_by = ?").run(now, a, b, otherId);
+    if (!Number(res.changes)) return false;
+    this.mirror?.row('friends', { a, b });
+    return true;
+  }
+
+  /** Unfriends, declines a request, or cancels one you sent. */
+  removeFriend(id: number, otherId: number): void {
+    const [a, b] = id < otherId ? [id, otherId] : [otherId, id];
+    this.db.prepare('DELETE FROM friends WHERE a = ? AND b = ?').run(a, b);
+    this.mirror?.deleteRows('friends', { a, b });
+  }
+
+  /** Your friends and requests, friends first then by name. */
+  friends(id: number): { id: number; name: string; status: 'friends' | 'incoming' | 'outgoing'; since: number }[] {
+    const rows = this.db
+      .prepare('SELECT f.a AS a, f.b AS b, f.status AS status, f.requested_by AS by, f.at AS at, acc.name AS name FROM friends f JOIN accounts acc ON acc.id = CASE WHEN f.a = ? THEN f.b ELSE f.a END WHERE f.a = ? OR f.b = ?')
+      .all(id, id, id) as { a: number; b: number; status: string; by: number; at: number; name: string }[];
+    const order = { friends: 0, incoming: 1, outgoing: 2 };
+    return rows
+      .map((r) => ({
+        id: Number(r.a) === id ? Number(r.b) : Number(r.a),
+        name: r.name,
+        status: (r.status === 'friends' ? 'friends' : Number(r.by) === id ? 'outgoing' : 'incoming') as 'friends' | 'incoming' | 'outgoing',
+        since: Number(r.at),
+      }))
+      .sort((x, y) => order[x.status] - order[y.status] || x.name.localeCompare(y.name));
   }
 
   // --- Active today ---------------------------------------------------------------------------

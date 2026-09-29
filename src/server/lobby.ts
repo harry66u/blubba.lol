@@ -32,6 +32,15 @@ export function wantedMap(mode: ModeId, map: unknown): string | null {
 }
 
 /** Someone waiting for a ranked opponent. */
+/** A friend in a match (or the ranked queue). */
+export interface Presence {
+  code: string;
+  mode: ModeId;
+  joinable: boolean;
+  isPrivate: boolean;
+  queue?: boolean;
+}
+
 interface Queued {
   ws: WebSocket;
   name: string;
@@ -296,6 +305,20 @@ export class Lobby {
     for (const room of this.rooms.values()) {
       for (const conn of room.conns.values()) if (conn.key === key) room.applyProfile(conn);
     }
+  }
+
+  /** Where each of these accounts is playing right now (for friends lists). */
+  presence(ids: Set<number>): Map<number, Presence> {
+    const out = new Map<number, Presence>();
+    for (const room of this.rooms.values()) {
+      if (room.closed) continue;
+      for (const c of room.conns.values()) {
+        if (c.accountId === null || !ids.has(c.accountId)) continue;
+        out.set(c.accountId, { code: room.code, mode: room.mode, joinable: !room.ranked && room.canJoin(), isPrivate: room.isPrivate });
+      }
+    }
+    for (const q of this.queue) if (ids.has(q.accountId)) out.set(q.accountId, { code: '', mode: 'duel', joinable: false, isPrivate: false, queue: true });
+    return out;
   }
 
   stats() {
