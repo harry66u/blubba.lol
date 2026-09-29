@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BALANCE } from '../src/shared/balance';
 import type { GameEvent } from '../src/shared/game/events';
-import { GameSim, type SimPlayer } from '../src/shared/game/sim';
+import { GameSim, type SimPlayer, shotInflation } from '../src/shared/game/sim';
 import {
   type Loadout,
   PART_SLOTS,
@@ -69,7 +69,7 @@ describe('Bubble Shotgun', () => {
     // One hit event (one launch, one hit-stop), not seven.
     expect(hits.length).toBe(1);
     const W = BALANCE.weapons.bubbleShotgun;
-    expect(b.state.inflation).toBeCloseTo(W.inflation * volley.power, 3);
+    expect(b.state.inflation).toBeCloseTo(W.inflation * shotInflation(volley.power), 3);
   });
 
   it('is weak at range, and charging tightens the ring so it reaches further', () => {
