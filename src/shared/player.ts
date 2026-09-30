@@ -294,7 +294,7 @@ export function stepPlayer(p: PlayerState, inp: InputFrame, ctx: StepContext, ou
 function tickTimers(p: PlayerState, dt: number): void {
   const D = BALANCE.dash;
   if (p.dashCharges < D.charges) {
-    p.dashRecharge -= dt;
+    p.dashRecharge -= p.chaseTimer > 0 ? dt * BALANCE.ults.chase.dashRecharge : dt;
     if (p.dashRecharge <= 0) {
       p.dashCharges += 1;
       p.dashRecharge = p.dashCharges < D.charges ? D.rechargeTime : 0;
@@ -342,10 +342,9 @@ function stepUlt(p: PlayerState, ultP: boolean, dt: number, out: StepResult): vo
   if (p.prideTimer > 0) p.prideTimer = Math.max(0, p.prideTimer - dt);
   p.gasTimer = Math.max(0, p.gasTimer - dt);
   if (p.chaseTimer > 0) {
+    // On the hunt, dashes recharge faster (see tickTimers), but not instantly: chaining air
+    // dashes every few frames used to let him fly for the whole ult.
     p.chaseTimer = Math.max(0, p.chaseTimer - dt);
-    // On the hunt, dashes recharge instantly.
-    p.dashCharges = BALANCE.dash.charges;
-    p.dashRecharge = 0;
     if (p.chaseTimer <= 0) p.chaseTarget = -1;
   }
   if (p.fartTimer > 0) {

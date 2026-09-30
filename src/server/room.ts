@@ -47,8 +47,12 @@ export interface Conn {
   chatTimes: number[];
   /** Players this connection already reported (one report each). */
   reported: Set<number>;
-  /** The map they picked for quick play (null: any map). A public room stays on it while they're in. */
+  /** The map they picked for quick play (null: any map): their vote when a public room moves on to its next map. */
   wantMap: string | null;
+  /** Public rooms: they want bots filling the empty spots (bots play while everyone here does). */
+  wantBots: boolean;
+  /** When they last flipped their bots vote (flipping is rate limited: bots joining and leaving is churn). */
+  botsVoteAt: number;
 }
 
 const CHAT_MIN_GAP_MS = 1200;
@@ -149,6 +153,8 @@ export class Room {
     let lastPhase = sim.phase;
     sim.onPhaseChange = () => {
       if (sim.phase !== 'results') this.againVotes.clear();
+      // Bots someone voted off during the match leave now it's over.
+      if (sim === this.sim && sim.phase !== 'playing' && this.refreshBots()) this.broadcastJson({ type: 'room', room: this.info() });
       if (sim.phase === 'waiting') this.resetTeamLobby(lastPhase === 'results' || lastPhase === 'playing');
       lastPhase = sim.phase;
       this.broadcastJson(this.matchMessage());
@@ -176,7 +182,40 @@ export class Room {
       features: { ...this.sim.features },
       challenge: this.challenge,
       ranked: this.ranked,
+      botVotes: this.votesBots ? [...this.conns.values()].filter((c) => c.wantBots).map((c) => c.playerId) : undefined,
     };
+  }
+
+  /** Public rooms decide bots by vote (private rooms leave it to the host; ranked never has any). */
+  get votesBots(): boolean {
+    return !this.isPrivate && !this.ranked;
+  }
+
+  /**
+   * Between matches with nobody to play: waiting for players (not counting down to a start), or
+   * the last moments of a results screen. The lobby moves people out of small rooms like this into
+   * a busier one of the same mode.
+   */
+  get betweenMatches(): boolean {
+    const s = this.sim;
+    if (s.phase === 'waiting') return !this.lobbyStartsAt;
+    return s.phase === 'results' && s.phaseEndsAt - s.time < 1.5;
+  }
+
+  /**
+   * Public rooms: bots fill the empty spots while every player here wants them (the menu's Bots
+   * switch, and the same switch in the pause menu and the team lobby), so one pool of players per
+   * mode can hold people who want bots and people who don't. Bots never vanish in the middle of a
+   * fight: switching them off waits for the match to end.
+   */
+  private refreshBots(): boolean {
+    if (!this.votesBots) return false;
+    const want = this.conns.size > 0 && [...this.conns.values()].every((c) => c.wantBots);
+    if (want === this.settings.bots) return false;
+    if (!want && this.sim.phase === 'playing' && this.sim.bots.size > 0) return false;
+    this.settings = { ...this.settings, bots: want };
+    this.balanceBots();
+    return true;
   }
 
   canJoin(): boolean {
@@ -197,7 +236,15 @@ export class Room {
     return idx;
   }
 
-  join(ws: WebSocket, name: string, guestId: string, loadout?: Loadout, identity: Identity = { key: null, accountId: null }, wantMap: string | null = null): Conn | null {
+  join(
+    ws: WebSocket,
+    name: string,
+    guestId: string,
+    loadout?: Loadout,
+    identity: Identity = { key: null, accountId: null },
+    wantMap: string | null = null,
+    wantBots = this.settings.bots,
+  ): Conn | null {
     if (!this.canJoin()) return null;
     // Make room by removing a bot if needed.
     if (this.playerCount >= BALANCE.match.maxPlayers) this.removeOneBot();
@@ -205,7 +252,7 @@ export class Room {
     const cos = profile ? { ...profile.cosmetics } : { ...DEFAULT_COSMETICS };
     const clean = sanitizeLoadout(loadout, this.allowed(identity));
     const p = this.sim.addPlayer(name, { loadout: clean, cos, color: this.colorFor(cos.color, -1) });
-    const conn: Conn = { ws, playerId: p.id, guestId, name, rtt: 0, inputMsgs: 0, key: identity.key, accountId: identity.accountId, chatTimes: [], reported: new Set(), wantMap };
+    const conn: Conn = { ws, playerId: p.id, guestId, name, rtt: 0, inputMsgs: 0, key: identity.key, accountId: identity.accountId, chatTimes: [], reported: new Set(), wantMap, wantBots, botsVoteAt: 0 };
     this.conns.set(p.id, conn);
     if (this.ranked && identity.key) this.rankedKeys.set(p.id, identity.key);
     if (this.hostId < 0 || !this.conns.has(this.hostId)) this.hostId = p.id;
@@ -214,6 +261,7 @@ export class Room {
     this.send(conn, { type: 'entities', ...this.sim.entitySnapshot() });
     this.rosterDirty = true;
     this.lobbySent = '';
+    this.refreshBots();
     this.balanceBots();
     // A real opponent arrived for a 1v1 that was warming up against a bot: start fresh.
     if (this.mode === 'duel' && this.humanCount === 2 && this.sim.autoStart) this.sim.startMatch();
@@ -247,6 +295,7 @@ export class Room {
     }
     if (this.conns.size === 0) this.emptySince = Date.now();
     this.rosterDirty = true;
+    if (this.refreshBots() || this.votesBots) this.broadcastJson({ type: 'room', room: this.info() });
     this.balanceBots();
     // Whoever is left may all be waiting on PLAY AGAIN already.
     this.checkAgain();
@@ -415,6 +464,13 @@ export class Room {
       case 'team':
         this.teamAction(conn, msg);
         break;
+      case 'bots':
+        if (!this.votesBots || typeof msg.on !== 'boolean' || conn.wantBots === msg.on || Date.now() - conn.botsVoteAt < 400) return;
+        conn.botsVoteAt = Date.now();
+        conn.wantBots = msg.on;
+        this.refreshBots();
+        this.broadcastJson({ type: 'room', room: this.info() });
+        break;
       case 'report':
         this.report(conn, msg.target, msg.reason);
         break;
@@ -496,22 +552,34 @@ export class Room {
       np.lastSeq = p.lastSeq;
     }
     this.broadcastJson({ type: 'entities', ...fresh.entitySnapshot() });
-  }
-
-  /** Someone here picked this room's map, so it doesn't rotate away from it. */
-  get mapPinned(): boolean {
-    for (const c of this.conns.values()) if (c.wantMap === this.settings.mapId) return true;
-    return false;
+    // The fresh match may sit waiting for players: clients must hear it's no longer the results.
+    this.broadcastJson(this.matchMessage());
   }
 
   /**
-   * Public knockout rooms move to the next map when the results screen ends, unless someone in
-   * the room picked the map they're on.
+   * Where a public knockout room goes when the results screen ends: the map most players here
+   * picked on the menu (ties take turns), or the next map in the rotation when nobody picked one.
    */
+  nextMap(): string {
+    const votes = new Map<string, number>();
+    for (const c of this.conns.values()) if (c.wantMap && KNOCKOUT_MAPS.includes(c.wantMap)) votes.set(c.wantMap, (votes.get(c.wantMap) ?? 0) + 1);
+    const n = KNOCKOUT_MAPS.length;
+    const from = Math.max(0, KNOCKOUT_MAPS.indexOf(this.settings.mapId));
+    if (!votes.size) return KNOCKOUT_MAPS[(this.rotation + 1) % n];
+    const top = Math.max(...votes.values());
+    // The first top pick after the current map, so two maps with a vote each take turns.
+    for (let i = 1; i <= n; i++) {
+      const m = KNOCKOUT_MAPS[(from + i) % n];
+      if (votes.get(m) === top) return m;
+    }
+    return this.settings.mapId;
+  }
+
   private rotateMap(): void {
-    if (this.mapPinned) return;
-    this.rotation = (this.rotation + 1) % KNOCKOUT_MAPS.length;
-    this.settings = { ...this.settings, mapId: KNOCKOUT_MAPS[this.rotation] };
+    const next = this.nextMap();
+    this.rotation = Math.max(0, KNOCKOUT_MAPS.indexOf(next));
+    if (next === this.settings.mapId) return;
+    this.settings = { ...this.settings, mapId: next };
     this.rebuild();
     this.balanceBots();
     this.broadcastJson({ type: 'room', room: this.info() });
@@ -565,8 +633,8 @@ export class Room {
   /**
    * Runs the lobby between Team Knockout matches: once both teams have enough players, they're
    * even, and every human is ready, a short countdown starts the match (anything changing stops
-   * it). In public rooms, one idle player can't hold everyone up: once someone is ready and the
-   * teams are fine, everyone counts as ready after a while.
+   * it). In public rooms, idle players can't hold everyone up: once the teams are fine, everyone
+   * counts as ready after a while.
    */
   private stepTeamLobby(): void {
     const s = this.sim;
@@ -574,14 +642,14 @@ export class Room {
     const T = BALANCE.modes.teamKnockout;
     for (const id of this.lobbyReady) if (!this.conns.has(id)) this.lobbyReady.delete(id);
     let check = checkTeamLobby(this.seats(), this.lobbyReady);
-    if (!this.isPrivate && check.teamsOk && !check.ok && this.lobbyReady.size > 0) {
+    if (!this.isPrivate && check.teamsOk && !check.ok) {
       if (!this.lobbyAutoReadyAt) this.lobbyAutoReadyAt = s.tick + T.autoReady * BALANCE.tickRate;
       else if (s.tick >= this.lobbyAutoReadyAt) {
         for (const id of this.conns.keys()) this.lobbyReady.add(id);
         check = checkTeamLobby(this.seats(), this.lobbyReady);
       }
     }
-    if (check.ok || !check.teamsOk || this.lobbyReady.size === 0) this.lobbyAutoReadyAt = 0;
+    if (check.ok || !check.teamsOk) this.lobbyAutoReadyAt = 0;
     if (!check.ok) this.lobbyStartsAt = 0;
     else if (!this.lobbyStartsAt) this.lobbyStartsAt = s.tick + T.countdown * BALANCE.tickRate;
     else if (s.tick >= this.lobbyStartsAt) {

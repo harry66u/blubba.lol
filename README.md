@@ -19,17 +19,24 @@ npm start            # serves everything on http://localhost:8080
 Open http://localhost:8080 and click **PLAY**. The menu starts on **Any mode**: everyone who just
 presses PLAY lands in the same **Sudden Death** rooms with real players only (the main mode: one
 life, get knocked out and you're out, last one standing wins the round). You can also pick a mode yourself (Sudden Death,
-Knockout, Team Knockout, Ball, Pump, 1v1, Ranked). Bots only fill in if you switch **Bots** on. To play with friends, click
-**Private room**, press **Esc** in the match, and use **Copy invite link** (links look like
-`http://host/r/ABCDE`). **1v1 challenge** copies a `http://host/c/ABCDE` link: whoever opens it
-plays you one-on-one.
+Knockout, Team Knockout, Ball, Pump, 1v1, Ranked). Everyone who picks the same mode plays
+together, whatever map or Bots switch they picked: your map is a vote for the next map, and bots
+only fill in while everyone in the match has **Bots** on (you can vote from the pause menu too).
+The menu shows how many people are playing each mode right now, and quiet rooms are merged into
+busier ones between matches. To play with friends, press **Esc** in any match and use **Copy
+invite link** (links look like `http://host/r/ABCDE`; public matches have one too), or **👥
+Invite** friends from your list: they get a JOIN card on their menu, and **JOIN** on the friends
+list follows a friend into whatever match they're in. **Private room** gives you host controls.
+**1v1 challenge** copies a `http://host/c/ABCDE` link: whoever opens it plays you one-on-one.
 
 **Team Knockout** plays on its own map, **Face-Off** (two bases across a contested middle,
 mirrored so neither side has an edge), and starts from a team lobby: pick a side, press
 **READY** (or **R**; **A** on a controller, bumpers to switch teams), and the match counts down
-once both teams have at least two players, they're even, and everyone is ready. There are no
-bots unless you switch them on (the menu's Bots switch for quick play, the host's settings in a
-private room). A private room's host can **Shuffle** and **Lock** the teams.
+once both teams have at least two players, they're even, and everyone is ready (in public rooms,
+30 seconds after the teams are fine it starts anyway). There are no bots unless everyone in the
+lobby presses **🤖 Fill with bots** (or has the menu's Bots switch on; in a private room the host
+decides): then bots take the empty seats and step aside as players join. A private room's host
+can **Shuffle** and **Lock** the teams.
 
 Controls are listed under **How to play** in the menu and every ability shows its key on the
 HUD. Press **V** to switch between first and third person (the choice is remembered). Phones and

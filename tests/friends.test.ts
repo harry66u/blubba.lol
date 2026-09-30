@@ -87,6 +87,43 @@ describe('friends', () => {
     expect((await call('/api/friends', b.token)).body.friends).toEqual([]);
   });
 
+  it('join a friend wherever they are, and invite friends into your match', async () => {
+    const a = await register('Followme');
+    const b = await register('Follower');
+    const stranger = await register('Strangeone');
+    await call('/api/friends/add', a.token, { name: 'Follower' });
+    await call('/api/friends/accept', b.token, { id: a.id });
+    // Not in a match yet: nothing to invite them into.
+    expect((await call('/api/friends/invite', a.token, { id: b.id })).status).toBe(400);
+    const connect = async (token: string, join: unknown, guestId: string) => {
+      const ws = new WebSocket(`${base.replace('http', 'ws')}/ws`);
+      const msgs: ServerMessage[] = [];
+      ws.on('message', (d, bin) => {
+        if (!bin) msgs.push(JSON.parse(String(d)));
+      });
+      await new Promise((r) => ws.once('open', r));
+      ws.send(JSON.stringify({ type: 'hello', v: PROTOCOL_VERSION, name: 'x', guestId, join, token }));
+      for (let i = 0; i < 100 && !msgs.some((m) => m.type === 'welcome' || m.type === 'error'); i++) await new Promise((r) => setTimeout(r, 10));
+      return { ws, msg: msgs.find((m) => m.type === 'welcome' || m.type === 'error')! };
+    };
+    const host = await connect(a.token, { kind: 'quick', mode: 'teamKnockout', open: true }, 'guest-follow-a');
+    const code = (host.msg as Extract<ServerMessage, { type: 'welcome' }>).room.code;
+    // A invites B: B sees it on their list, with the mode.
+    expect((await call('/api/friends/invite', a.token, { id: b.id })).status).toBe(200);
+    expect((await call('/api/friends/invite', a.token, { id: stranger.id })).status).toBe(404);
+    const seen = (await call('/api/friends', b.token)).body.friends.find((f) => f.id === a.id)!;
+    expect(seen.invite?.mode).toBe('teamKnockout');
+    // B follows A straight into their room; a stranger can't.
+    const follow = await connect(b.token, { kind: 'friend', id: a.id }, 'guest-follow-b');
+    expect(follow.msg.type).toBe('welcome');
+    expect((follow.msg as Extract<ServerMessage, { type: 'welcome' }>).room.code).toBe(code);
+    const nope = await connect(stranger.token, { kind: 'friend', id: a.id }, 'guest-follow-c');
+    expect(nope.msg).toMatchObject({ type: 'error', code: 'not_found' });
+    // Together now: the invite is spent.
+    expect((await call('/api/friends', b.token)).body.friends.find((f) => f.id === a.id)!.invite).toBeUndefined();
+    for (const x of [host, follow, nope]) x.ws.close();
+  });
+
   it('caps friends and requests', () => {
     const s = new Store(':memory:');
     const ids: number[] = [];

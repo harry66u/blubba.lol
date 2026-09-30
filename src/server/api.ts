@@ -67,10 +67,14 @@ export interface FriendView {
   status: 'friends' | 'incoming' | 'outgoing';
   online: boolean;
   playing: { code: string; mode: string; joinable: boolean; private: boolean } | null;
+  /** They invited you into their match (while it's fresh and you can still join it). */
+  invite?: { mode: string; at: number };
 }
 
 /** Someone who opened the game this recently counts as online. */
 const ONLINE_WINDOW_MS = 90_000;
+/** How long an invite to a friend's match shows. */
+const INVITE_TTL_MS = 3 * 60_000;
 
 /** Account, profile, store and leaderboard endpoints under /api/. All JSON. */
 export class Api {
@@ -81,6 +85,8 @@ export class Api {
   onProfileChange: ((key: string) => void) | null = null;
   /** Which of these accounts are in a match, and where (the lobby answers). */
   presence: ((ids: Set<number>) => Map<number, Presence>) | null = null;
+  /** Invites to friends' matches: invitee id -> inviter id -> when. */
+  private readonly invites = new Map<number, Map<number, number>>();
   /** When each account last had the game open (menus poll /api/friends), for "online". */
   private readonly lastSeen = new Map<number, number>();
 
@@ -108,13 +114,29 @@ export class Api {
   /** Your friends and requests, with who's online and which match they're in. */
   private friendsOf(id: number): FriendView[] {
     const list = this.store.friends(id);
-    const where = this.presence?.(new Set(list.filter((f) => f.status === 'friends').map((f) => f.id))) ?? new Map<number, Presence>();
+    const where = this.presence?.(new Set([id, ...list.filter((f) => f.status === 'friends').map((f) => f.id)])) ?? new Map<number, Presence>();
     const now = Date.now();
+    const mine = this.invites.get(id);
+    const myRoom = where.get(id)?.code;
     return list.map((f) => {
       const p = f.status === 'friends' ? where.get(f.id) : undefined;
       const online = f.status === 'friends' && (!!p || now - (this.lastSeen.get(f.id) ?? 0) < ONLINE_WINDOW_MS);
-      return { id: f.id, name: f.name, status: f.status, online, playing: p ? { code: p.joinable ? p.code : '', mode: p.queue ? 'ranked' : p.mode, joinable: p.joinable, private: p.isPrivate } : null };
+      const at = mine?.get(f.id) ?? 0;
+      // Already there together: nothing to show.
+      const invite = p?.joinable && p.code !== myRoom && now - at < INVITE_TTL_MS ? { mode: p.mode, at } : undefined;
+      return { id: f.id, name: f.name, status: f.status, online, playing: p ? { code: p.joinable ? p.code : '', mode: p.queue ? 'ranked' : p.mode, joinable: p.joinable, private: p.isPrivate } : null, invite };
     });
+  }
+
+  /** Invites a friend into the match you're in (they see it on their menu and friends list). */
+  private invite(me: number, other: number, now = Date.now()): void {
+    if (!this.store.friends(me).some((f) => f.id === other && f.status === 'friends')) throw new ApiError(404, 'not_friends', 'You can only invite people on your friends list.');
+    const here = this.presence?.(new Set([me])).get(me);
+    if (!here || !here.joinable) throw new ApiError(400, 'not_in_match', 'Get into a match with space first, then invite friends.');
+    const theirs = this.invites.get(other) ?? new Map<number, number>();
+    theirs.set(me, now);
+    this.invites.set(other, theirs);
+    if (this.invites.size > 5000) this.invites.delete(this.invites.keys().next().value!);
   }
 
   /** True when the request carries the admin token (set BUBBA_ADMIN_TOKEN, 12+ characters). */
@@ -371,6 +393,7 @@ export class Api {
         return { profile: this.view(c) };
       }
       case '/api/friends':
+      case '/api/friends/invite':
       case '/api/friends/add':
       case '/api/friends/accept':
       case '/api/friends/remove': {
@@ -388,6 +411,7 @@ export class Api {
             if (!r.ok) throw new ApiError(400, 'friend', r.message);
             added = r.status;
           } else if (!Number.isInteger(other) || other <= 0) throw new ApiError(400, 'bad_id', 'Bad id.');
+          else if (path === '/api/friends/invite') this.invite(me, other);
           else if (path === '/api/friends/accept') {
             if (!this.store.acceptFriend(me, other)) throw new ApiError(404, 'no_request', 'That request is gone.');
           } else this.store.removeFriend(me, other);

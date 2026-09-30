@@ -131,6 +131,8 @@ body {
   font-weight: 700;
   line-height: 1.15;
   letter-spacing: 0.5px;
+  /* Fredoka's kerning tucks an I under a V ("PRIVATE" read as "PRVATE"). */
+  font-kerning: none;
   color: white;
   background: linear-gradient(180deg, #ff7ab4 0%, var(--pink) 58%, #e0206e 100%);
   border: 4px solid var(--ink);
@@ -310,7 +312,9 @@ select.field:disabled {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  /* Centered when it fits, scrollable from the top when it doesn't (short laptop windows). */
+  justify-content: safe center;
+  overflow-y: auto;
   gap: 16px;
   padding: 12px 16px;
   /* A soft vignette over the 3D scene, a little brighter up top behind the logo. */
@@ -3648,6 +3652,39 @@ select.field:disabled {
 .mode-picker button.on .ico {
   animation: pop-in 0.4s var(--ease-pop);
 }
+/* Live player counts: a badge on each mode, and a line under the picked one. */
+.mode-picker button {
+  position: relative;
+}
+.mode-picker button .cnt {
+  position: absolute;
+  top: -8px;
+  right: -6px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: #2bd46a;
+  border: 2px solid var(--ink);
+  color: #fff;
+  font: 700 12px/16px var(--font-display);
+  text-align: center;
+  pointer-events: none;
+}
+.mode-picker button .cnt.lobby {
+  background: #ff9f1c;
+}
+.mode-live {
+  min-height: 1.2em;
+  margin-top: -6px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #169c4c;
+  text-align: center;
+}
+.mode-live:empty {
+  display: none;
+}
 .mode-blurb {
   min-height: 1.3em;
   font-size: 14px;
@@ -5041,6 +5078,10 @@ select.field:disabled {
     line-height: 1.3;
     z-index: 2;
   }
+  /* The pause button stays reachable above it (rotation lock on: you can still pause or leave). */
+  .touch-controls .pause {
+    z-index: 3;
+  }
 }
 
 /* HUD rearranged around the thumbs on touch screens. */
@@ -5762,8 +5803,9 @@ body.touch .inflation .self-gain {
 }
 .room-ticket {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 8px 12px;
   padding: 10px 14px;
   background: var(--wash);
   border: 2px solid var(--line);
@@ -7020,6 +7062,22 @@ body.touch .callout.small .main {
 .tl-host .label {
   color: white;
 }
+.tl-botsrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+.tl-bots-note {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 13px;
+  font-weight: 700;
+}
+.tl-bots-note:empty {
+  display: none;
+}
+
 .tl-foot {
   width: 100%;
   display: flex;
@@ -7090,4 +7148,60 @@ body.touch .tl-keys {
   .main-menu .menu-card > .map-picker.fixed {
     display: none;
   }
+}
+
+/* Friends' invites on the menu (top center, above everything but menus' overlays). */
+.invites {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(420px, calc(100vw - 32px));
+}
+.invites:empty {
+  display: none;
+}
+.invite-card-mini {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  border: 3px solid var(--ink);
+  background: #fff;
+  box-shadow: var(--lip-sm);
+  animation: pop-in 0.35s var(--ease-pop);
+}
+.invite-card-mini .nm {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 17px;
+}
+.invite-card-mini .what {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.friend-row.invited {
+  background: #eafff1;
+}
+
+/* First "click to play": mouse or trackpad (sets the aim speed). */
+.click-to-play .device-ask {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.92);
+  border: 2px solid var(--ink);
+}
+.click-to-play .device-ask .label {
+  margin: 0 4px 0 0;
+  color: var(--ink);
 }

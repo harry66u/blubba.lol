@@ -7,6 +7,8 @@ export type PopupWords = 'all' | 'near' | 'mine';
 
 export interface Settings {
   device: PointerDevice;
+  /** The player told us which they aim with (asked once, on the first "click to play"). */
+  deviceAsked: boolean;
   sensTrackpad: number;
   sensMouse: number;
   sensController: number;
@@ -36,6 +38,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   device: 'trackpad',
+  deviceAsked: false,
   sensTrackpad: 1,
   sensMouse: 1,
   sensController: 1,

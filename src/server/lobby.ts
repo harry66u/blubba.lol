@@ -5,13 +5,17 @@ import { MODE_IDS, type ModeId } from '../shared/game/modes';
 import { KNOCKOUT_MAPS, homeMapFor } from '../shared/maps';
 import type { Loadout } from '../shared/loadout';
 import { checkName, randomGuestName } from '../shared/names';
-import { type ClientMessage, type JoinRequest, PROTOCOL_VERSION, type ServerMessage } from '../shared/protocol';
+import { type ClientMessage, type JoinRequest, PROTOCOL_VERSION, type QueueCounts, type ServerMessage } from '../shared/protocol';
 import { type Conn, type Identity, Room } from './room';
 import { Store, accountKey, guestKey, validGuestId } from './store';
 
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const CODE_LENGTH = 5;
 const EMPTY_PRIVATE_TTL_MS = 5 * 60 * 1000;
+/** Public rooms this small get folded into a busier room of the same mode between matches. */
+const MERGE_MAX_HUMANS = 3;
+/** How long an invite link to a merged room still leads to where its players went. */
+const ALIAS_TTL_MS = 30 * 60 * 1000;
 
 export function makeCode(rng: () => number = Math.random): string {
   let s = '';
@@ -57,6 +61,9 @@ export class Lobby {
   readonly rooms = new Map<string, Room>();
   private readonly connRoom = new Map<WebSocket, { room: Room; conn: Conn }>();
   private queue: Queued[] = [];
+  /** Codes of rooms that were merged into another one, so their invite links still work. */
+  private readonly aliases = new Map<string, { code: string; until: number }>();
+  private countsCache: { at: number; counts: QueueCounts } | null = null;
   private timers: NodeJS.Timeout[] = [];
   private lastTime = 0;
   private acc = 0;
@@ -93,7 +100,12 @@ export class Lobby {
       }, 4),
     );
     this.timers.push(setInterval(() => this.sweep(), 10_000));
-    this.timers.push(setInterval(() => this.matchmake(), 1000));
+    this.timers.push(
+      setInterval(() => {
+        this.matchmake();
+        this.consolidate();
+      }, 1000),
+    );
     this.timers.push(setInterval(() => this.store.prune(), 6 * 3600_000));
   }
 
@@ -113,6 +125,21 @@ export class Lobby {
       const ttl = room.isPrivate && !room.ranked ? EMPTY_PRIVATE_TTL_MS : 0;
       if (now - room.emptySince >= ttl) this.rooms.delete(code);
     }
+    for (const [code, a] of this.aliases) if (now > a.until || this.rooms.has(code)) this.aliases.delete(code);
+  }
+
+  /** A room by its code, following merges (an invite link to a room that was folded into another). */
+  roomByCode(raw: string): Room | undefined {
+    const code = normalizeCode(raw);
+    const direct = this.rooms.get(code);
+    if (direct && !direct.closed) return direct;
+    let a = this.aliases.get(code);
+    for (let hops = 0; a && hops < 5; hops++) {
+      const r = this.rooms.get(a.code);
+      if (r && !r.closed) return r;
+      a = this.aliases.get(a.code);
+    }
+    return undefined;
   }
 
   private newCode(): string {
@@ -124,26 +151,76 @@ export class Lobby {
   }
 
   /**
-   * Quick play for a mode. The busiest room with space wins so people end up playing together;
-   * for 1v1 that means the room where someone is already waiting (sparring with a bot). With a
-   * map picked, only rooms on that map count, and if there are none a new room opens on it. New
-   * rooms without a pick start on a random knockout map.
+   * Quick play for a mode: everyone who picks it plays together. The busiest public room of the
+   * mode with space wins, whatever map or bots switch each player picked; between rooms just as
+   * busy, one on your map (then one whose bots match your switch) goes first. A new room opens only
+   * when every room of the mode is full, on your map (or the mode's own arena, or a random one).
+   * `need` seats are needed together (a group); `code` is a room to go back to first (after a
+   * dropped connection), reopened under the same code if the server restarted, so a group that
+   * was playing together lands together again.
    */
-  findPublicRoom(mode: ModeId = 'knockout', map: string | null = null, open = false): Room {
+  findPublicRoom(mode: ModeId = 'knockout', map: string | null = null, wantBots = false, need = 1, code?: string): Room {
     const want = wantedMap(mode, map);
+    const back = code ? this.roomByCode(code) : undefined;
+    if (back && !back.isPrivate && back.mode === mode && back.capacity - back.humanCount >= need && back.canJoin()) return back;
     let best: Room | null = null;
+    let bestScore = -Infinity;
     for (const r of this.rooms.values()) {
-      if (r.isPrivate || r.mode !== mode || !r.canJoin()) continue;
-      // Open rooms (no bots) and regular public rooms (bots fill in) are kept apart.
-      if (r.settings.bots === open) continue;
-      if (want && r.settings.mapId !== want) continue;
-      if (!best || r.humanCount > best.humanCount) best = r;
+      // Empty rooms are left over from people who went home (the sweep drops them): start fresh.
+      if (r.isPrivate || r.mode !== mode || r.humanCount === 0 || !r.canJoin() || r.capacity - r.humanCount < need) continue;
+      const score = r.humanCount * 4 + (want && r.settings.mapId === want ? 2 : 0) + (r.settings.bots === wantBots ? 1 : 0);
+      if (score > bestScore) {
+        best = r;
+        bestScore = score;
+      }
     }
     if (best) return best;
     const mapId = want ?? homeMapFor(mode) ?? KNOCKOUT_MAPS[Math.floor(Math.random() * KNOCKOUT_MAPS.length)];
-    const room = new Room(this.newCode(), false, { mode, mapId, bots: !open }, this.store);
+    const reuse = code ? normalizeCode(code) : '';
+    const fresh = reuse.length === CODE_LENGTH && !this.rooms.has(reuse) && !this.aliases.has(reuse) ? reuse : this.newCode();
+    const room = new Room(fresh, false, { mode, mapId, bots: wantBots }, this.store);
     this.rooms.set(room.code, room);
     return room;
+  }
+
+  /**
+   * Folds small public rooms into a busier room of the same mode, between matches (a room waiting
+   * for players, or at the very end of its results), so two rooms that each wait for a second
+   * player become one match. Players move together and keep their seat, loadout and votes; the
+   * old code keeps leading to them.
+   */
+  consolidate(now = Date.now()): void {
+    const rooms = [...this.rooms.values()].filter((r) => !r.isPrivate && !r.closed && r.humanCount > 0);
+    for (const small of rooms) {
+      const n = small.humanCount;
+      if (n === 0 || n > MERGE_MAX_HUMANS || !small.betweenMatches) continue;
+      let target: Room | null = null;
+      for (const big of rooms) {
+        if (big === small || big.closed || big.mode !== small.mode || !big.canJoin()) continue;
+        // Only toward a busier room (or, between two just as busy, the one with the lower code).
+        if (big.humanCount < n || (big.humanCount === n && big.code > small.code)) continue;
+        if (big.capacity - big.humanCount < n) continue;
+        if (!target || big.humanCount > target.humanCount) target = big;
+      }
+      if (target) this.moveAll(small, target, now);
+    }
+  }
+
+  /** Moves every player in `from` into `to` over their open connections. */
+  private moveAll(from: Room, to: Room, now = Date.now()): void {
+    const reason = to.humanCount === 1 ? 'Found another player!' : `Found a match with ${to.humanCount} players!`;
+    for (const conn of [...from.conns.values()]) {
+      const p = from.sim.players.get(conn.playerId);
+      const loadout = p ? (p.pendingLoadout ?? p.loadout) : undefined;
+      from.send(conn, { type: 'moved', reason });
+      from.leave(conn.playerId);
+      this.connRoom.delete(conn.ws);
+      const moved = to.join(conn.ws, conn.name, conn.guestId, loadout, { key: conn.key, accountId: conn.accountId }, conn.wantMap, conn.wantBots);
+      if (moved) this.connRoom.set(conn.ws, { room: to, conn: moved });
+      else conn.ws.close(4003, 'moved');
+    }
+    this.aliases.set(from.code, { code: to.code, until: now + ALIAS_TTL_MS });
+    from.closed = true;
   }
 
   handleMessage(ws: WebSocket, data: Buffer | ArrayBuffer | Buffer[], isBinary: boolean): void {
@@ -206,8 +283,10 @@ export class Lobby {
     let room: Room | undefined;
     /** The map this player picked for quick play (the room stays on it while they're in). */
     let picked: string | null = null;
+    /** Their Bots switch (quick play); joining by code or through a friend, you go along with the room. */
+    let wantBots: boolean | undefined;
     if (join.kind === 'code') {
-      room = this.rooms.get(normalizeCode(String(join.code ?? '')));
+      room = this.roomByCode(String(join.code ?? ''));
       if (!room || room.closed || room.ranked) return fail('not_found', "That room doesn't exist anymore. Check the code or start a new room.");
       if (room.kicked.has(guestId) || (identity.key && room.kicked.has(identity.key))) return fail('kicked', 'The host removed you from this room.');
       if (!room.canJoin()) return fail('full', room.mode === 'duel' ? 'That 1v1 already has two players.' : 'That room is full (10 players).');
@@ -220,14 +299,23 @@ export class Lobby {
       room.challenge = true;
       room.sim.autoStart = true;
       this.rooms.set(room.code, room);
+    } else if (join.kind === 'friend') {
+      // Following a friend into their match: wherever they are right now (the list can be seconds old).
+      if (!account) return fail('account_required', 'Make a free account to join friends.');
+      const friend = this.store.friends(account.id).find((f) => f.id === join.id && f.status === 'friends');
+      if (!friend) return fail('not_found', "You can only join people on your friends list.");
+      room = this.roomOfAccount(friend.id);
+      if (!room || room.ranked) return fail('not_found', `${friend.name} isn't in a match right now.`);
+      if (!room.canJoin()) return fail('full', `${friend.name}'s match is full. Try again in a moment!`);
     } else {
       const mode = typeof join.mode === 'string' && (MODE_IDS as readonly string[]).includes(join.mode) ? join.mode : 'knockout';
       // The menu's default queue ("Any mode") is real players only, on whatever map they're on.
       const any = join.any === true;
       picked = any ? null : wantedMap(mode, join.map);
-      room = this.findPublicRoom(mode, picked, any || join.open === true);
+      wantBots = !any && join.open !== true;
+      room = this.findPublicRoom(mode, picked, wantBots, 1, typeof join.room === 'string' ? join.room : undefined);
     }
-    const conn = room.join(ws, name, guestId, msg.loadout, identity, picked);
+    const conn = room.join(ws, name, guestId, msg.loadout, identity, picked, wantBots);
     if (!conn) return fail('full', 'That room is full (10 players).');
     this.connRoom.set(ws, { room, conn });
   }
@@ -309,6 +397,15 @@ export class Lobby {
     }
   }
 
+  /** The room an account is playing in right now (not the ranked queue). */
+  roomOfAccount(id: number): Room | undefined {
+    for (const room of this.rooms.values()) {
+      if (room.closed) continue;
+      for (const c of room.conns.values()) if (c.accountId === id) return room;
+    }
+    return undefined;
+  }
+
   /** Where each of these accounts is playing right now (for friends lists). */
   presence(ids: Set<number>): Map<number, Presence> {
     const out = new Map<number, Presence>();
@@ -321,6 +418,24 @@ export class Lobby {
     }
     for (const q of this.queue) if (ids.has(q.accountId)) out.set(q.accountId, { code: '', mode: 'duel', joinable: false, isPrivate: false, queue: true });
     return out;
+  }
+
+  /** How many people are playing each mode right now (the menu's counts), cached for a moment. */
+  counts(now = Date.now()): QueueCounts {
+    if (this.countsCache && now - this.countsCache.at < 2000) return this.countsCache.counts;
+    const modes: QueueCounts['modes'] = {};
+    let online = this.queue.length;
+    for (const r of this.rooms.values()) {
+      if (r.closed || r.humanCount === 0) continue;
+      online += r.humanCount;
+      if (r.isPrivate) continue;
+      const m = (modes[r.mode] ??= { playing: 0, waiting: 0 });
+      if (r.sim.phase === 'waiting') m.waiting += r.humanCount;
+      else m.playing += r.humanCount;
+    }
+    const counts: QueueCounts = { online, modes, ranked: this.queue.length };
+    this.countsCache = { at: now, counts };
+    return counts;
   }
 
   stats() {

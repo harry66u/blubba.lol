@@ -191,7 +191,7 @@ describe('server', () => {
     b.ws.close();
   });
 
-  it('quick play on a picked map shares a room on that map, or opens one', async () => {
+  it('quick play puts everyone on a mode together; map picks choose a new room\'s map and vote for the next', async () => {
     const join = async (guestId: string, map?: string, mode = 'knockout') => {
       const c = new TestClient();
       await c.open();
@@ -202,18 +202,24 @@ describe('server', () => {
     expect(a.w.room.mapId).toBe('candy');
     const b = await join('m2', 'candy');
     expect(b.w.room.code).toBe(a.w.room.code);
+    // A different pick still plays with everyone else; picks are votes for the next map.
     const c = await join('m3', 'moonBase');
-    expect(c.w.room.mapId).toBe('moonBase');
-    expect(c.w.room.code).not.toBe(a.w.room.code);
+    expect(c.w.room.code).toBe(a.w.room.code);
+    const room = lobby.rooms.get(a.w.room.code)!;
+    expect(room.nextMap()).toBe('candy');
+    const d = await join('m4', 'moonBase');
+    expect(d.w.room.code).toBe(a.w.room.code);
+    // Two picks each: they take turns (the one after the current map goes next).
+    expect(room.nextMap()).toBe('moonBase');
     // Nonsense picks mean any map; modes with their own arena ignore the pick.
-    const d = await join('m4', 'ballArena');
-    expect(KNOCKOUT_MAPS).toContain(d.w.room.mapId);
     const e = await join('m5', 'candy', 'ball');
     expect(e.w.room.mapId).toBe('ballArena');
-    for (const x of [a, b, c, d, e]) x.c.ws.close();
+    const f = await join('m6', 'ballArena', 'duel');
+    expect(KNOCKOUT_MAPS).toContain(f.w.room.mapId);
+    for (const x of [a, b, c, d, e, f]) x.c.ws.close();
   });
 
-  it('open rooms are public with no bots, and kept apart from bot-filled rooms', async () => {
+  it('bots switch: one pool per mode, and bots play only while everyone in the room wants them', async () => {
     const join = async (guestId: string, open: boolean) => {
       const c = new TestClient();
       await c.open();
@@ -225,12 +231,25 @@ describe('server', () => {
     expect(a.w.room.settings.bots).toBe(false);
     const r = await a.c.waitFor('roster');
     expect(r.players.some((p) => p.bot)).toBe(false);
-    // A second open-room player lands in the same room, no code needed; a regular player doesn't.
+    // Everyone lands in the same room, bots switch on or off.
     const b = await join('o2', true);
     expect(b.w.room.code).toBe(a.w.room.code);
     const c = await join('o3', false);
-    expect(c.w.room.code).not.toBe(a.w.room.code);
-    expect(c.w.room.settings.bots).toBe(true);
+    expect(c.w.room.code).toBe(a.w.room.code);
+    const room = lobby.rooms.get(a.w.room.code)!;
+    expect(room.settings.bots).toBe(false);
+    expect(c.w.room.botVotes).toEqual([c.w.you]);
+    // Once everyone votes for bots they fill the empty seats; one vote off sends them away (between matches).
+    a.c.send({ type: 'bots', on: true });
+    b.c.send({ type: 'bots', on: true });
+    // (Votes can't flip faster than every 0.4 s.)
+    await new Promise((r) => setTimeout(r, 450));
+    expect(room.settings.bots).toBe(true);
+    expect(room.sim.bots.size).toBeGreaterThan(0);
+    b.c.send({ type: 'bots', on: false });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(room.settings.bots).toBe(false);
+    expect(room.sim.bots.size).toBe(0);
     for (const x of [a, b, c]) x.c.ws.close();
   });
 

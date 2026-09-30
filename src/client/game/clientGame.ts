@@ -609,6 +609,8 @@ export class ClientGame {
           // The server's collapse plan: our world sinks and crumbles exactly like its world.
           this.world.setCollapse(msg.collapse ?? []);
           if (msg.phase === 'playing' && (!next || newRound)) this.announcer.say(next ? `Round ${next.n}! Go!` : 'Go!', 2);
+          // Sudden Death rounds after the first get a big "ROUND N" too (everyone's back in).
+          if (msg.phase === 'playing' && newRound && next && next.n > 1) this.hud.callout(`ROUND ${next.n}`, 'Everyone back in. One life. Go!', 1.8, '#ff3b5c', CALLOUT.match);
         }
         if (msg.phase === 'results' && msg.result) {
           const teams = msg.result.teams;
@@ -3040,7 +3042,10 @@ export class ClientGame {
           ? `Lobby · ${n} in · press ENTER (or START in the menu) when everyone's here`
           : 'Lobby · waiting for friends (or switch bots on in the menu)'
         : `Lobby · ${n} in · waiting for ${hostName} to start`;
-    } else if (this.match.phase === 'waiting') sub = 'Waiting for another player...';
+    } else if (this.match.phase === 'waiting') {
+      // Public rooms: the pause menu has the invite link and the bots vote.
+      sub = this.room && !this.room.isPrivate ? 'Waiting for another player · pause menu: invite friends or vote for bots' : 'Waiting for another player...';
+    }
     else if (this.match.phase === 'results') sub = 'Match over!';
     else if (me && this.mode === 'suddenDeath') {
       const r = this.round;
@@ -3092,7 +3097,7 @@ export class ClientGame {
       },
       dt,
     );
-    if (this.mode === 'suddenDeath' && this.match.phase === 'playing') {
+    if (this.mode === 'suddenDeath' && this.match.phase === 'playing' && !this.round?.intermission) {
       const rows = [...this.roster.values()];
       this.hud.setSurvivors(rows.filter((r) => !r.out).length, rows.length, !me?.out);
     } else this.hud.setSurvivors(null);
@@ -3102,9 +3107,17 @@ export class ClientGame {
       const watch = this.spectateId >= 0 ? this.nameOf(this.spectateId) : '';
       const how = `${this.key('jump')} to watch someone else`;
       const killer = this.killerId >= 0 ? this.nameOf(this.killerId) : null;
-      const big = late ? 'Match in progress' : killer ? `Popped by ${killer}!` : 'You fell off!';
-      const small = late ? `You'll play next round${watch ? ` · watching ${watch}` : ''}` : `You're out${watch ? ` · watching ${watch}` : ''} · ${how}`;
-      this.hud.setRespawn(big, small);
+      // When you're back in: the round ends when one is left, or at its time limit at the latest.
+      const secs = Math.max(0, Math.ceil((this.match.endsAtTick - this.clock.tickAt(performance.now())) / BALANCE.tickRate));
+      const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+      if (this.round?.intermission && this.match.phase === 'playing') {
+        this.hud.setRespawn('Round over!', `Next round in ${secs}...`);
+      } else {
+        const big = late ? 'Match in progress' : killer ? `Popped by ${killer}!` : 'You fell off!';
+        const back = `back in next round (${clock} at most)`;
+        const small = late ? `You'll play next round (${clock} at most)${watch ? ` · watching ${watch}` : ''}` : `You're out · ${back}${watch ? ` · watching ${watch}` : ''} · ${how}`;
+        this.hud.setRespawn(big, small);
+      }
     } else if (!alive && this.havePred) {
       const killer = this.killerId >= 0 ? this.nameOf(this.killerId) : null;
       const left = Math.max(0, BALANCE.match.respawnDelay - (this.time - this.deathAt));

@@ -9,7 +9,7 @@ import type { Tornado } from './game/loot';
 import type { Cosmetics, ProgressReport, ReportReason } from './economy';
 import { publicUlt } from './game/ults';
 
-export const PROTOCOL_VERSION = 13;
+export const PROTOCOL_VERSION = 14;
 
 // --- Binary message ids -------------------------------------------------------------------
 export const MSG_INPUTS = 1;
@@ -19,12 +19,16 @@ export const MSG_SNAPSHOT = 2;
 
 export type JoinRequest =
   /**
-   * `map`: a knockout map to play on (a public room already on it, or a new one); none means any
-   * map. `open`: an open room, public but with no bots (anyone joins without a code). `any`: the
-   * menu's default "Any mode" queue: real players only (always an open room, whatever `open`
-   * says), any map, so people who just press PLAY end up together.
+   * Quick play: everyone who picks the same mode lands in the same public room (the busiest one
+   * with space), whatever else they picked. `map`: the knockout map you'd like (it picks the map
+   * of a new room and counts as a vote when the room moves to its next map). `open`: you don't
+   * want bots (a public room only has bots while every player in it wants them). `any`: the
+   * menu's default "Any mode" queue (Sudden Death, no bots). `room`: a room to go back to first
+   * (after a dropped connection), if it's still there, on this mode and has space.
    */
-  | { kind: 'quick'; mode?: ModeId; map?: string; open?: boolean; any?: boolean }
+  | { kind: 'quick'; mode?: ModeId; map?: string; open?: boolean; any?: boolean; room?: string }
+  /** Join a friend's match, wherever they are right now (accounts only, friends only). */
+  | { kind: 'friend'; id: number }
   /** Private 1v1 room whose code is shared as a challenge link. */
   | { kind: 'challenge' }
   /** Ranked 1v1 matchmaking (needs an account). */
@@ -66,6 +70,8 @@ export type ClientMessage =
   /** Team Knockout lobby: pick a side, ready up. */
   | { type: 'team'; action: 'join'; team: number }
   | { type: 'team'; action: 'ready'; ready: boolean }
+  /** Public rooms: whether you want bots filling the empty spots (they play while everyone here says yes). */
+  | { type: 'bots'; on: boolean }
   /** Only honored when the server runs with BUBBA_DEBUG=1 (for testing events quickly). */
   | { type: 'debug'; action: 'chaos'; kind: string }
   | { type: 'debug'; action: 'endIn'; seconds: number }
@@ -117,6 +123,17 @@ export interface RoomInfo {
   /** A private 1v1 made from a challenge link. */
   challenge: boolean;
   ranked: boolean;
+  /** Public rooms: players who want bots filling the empty spots (bots play once everyone does). */
+  botVotes?: number[];
+}
+
+/** How many people are playing each mode right now (GET /api/counts, for the menu). */
+export interface QueueCounts {
+  /** Everyone in a match or the ranked queue. */
+  online: number;
+  /** Public rooms by mode: humans in a match, and humans waiting for more players (or in a team lobby). */
+  modes: Partial<Record<ModeId, { playing: number; waiting: number }>>;
+  ranked: number;
 }
 
 /**
@@ -166,6 +183,8 @@ export type ServerMessage =
   | { type: 'again'; ids: number[] }
   /** The Team Knockout lobby before each match (see TeamLobbyState). */
   | { type: 'teamLobby'; lobby: TeamLobbyState }
+  /** You're being moved into a busier room of the same mode (its welcome comes next). */
+  | { type: 'moved'; reason: string }
   /** Your name was changed (e.g. after several players reported it). */
   | { type: 'renamed'; name: string; message: string }
   | { type: 'error'; code: 'full' | 'not_found' | 'version' | 'kicked' | 'bad_name' | 'server' | 'account_required' | 'already' | 'ranked_over'; message: string };

@@ -304,7 +304,7 @@ export class UltSystem {
     const horiz = Math.hypot(t.px - s.px, t.pz - s.pz);
     if (horiz > playerRadius(s) + playerRadius(t) + BALANCE.grab.range + C.hugReach) return;
     const dy = t.py + playerHeight(t) * 0.5 - (s.py + playerHeight(s) * 0.5);
-    if (Math.abs(dy) > playerHeight(s) * 0.8 + 0.5) return;
+    if (Math.abs(dy) > playerHeight(s) * 0.8 + 0.5 || !this.sim.clearBetween(s, t)) return;
     this.hugAt.set(p.id, this.sim.time + C.hugRetry);
     this.sim.hug(p, target);
   }

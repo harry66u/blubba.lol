@@ -394,7 +394,7 @@ describe('The Chase', () => {
     expect(ps[0].state.chaseTarget).toBe(ps[1].id);
   });
 
-  it('is faster, recharges dashes instantly, and re-sniffs when the target pops', () => {
+  it('is faster, recharges dashes faster (not instantly), and re-sniffs when the target pops', () => {
     const { sim, ps, ds } = setup([{ ult: 'chase' }, {}, {}]);
     const [a, b, c] = ps;
     // The others stand well off to the side, so walking doesn't bump into (and hug) either.
@@ -409,7 +409,11 @@ describe('The Chase', () => {
     run(sim, ds, 20);
     ds[0].press('dash');
     run(sim, ds, 2);
-    expect(a.state.dashCharges).toBe(BALANCE.dash.charges);
+    // Spent dashes come back three times as fast, but not every frame (no flying on endless air dashes).
+    const spent = a.state.dashCharges;
+    expect(spent).toBeLessThan(BALANCE.dash.charges);
+    run(sim, ds, Math.ceil((BALANCE.dash.rechargeTime / BALANCE.ults.chase.dashRecharge) * 60) + 5);
+    expect(a.state.dashCharges).toBeGreaterThan(spent);
     const first = a.state.chaseTarget;
     expect([b.id, c.id]).toContain(first);
     const other = first === b.id ? c : b;

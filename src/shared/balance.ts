@@ -165,7 +165,7 @@ export const BALANCE = {
       /** Half-angle of the stream cone (radians). */
       cone: 0.38,
       /** Push acceleration at full strength on a fresh target (m/s²). */
-      knockback: 22,
+      knockback: 26,
       /** Inflation per second of full-strength blowing. */
       inflation: 0.07,
       projSpeed: 0,
@@ -585,7 +585,7 @@ export const BALANCE = {
     transformHitbox: { radius: 1.45, height: 1.7 },
     /**
      * The Chase: lock on to the nearest enemy (in front if anyone is) and hunt them. Faster, dashes
-     * recharge instantly, shots curve toward the target and grabbing them throws extra hard.
+     * recharge 3x faster, shots curve toward the target and grabbing them throws extra hard.
      */
     chase: {
       duration: 6,
@@ -603,6 +603,8 @@ export const BALANCE = {
       /** Cone and hitscan shots bend toward the target by up to this much (radians). */
       aimBend: 0.2,
       throwMult: 1.7,
+      /** Dashes recharge this many times faster on the hunt. */
+      dashRecharge: 3,
       /** Seconds between tries to sniff out a new target after losing one. */
       resniff: 0.5,
     },

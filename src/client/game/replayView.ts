@@ -16,6 +16,10 @@ interface Actor {
 
 const FIELDS = 7;
 
+/** Slow-motion playback speed, and the longest a replay plays for (seconds, before its outro). */
+const REPLAY_SPEED = 0.5;
+const REPLAY_MAX_PLAY = 5.8;
+
 /** Plays back the recorded longest launch in slow motion with a cinematic camera. */
 export class ReplayView {
   active = false;
@@ -27,8 +31,8 @@ export class ReplayView {
   private camAngle = 0;
   private victimGone = false;
   private readonly focus = new THREE.Vector3();
-  /** Playback speed (0.4 = slow motion). */
-  speed = 0.5;
+  /** Playback speed (0.5 = half speed; faster for long flights, see start). */
+  speed = REPLAY_SPEED;
   onDone: (() => void) | null = null;
 
   constructor(
@@ -46,7 +50,11 @@ export class ReplayView {
     this.victimGone = false;
     const f0 = data.frames[0][0];
     const f1 = data.frames[data.frames.length - 1][0];
-    this.duration = (f1 - f0) / 60 / this.speed + 1.2;
+    // Slow motion, but never more than about 7 seconds: the results (and the next match's
+    // countdown) shouldn't be spent watching one long flight.
+    const span = (f1 - f0) / 60;
+    this.speed = Math.max(REPLAY_SPEED, span / REPLAY_MAX_PLAY);
+    this.duration = span / this.speed + 1.2;
     const ids = new Set<number>();
     for (const f of data.frames) for (let i = 1; i < f.length; i += FIELDS) ids.add(f[i]);
     for (const id of ids) {

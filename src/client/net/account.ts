@@ -27,6 +27,8 @@ export interface Friend {
   online: boolean;
   /** In a match (code set when you can join it), or the ranked queue. */
   playing: { code: string; mode: string; joinable: boolean; private: boolean } | null;
+  /** They invited you into their match (fresh, and it still has space). */
+  invite?: { mode: string; at: number };
 }
 
 export interface FaceStatus {
@@ -229,6 +231,17 @@ export class AccountClient {
   }
 
   /** Unfriend, decline, or cancel a request. */
+  /** Invites a friend into the match you're in. */
+  async inviteFriend(id: number): Promise<void> {
+    this.friends = (await this.call<{ friends: Friend[] }>('/api/friends/invite', { id })).friends;
+    this.emit();
+  }
+
+  /** Friends who invited you into their match (newest first). */
+  get invites(): Friend[] {
+    return this.friends.filter((f) => f.invite).sort((a, b) => b.invite!.at - a.invite!.at);
+  }
+
   async removeFriend(id: number): Promise<void> {
     this.friends = (await this.call<{ friends: Friend[] }>('/api/friends/remove', { id })).friends;
     this.emit();

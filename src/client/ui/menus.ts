@@ -6,7 +6,7 @@ import { type ProgressReport, REPORT_REASONS, REPORT_REASON_TEXT, type ReportRea
 import { buildProgressBox } from './accountUi';
 import { KNOCKOUT_MAPS, MAPS, homeMapFor, mapsForMode } from '../../shared/maps';
 import { checkName, randomGuestName } from '../../shared/names';
-import type { EventFrequency, JoinRequest, RoomInfo, RosterEntry } from '../../shared/protocol';
+import type { EventFrequency, JoinRequest, QueueCounts, RoomInfo, RosterEntry } from '../../shared/protocol';
 import { ACTION_LABELS, type Action, DEFAULT_BINDINGS, codeLabel } from '../input/input';
 import type { Settings } from '../settings';
 import { add, clear, el, hexColor } from './dom';
@@ -158,12 +158,12 @@ function mapPicker(initial: string | null, onChange: (map: string | null) => voi
   const label = (id: string | null) => (id ? MAPS[id].name : 'Any map');
   const name = el('span', { class: 'map-name', attrs: { 'aria-live': 'polite' } });
   const tiles = el('div', { class: 'map-tiles', attrs: { role: 'radiogroup', 'aria-label': 'Map' } });
-  const wrap = el('div', { class: 'map-picker' }, el('div', { class: 'map-head' }, el('span', { class: 'label', text: 'Map' }), name), tiles);
+  const wrap = el('div', { class: 'map-picker' }, el('div', { class: 'map-head' }, el('span', { class: 'label', text: 'Map', attrs: { title: 'You join whoever is playing this mode; your pick votes for the next map (and picks the map of a new room).' } }), name), tiles);
   const refresh = () => {
     const forced = mode === 'ranked' || mode === 'any' ? null : homeMapFor(mode);
     const fixed = mode === 'ranked' || mode === 'any' || !!forced;
     wrap.classList.toggle('fixed', fixed);
-    name.textContent = forced ? `${MAPS[forced].name} (its own arena)` : mode === 'ranked' ? 'Picked for you' : mode === 'any' ? 'Wherever everyone is' : label(picked);
+    name.textContent = forced ? `${MAPS[forced].name} (its own arena)` : mode === 'ranked' ? 'Picked for you' : mode === 'any' ? 'Wherever everyone is' : picked ? `${label(picked)} (your vote)` : label(picked);
     for (const b of tiles.querySelectorAll('button')) {
       const on = !fixed && (b.dataset.map || null) === picked;
       b.classList.toggle('on', on);
@@ -206,17 +206,73 @@ function mapPicker(initial: string | null, onChange: (map: string | null) => voi
 /** `side` sits beside the main card on wide screens and below it on narrow ones (the daily challenges). */
 /** "🟢 37 active": players who opened the game today. Hidden until the count arrives. */
 function activePill(n: number | null): HTMLElement {
-  const pill = el('div', { class: 'active-pill', attrs: { title: 'Players today' } }, el('span', { class: 'dot', attrs: { 'aria-hidden': 'true' } }), el('span', { class: 'n' }), ' active');
+  const pill = el('div', { class: 'active-pill', attrs: { title: 'Players today' } }, el('span', { class: 'dot', attrs: { 'aria-hidden': 'true' } }), el('span', { class: 'n' }), el('span', { class: 'w', text: ' active' }));
   setActiveCount(n, pill);
   return pill;
 }
 
 /** Updates the menu's active count in place (it arrives after the menu is drawn). */
 export function setActiveCount(n: number | null, pill: Element | null = document.querySelector('.active-pill')): void {
-  if (!pill) return;
+  if (!pill || pill.classList.contains('live')) return;
   pill.classList.toggle('hidden', !n);
   const num = pill.querySelector('.n');
   if (num && n) num.textContent = n.toLocaleString();
+}
+
+/** Players in a mode right now: [in a match, waiting for more players]. */
+function modeLive(c: QueueCounts, m: PlayMode): [number, number] {
+  if (m === 'ranked') return [0, c.ranked];
+  const x = c.modes[m === 'any' ? 'suddenDeath' : m];
+  return [x?.playing ?? 0, x?.waiting ?? 0];
+}
+
+/** What the mode's live line says ('' when nobody's on). */
+function liveText(c: QueueCounts, m: PlayMode): string {
+  const [playing, waiting] = modeLive(c, m);
+  if (m === 'ranked') return waiting ? `🟢 ${waiting} searching for a ranked match` : '';
+  const parts: string[] = [];
+  if (playing) parts.push(`${playing} playing now`);
+  if (waiting) parts.push(m === 'teamKnockout' ? `${waiting} in the team lobby` : `${waiting} waiting for players`);
+  if (!parts.length) return m === 'teamKnockout' ? 'Nobody in Team Knockout yet: invite friends or turn bots on' : '';
+  return `🟢 ${parts.join(' · ')}`;
+}
+
+let lastCounts: QueueCounts | null = null;
+
+/**
+ * Live player counts on the menu: a badge on each mode button, a line under the picked mode, and
+ * "N online" in the pill (instead of today's count) once anyone is on.
+ */
+export function setModeCounts(c: QueueCounts | null = lastCounts): void {
+  lastCounts = c;
+  if (!c) return;
+  for (const b of document.querySelectorAll<HTMLElement>('.mode-picker button[data-mode]')) {
+    const m = b.dataset.mode as PlayMode;
+    const [playing, waiting] = modeLive(c, m);
+    const n = playing + waiting;
+    let badge = b.querySelector<HTMLElement>('.cnt');
+    if (!badge) {
+      badge = el('span', { class: 'cnt', attrs: { 'aria-hidden': 'true' } });
+      b.append(badge);
+    }
+    badge.textContent = n ? String(n) : '';
+    badge.classList.toggle('hidden', !n);
+    badge.classList.toggle('lobby', !playing && waiting > 0);
+    b.title = `${b.dataset.blurb ?? ''}${n ? ` (${liveText(c, m).replace('🟢 ', '')})` : ''}`;
+  }
+  const on = document.querySelector<HTMLElement>('.mode-picker button.on');
+  const live = document.querySelector('.mode-live');
+  if (live && on) live.textContent = liveText(c, on.dataset.mode as PlayMode);
+  const pill = document.querySelector('.active-pill');
+  if (pill && c.online > 0) {
+    pill.classList.add('live');
+    pill.classList.remove('hidden');
+    pill.setAttribute('title', 'Playing right now');
+    const num = pill.querySelector('.n');
+    if (num) num.textContent = c.online.toLocaleString();
+    const word = pill.querySelector('.w');
+    if (word) word.textContent = ' online';
+  }
 }
 
 export function buildMainMenu(
@@ -255,6 +311,7 @@ export function buildMainMenu(
   let mode: PlayMode = initialMode;
   const maps = mapPicker(initialMap, cb.onMapChange);
   const blurb = el('div', { class: 'mode-blurb', attrs: { 'aria-live': 'polite' } });
+  const live = el('div', { class: 'mode-live' });
   const picker = el('div', { class: 'mode-picker', attrs: { role: 'radiogroup', 'aria-label': 'Game mode' } });
   const play = el('button', {
     class: 'btn big play',
@@ -271,7 +328,7 @@ export function buildMainMenu(
   const botsLabel = el('span', { class: 'bots-state' });
   const botsBtn = el('button', {
     class: 'bots-switch',
-    attrs: { role: 'switch', 'aria-label': 'Bots', title: 'Off: play only with real people who are online. On: bots fill the empty spots.' },
+    attrs: { role: 'switch', 'aria-label': 'Bots', title: 'Off: only real people. On: bots fill the empty spots while everyone in your match has bots on too.' },
     on: {
       click: () => {
         botsOn = !botsOn;
@@ -283,7 +340,7 @@ export function buildMainMenu(
   const drawBots = () => {
     botsBtn.setAttribute('aria-checked', String(botsOn));
     botsBtn.classList.toggle('on', botsOn);
-    botsLabel.textContent = botsOn ? 'Bots fill the empty spots' : 'Only real players';
+    botsLabel.textContent = botsOn ? 'Bots fill empty spots (if everyone agrees)' : 'Only real players';
   };
   drawBots();
   const botsRow = el('div', { class: 'bots-row' }, el('span', { class: 'label', text: 'Bots' }), botsBtn, botsLabel);
@@ -300,6 +357,7 @@ export function buildMainMenu(
       b.setAttribute('aria-checked', String(b.dataset.mode === m));
     }
     blurb.textContent = info(m).blurb;
+    live.textContent = lastCounts ? liveText(lastCounts, m) : '';
     maps.setMode(m);
     // Ranked and the default queue (Any mode) never have bots.
     botsRow.classList.toggle('hidden', m === 'ranked' || m === 'any');
@@ -312,7 +370,7 @@ export function buildMainMenu(
     const b = el(
       'button',
       {
-        attrs: { 'data-mode': m, role: 'radio', title: info(m).blurb },
+        attrs: { 'data-mode': m, 'data-blurb': info(m).blurb, role: 'radio', title: info(m).blurb },
         on: {
           click: () => {
             pick(m);
@@ -378,6 +436,7 @@ export function buildMainMenu(
     el('div', { class: 'name-row' }, el('label', { class: 'label', text: 'Your name' }), el('div', { class: 'row' }, nameInput, accountName ? null : dice)),
     picker,
     blurb,
+    live,
     maps.el,
     botsRow,
     play,
@@ -464,7 +523,9 @@ export function buildConnecting(join: JoinRequest, onCancel: () => void): HTMLEl
           ? 'Setting up your 1v1'
           : join.kind === 'code'
             ? `Joining room ${join.code}`
-            : 'Connecting';
+            : join.kind === 'friend'
+              ? 'Joining your friend'
+              : 'Connecting';
   return el(
     'div',
     { class: 'menu' },
@@ -480,12 +541,25 @@ export function buildConnecting(join: JoinRequest, onCancel: () => void): HTMLEl
   );
 }
 
-export function buildClickToPlay(text: string, onClick: () => void): HTMLElement {
+export function buildClickToPlay(text: string, onClick: () => void, pad = false, device?: { current: 'mouse' | 'trackpad'; onPick: (d: 'mouse' | 'trackpad') => void }): HTMLElement {
+  // First time only: which do you aim with? (Trackpads need faster turning than a mouse.) Picking
+  // one also starts playing, since it's a click like any other here.
+  const ask = device
+    ? el(
+        'div',
+        { class: 'device-ask' },
+        el('span', { class: 'label', text: 'Aiming with' }),
+        ...(['mouse', 'trackpad'] as const).map((d) =>
+          el('button', { class: `btn small${device.current === d ? ' blue' : ' ghost'}`, text: d === 'mouse' ? '🖱️ Mouse' : '💻 Trackpad', on: { click: () => device.onPick(d) } }),
+        ),
+      )
+    : null;
   return el(
     'div',
     { class: 'click-to-play interactive', on: { click: onClick } },
     el('div', { class: 'big-text', text }),
-    el('div', { class: 'click-hint' }, el('span', { class: 'tap-ring', attrs: { 'aria-hidden': 'true' } }), 'Click anywhere to play'),
+    el('div', { class: 'click-hint' }, el('span', { class: 'tap-ring', attrs: { 'aria-hidden': 'true' } }), pad ? 'Press Ⓐ to play' : 'Click anywhere to play'),
+    ask,
   );
 }
 
@@ -498,6 +572,33 @@ export interface PauseCallbacks {
   onHowTo: () => void;
   onCopyLink: () => void;
   onHost: (action: 'restart' | 'start' | { durationSec?: number; bots?: boolean; events?: EventFrequency; mode?: ModeId; mapId?: string; teamNames?: [string, string] }) => void;
+  /** Public matches: your vote for bots filling the empty spots. */
+  onBots?: (on: boolean) => void;
+  onFriends?: () => void;
+}
+
+/**
+ * Public matches: the Bots switch is a vote. Bots fill the empty spots once everyone here wants
+ * them, and leave when the match ends if anyone changes their mind.
+ */
+export function botsVote(room: RoomInfo, you: number, humans: number, onBots: (on: boolean) => void): HTMLElement {
+  const votes = room.botVotes ?? [];
+  const mine = votes.includes(you);
+  const sw = el('button', {
+    class: `bots-switch${mine ? ' on' : ''}`,
+    attrs: { role: 'switch', 'aria-checked': String(mine), 'aria-label': 'Bots', title: 'Bots fill the empty spots once everyone here switches them on.' },
+    on: { click: () => onBots(!mine) },
+  });
+  const text = room.settings.bots
+    ? mine
+      ? 'Bots are filling the empty spots'
+      : 'Bots leave when this match ends'
+    : humans <= 1
+      ? mine
+        ? 'Bots on'
+        : 'Off: waiting for real players'
+      : `${votes.length}/${humans} want bots · they join once everyone does`;
+  return el('div', { class: 'bots-row vote' }, el('span', { class: 'label', text: 'Bots' }), sw, el('span', { class: 'bots-state', text }));
 }
 
 /** Funny team name pairs for the 🎲 button. */
@@ -516,6 +617,9 @@ const TEAM_NAME_PAIRS: [string, string][] = [
 export interface LobbyState {
   waiting: boolean;
   players: number;
+  /** Your player id and how many real people are here (public matches' bots vote). */
+  you?: number;
+  humans?: number;
 }
 
 export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCallbacks, lobby: LobbyState = { waiting: false, players: 0 }): HTMLElement {
@@ -531,6 +635,7 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
         { class: 'room-ticket' },
         el('div', { class: 'grow' }, el('div', { class: 'label', text: room.challenge ? '1v1 challenge' : 'Room code' }), el('div', { class: 'code', text: room.code })),
         el('button', { class: 'btn small blue', text: room.challenge ? 'Copy challenge link' : 'Copy invite link', on: { click: cb.onCopyLink } }),
+        cb.onFriends && !room.challenge ? el('button', { class: 'btn small', text: '👥 Invite', attrs: { title: 'Invite friends from your friends list' }, on: { click: cb.onFriends } }) : null,
       ),
     );
     if (isHost) {
@@ -642,11 +747,19 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
         ),
       );
     }
-  } else {
+  } else if (room) {
+    // Public match: its code works as an invite link too, and bots are up to everyone here.
     panel.append(
-      el('div', { class: 'room-banner', text: `Public match · ${MODE_INFO[room?.settings.mode ?? 'knockout'].name} · ${MAPS[room?.mapId ?? 'dealership']?.name ?? ''}` }),
-      el('div', { class: 'small-note', style: 'text-align:center', text: 'Bots only join public matches if you switch Bots on in the menu. Private rooms: the host decides.' }),
+      el('div', { class: 'room-banner', text: `Public match · ${MODE_INFO[room.settings.mode].name} · ${MAPS[room.mapId]?.name ?? ''}` }),
+      el(
+        'div',
+        { class: 'room-ticket' },
+        el('div', { class: 'grow' }, el('div', { class: 'label', text: 'Bring friends into this match' }), el('div', { class: 'code', text: room.code })),
+        el('button', { class: 'btn small blue', text: 'Copy invite link', on: { click: cb.onCopyLink } }),
+        cb.onFriends ? el('button', { class: 'btn small', text: '👥 Invite', attrs: { title: 'Invite friends from your friends list' }, on: { click: cb.onFriends } }) : null,
+      ),
     );
+    if (cb.onBots) panel.append(botsVote(room, lobby.you ?? -1, lobby.humans ?? 1, cb.onBots));
   }
   panel.append(
     el(
@@ -1089,7 +1202,10 @@ export function buildSettings(s: Settings, cb: SettingsCallbacks, tab: 'controls
       select('Aiming with', [
         ['trackpad', 'Trackpad'],
         ['mouse', 'Mouse'],
-      ], () => s.device, (v) => (s.device = v as Settings['device']));
+      ], () => s.device, (v) => {
+        s.device = v as Settings['device'];
+        s.deviceAsked = true;
+      });
       slider('Trackpad sensitivity', 0.2, 3, 0.05, () => s.sensTrackpad, (v) => (s.sensTrackpad = v));
       slider('Mouse sensitivity', 0.2, 3, 0.05, () => s.sensMouse, (v) => (s.sensMouse = v));
       slider('Controller sensitivity', 0.2, 3, 0.05, () => s.sensController, (v) => (s.sensController = v));

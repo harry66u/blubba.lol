@@ -406,3 +406,80 @@ from that long ago; a hit lands on the target's body where it is now. Bots' shot
 - **Ults are dealt fairly.** Every playable ult is equally likely each spawn, and you never get the
   same one twice in a row (the other four stay equally likely, so over time each still comes up a
   fifth of the time).
+
+## Queueing: everyone who picks a mode plays together
+
+An audit of every way into a match found players who wanted to play together ending up apart:
+12 players pressing PLAY with realistic menu settings landed in 10 rooms, 6 of them alone, because
+quick play kept rooms apart by map pick and by the Bots switch. Team Knockout needed four humans
+and had no way to start otherwise. So:
+
+- **One pool per mode.** Quick play joins the busiest public room of the mode with space, whatever
+  map or Bots switch you picked (between rooms just as busy, one on your map, then one matching your
+  bots, goes first). A new room opens only when every room of the mode is full. Empty leftover
+  rooms are never joined.
+- **Map picks are votes.** A new room opens on your map; when a public room moves on after the
+  results, it goes to the map most players there picked (two maps with a vote each take turns), or
+  the next in the rotation when nobody picked one.
+- **Bots are a vote.** In a public room bots fill the empty spots only while every player there
+  has Bots on (the menu switch, and the same switch in the pause menu and the team lobby's
+  "🤖 Fill with bots"). Switching them off never pulls bots out of a fight: they leave when the
+  match ends (or right away in a lobby). "Any mode" always votes no. Joining by code or through a
+  friend goes along with the room.
+- **Quiet rooms merge.** Once a second, a public room with 3 or fewer players that's between
+  matches (waiting for players, or the last moment of its results) moves everyone into a busier
+  room of the same mode with space for all of them ("Found a match with N players!"). Its code
+  keeps working as an invite link for half an hour.
+- **Live counts.** `GET /api/counts` says how many people are in a match or waiting, per mode; the
+  menu polls it every 8 s and shows a badge on each mode, a line under the picked one ("🟢 3
+  playing now · 1 waiting for players"), and "N online" in the pill.
+- **Team Knockout starts.** Public lobbies count everyone as ready 30 s after the teams are fine
+  (it used to wait for someone to press READY first); a lone player can fill the seats with bots,
+  which step aside as people join.
+- **Friends.** Every match (public too) has an invite code and link in the pause menu and the team
+  lobby. JOIN on the friends list follows a friend into wherever they are when you click (not a
+  code from a few seconds ago). **Invite** (in a match) puts a JOIN card on the friend's menu for
+  three minutes, and a toast if they're in a match.
+- **Dropped connections come back to the same room**, joined the way you first joined; if the
+  server restarted, the room opens again under the same code, so a group lands together again.
+- **Fixed: a frozen results screen.** When a public room moved to its next map with one player
+  left, the fresh match sat waiting without telling anyone, so the last player stayed on "Next
+  match in 0" until they left. A rebuilt match now always announces itself.
+
+## Mechanics audit fixes
+
+Measured with scripted matches and bot soaks:
+
+- **ABAG could fly.** On The Chase both dashes refilled every tick, and chaining air dashes kept him
+  rising for the whole 6 s (+11.7 m, 88 m across). Dashes now recharge 3× faster instead.
+- **Pop Gun corks never filled the ult meter** (or counted toward assists). They do now.
+- **Reeling someone in with the grapple knocked you back** (they crashed into you as if launched,
+  and got the credit). Pulled players can't chain-hit whoever pulled them.
+- **Soda cans and pins hovered over the void** after their island sank, a pin as bait. Pickups go
+  away with their floor and only respawn (or become the pin) where there's ground.
+- **Grabs (and ABAG's hug) went through walls.** They need a clear line now.
+- **A lag spike left a lasting input delay** (+33 to +50 ms until you died). Frames for ticks the
+  server already filled in with your held input are dropped when they arrive.
+- **A weak hit could rescue someone flying off the map** (a new hit kept only 15% of the old
+  speed). A weaker hit on a launched player now adds to the launch; a hit during hit-stop no longer
+  wipes the first hit's launch either.
+- **Leaf Blower and Air Blaster** (the weakest weapons in duels) are now lag compensated like the
+  Pump Rifle, and the Leaf Blower pushes a bit harder (26, was 22). Each blower gust counts as a hit
+  (Sudden Death's time-up tiebreak).
+- **Sudden Death's longer spawn protection** (3 s) was never used; it is now.
+
+## Player experience audit fixes
+
+- Replays play for about 7 s at most (long flights play faster), so the results screen isn't used
+  up watching one launch.
+- Sudden Death spectators see when they're back in ("back in next round, 1:12 at most"), "Round
+  over! Next round in 3" during the break, and a big ROUND N callout when the next one starts; the
+  "players left" pill hides during the break. The one-life banner waits for a round to start.
+- Alone in a public room for 20 s: a callout says how to invite friends or vote for bots.
+- The main menu scrolls on short windows (at 1366×657 the room-code row was off-screen), and
+  buttons turn off kerning (Fredoka tucked the I of "PRIVATE" under the V).
+- Controllers: the d-pad moves through menu buttons and A presses; on the results A is PLAY AGAIN
+  and B is MENU; A or B skips the replay; "Press Ⓐ to play".
+- The first "click to play" asks once whether you aim with a mouse or a trackpad (the default was
+  trackpad, which turned 62% faster than mouse users expect).
+- On a phone held upright, the pause button stays reachable above "turn your phone sideways".

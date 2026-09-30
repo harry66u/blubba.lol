@@ -85,6 +85,8 @@ export interface SimPlayer {
   lastSeq: number;
   /** Ticks of simulation this player is owed (input processing budget). */
   owed: number;
+  /** Ticks simulated with a held input during a lag spike, not yet made up by real frames. */
+  synth: number;
   score: number;
   stats: MatchStats;
   lastAttacker: number;
@@ -447,6 +449,7 @@ export class GameSim {
       queue: [],
       lastSeq: 0,
       owed: 0,
+      synth: 0,
       score: 0,
       stats: newStats(),
       lastAttacker: -1,
@@ -722,6 +725,7 @@ export class GameSim {
 
   private drainInputs(p: SimPlayer): void {
     p.owed = 0;
+    p.synth = 0;
     let last: InputFrame | undefined;
     while (p.queue.length) last = p.queue.shift();
     if (last) {
@@ -741,6 +745,13 @@ export class GameSim {
       return;
     }
     p.owed += 1;
+    // Frames for ticks already simulated with a held input (a lag spike) are dropped when they
+    // finally arrive, so the spike doesn't leave a lasting input delay. Presses are counters, so
+    // the next frame still carries them.
+    while (p.synth > 0 && p.queue.length > 1) {
+      p.queue.shift();
+      p.synth--;
+    }
     const n = Math.min(p.queue.length, Math.max(0, p.owed + MAX_AHEAD), 4);
     for (let i = 0; i < n; i++) {
       const f = p.queue.shift()!;
@@ -756,6 +767,7 @@ export class GameSim {
       while (p.owed > MAX_BEHIND) {
         this.applyInput(p, p.lastInput, true);
         p.owed -= 1;
+        p.synth = Math.min(p.synth + 1, 30);
       }
     }
   }
@@ -786,7 +798,7 @@ export class GameSim {
       switch (p.weapon.kind) {
         case 'cone':
           this.ults.bendAim(p, f);
-          this.fireCone(p, f.ox, f.oy, f.oz, f.dx, f.dy, f.dz, hard);
+          this.fireCone(p, f.ox, f.oy, f.oz, f.dx, f.dy, f.dz, hard, input.viewTick);
           break;
         case 'hitscan':
           this.ults.bendAim(p, f);
@@ -800,7 +812,7 @@ export class GameSim {
       }
     }
     p.streaming = out.stream > 0;
-    if (out.stream > 0) this.blow(p, out.stream);
+    if (out.stream > 0) this.blow(p, out.stream, input.viewTick);
     if (out.util1) this.useUtility(p, 0);
     if (out.util2) this.useUtility(p, 1);
     if (out.jumped) this.events.push({ t: 'move', tick, id: p.id, kind: out.springJump ? 'spring' : 'jump', x: s.px, y: s.py, z: s.pz });
@@ -1030,8 +1042,11 @@ export class GameSim {
       return;
     }
     const braced = s.braceTimer > 0;
+    const inflBefore = s.inflation;
     s.inflation = Math.min(BALANCE.inflation.max, s.inflation + pr.inflation * pr.power * (braced ? Br.inflationMult : 1));
     s.sinceHit = 0;
+    // Corks fill the ult meter (and count for assists) like any other hit.
+    this.ults.onHit(target, pr.owner, s.inflation - inflBefore, false);
     if (s.mode !== MODE_HELD) {
       const sp = Math.hypot(pr.vx, pr.vy, pr.vz) || 1;
       let dx = pr.vx / sp;
@@ -1215,14 +1230,24 @@ export class GameSim {
     }
 
     if (s.mode === MODE_HANG || s.mode === MODE_CLIMB) releaseLedge(s, 0);
-    s.vx = s.vx * K.keepVelocity + dx * speed;
-    s.vy = Math.max(0, s.vy) * K.keepVelocity + dy * speed;
-    s.vz = s.vz * K.keepVelocity + dz * speed;
+    // A weaker hit on someone already flying adds to the launch instead of replacing it (so a
+    // little poke can't rescue a player on their way off the map).
+    const flying = s.hitStop > 0 ? Math.hypot(s.hsVx, s.hsVy, s.hsVz) : Math.hypot(s.vx, s.vy, s.vz);
+    const weaker = s.launchTimer > 0 && flying > speed;
+    const keep = weaker ? Math.max(K.keepVelocity, 1 - speed / flying) : K.keepVelocity;
+    if (s.hitStop > 0) {
+      s.vx = s.hsVx;
+      s.vy = s.hsVy;
+      s.vz = s.hsVz;
+    }
+    s.vx = s.vx * keep + dx * speed;
+    s.vy = Math.max(0, s.vy) * keep + dy * speed;
+    s.vz = s.vz * keep + dz * speed;
     s.onGround = 0;
     s.groundId = -1;
     s.slideTimer = 0;
     s.dashTimer = 0;
-    s.launchTimer = Math.min(K.hitstunMax, Math.max(K.hitstunMin, speed * K.hitstunPerSpeed));
+    s.launchTimer = Math.max(weaker ? s.launchTimer : 0, Math.min(K.hitstunMax, Math.max(K.hitstunMin, speed * K.hitstunPerSpeed)));
     s.launchElapsed = 0;
     s.sinceHit = 0;
     if (K.hitStopBase > 0) {
@@ -1340,12 +1365,14 @@ export class GameSim {
   // --- Weapons ---------------------------------------------------------------------------
 
   /** Air Horn: instant cone blast in front of you. */
-  private fireCone(p: SimPlayer, _ox: number, _oy: number, _oz: number, dx: number, dy: number, dz: number, power: number): void {
+  private fireCone(p: SimPlayer, _ox: number, _oy: number, _oz: number, dx: number, dy: number, dz: number, power: number, viewTick = 0): void {
     const w = p.weapon;
     const s = p.state;
     const ex = s.px;
     const ey = s.py + eyeHeight(s);
     const ez = s.pz;
+    // Judged against where targets were on the shooter's screen, like the Pump Rifle.
+    const rewind = this.rewindTick(viewTick);
     p.stats.shots++;
     this.events.push({ t: 'honk', tick: this.tick, id: p.id, x: ex, y: ey, z: ez, dx, dy, dz, power, range: w.range, cone: w.cone });
     const ball = this.ballGame;
@@ -1364,12 +1391,14 @@ export class GameSim {
     for (const o of this.players.values()) {
       if (o === p || o.state.mode === MODE_DEAD || !this.isEnemy(p.id, o.id)) continue;
       const t = o.state;
+      const at = rewind < this.tick ? this.stateAt(o, rewind) : t;
+      if (at.mode === MODE_DEAD) continue;
       const r = playerRadius(t) * this.hitR(o);
       const h = playerHeight(t) * this.hitH(o);
-      const ay = Math.max(t.py + r, Math.min(t.py + h - r, ey));
-      let vx = t.px - ex;
+      const ay = Math.max(at.py + r, Math.min(at.py + h - r, ey));
+      let vx = at.px - ex;
       let vy = ay - ey;
-      let vz = t.pz - ez;
+      let vz = at.pz - ez;
       const d = Math.hypot(vx, vy, vz) || 0.001;
       if (d - r > w.range) continue;
       vx /= d;
@@ -1547,10 +1576,11 @@ export class GameSim {
   }
 
   /** Leaf Blower: push everyone in the stream this step. */
-  private blow(p: SimPlayer, strength: number): void {
+  private blow(p: SimPlayer, strength: number, viewTick = 0): void {
     const w = p.weapon;
     const s = p.state;
     const K = BALANCE.knockback;
+    const rewind = this.rewindTick(viewTick);
     const d0 = lookDir(s.yaw, s.pitch, { x: 0, y: 0, z: 0 });
     const ex = s.px;
     const ey = s.py + eyeHeight(s);
@@ -1572,12 +1602,14 @@ export class GameSim {
       if (o === p || !this.isEnemy(p.id, o.id)) continue;
       const t = o.state;
       if (t.mode === MODE_DEAD || t.mode === MODE_HELD || t.spawnProt > 0) continue;
+      // Aimed where the shooter saw them (the stream still pushes them where they are now).
+      const at = rewind < this.tick ? this.stateAt(o, rewind) : t;
       const r = playerRadius(t) * this.hitR(o);
       const h = playerHeight(t) * this.hitH(o);
-      const ay = Math.max(t.py + r, Math.min(t.py + h - r, ey));
-      let vx = t.px - ex;
+      const ay = Math.max(at.py + r, Math.min(at.py + h - r, ey));
+      let vx = at.px - ex;
       let vy = ay - ey;
-      let vz = t.pz - ez;
+      let vz = at.pz - ez;
       const d = Math.hypot(vx, vy, vz) || 0.001;
       if (d - r > w.range) continue;
       vx /= d;
@@ -1615,6 +1647,8 @@ export class GameSim {
       const lastEv = p.blowEvents.get(o.id) ?? -1;
       if (this.time - lastEv > 0.35) {
         p.blowEvents.set(o.id, this.time);
+        // Each gust counts as a hit (Sudden Death's time-up tiebreak goes by hits).
+        p.stats.hits++;
         this.events.push({ t: 'blow', tick: this.tick, id: p.id, target: o.id });
       }
     }
@@ -1626,6 +1660,11 @@ export class GameSim {
       p.history.push({ tick: this.tick, px: s.px, py: s.py, pz: s.pz, inflation: s.inflation, mode: s.mode });
       if (p.history.length > 45) p.history.shift();
     }
+  }
+
+  /** The tick a shot is judged at: what the shooter saw (at most 40 ticks back), or now. */
+  private rewindTick(viewTick: number): number {
+    return viewTick > 0 ? Math.max(this.tick - 40, Math.min(this.tick, Math.round(viewTick))) : this.tick;
   }
 
   private stateAt(p: SimPlayer, tick: number): { px: number; py: number; pz: number; inflation: number; mode: number } {
@@ -1904,10 +1943,13 @@ export class GameSim {
 
   private stepPickups(): void {
     const P = BALANCE.pickups;
+    // Pickups whose floor sank away (collapsing maps) go with it instead of hovering over the void.
+    const grounded = (k: { x: number; y: number; z: number }) => this.world.groundBelow(k.x, k.y + 0.5, k.z, 2) !== null;
     if (this.time >= this.nextPinAt && this.pickups.length) {
       const pinOut = this.pickups.some((k) => k.kind === 'pin' && k.active) || [...this.players.values()].some((p) => p.state.pinTimer > 0);
-      if (!pinOut) {
-        const k = this.pickups[Math.floor(Math.random() * this.pickups.length)];
+      const spots = this.pickups.filter(grounded);
+      if (!pinOut && spots.length) {
+        const k = spots[Math.floor(Math.random() * spots.length)];
         k.kind = 'pin';
         k.active = true;
         this.events.push({ t: 'pickup', tick: this.tick, id: k.id, kind: 'pin', x: k.x, y: k.y, z: k.z, active: true, by: -1 });
@@ -1915,8 +1957,15 @@ export class GameSim {
       this.scheduleNextPin();
     }
     for (const k of this.pickups) {
+      if (k.active && this.tick % 30 === k.id % 30 && !grounded(k)) {
+        k.active = false;
+        k.kind = 'soda';
+        k.respawnAt = this.time + P.sodaRespawn;
+        this.events.push({ t: 'pickup', tick: this.tick, id: k.id, kind: 'soda', x: k.x, y: k.y, z: k.z, active: false, by: -1 });
+        continue;
+      }
       if (!k.active) {
-        if (this.time >= k.respawnAt) {
+        if (this.time >= k.respawnAt && grounded(k)) {
           k.active = true;
           k.kind = 'soda';
           this.events.push({ t: 'pickup', tick: this.tick, id: k.id, kind: 'soda', x: k.x, y: k.y, z: k.z, active: true, by: -1 });
@@ -2369,7 +2418,7 @@ export class GameSim {
       if (horiz > r + playerRadius(t) + G.range) continue;
       if (Math.abs(dy) > playerHeight(s) * 0.8 + 0.5) continue;
       if (horiz > 0.3 && (dx * fx + dz * fz) / horiz < Math.cos(G.cone)) continue;
-      if (horiz < bestD) {
+      if (horiz < bestD && this.clearBetween(s, t)) {
         bestD = horiz;
         best = o;
       }
@@ -2379,6 +2428,17 @@ export class GameSim {
       return;
     }
     this.startGrab(p, best);
+  }
+
+  /** Nothing solid between two players' middles (no grabbing through a wall). */
+  clearBetween(a: PlayerState, b: PlayerState): boolean {
+    const ay = a.py + playerHeight(a) * 0.5;
+    const dx = b.px - a.px;
+    const dy = b.py + playerHeight(b) * 0.5 - ay;
+    const dz = b.pz - a.pz;
+    const d = Math.hypot(dx, dy, dz);
+    if (d < 0.05) return true;
+    return this.world.raycast(a.px, ay, a.pz, dx / d, dy / d, dz / d, d) === null;
   }
 
   /** ABAG's hug: grabs his chase target on contact (see UltSim.stepChases). */
@@ -2615,6 +2675,10 @@ export class GameSim {
       target.launchFromX = t.px;
       target.launchFromZ = t.pz;
       target.launchStartTick = this.tick;
+      // Reeled in, they don't crash into you as if you'd been hit by them.
+      const noChain = this.time + G.pullHitstun + 0.3;
+      target.chainCool.set(p.id, noChain);
+      p.chainCool.set(target.id, noChain);
       s.grappleCool = G.cooldown;
       this.events.push({ t: 'grapple', tick: this.tick, id: p.id, target: target.id, x: t.px, y: cy, z: t.pz, miss: false });
     } else if (wh) {
@@ -3032,7 +3096,8 @@ export class GameSim {
     s.yaw = Math.atan2(-(this.homePoint.x - sp[0]), -(this.homePoint.z - sp[2]));
     s.mode = MODE_NORMAL;
     s.onGround = 1;
-    s.spawnProt = BALANCE.match.spawnProtection;
+    // Sudden Death: one life, so a little longer to get your bearings.
+    s.spawnProt = this.suddenDeath ? BALANCE.modes.suddenDeath.spawnProtection : BALANCE.match.spawnProtection;
     s.ammo = p.weapon.ammo;
     p.lastAttacker = -1;
     p.launchBy = -1;

@@ -3,8 +3,8 @@ import { QUICK_CHAT, unlockLevelOf, unlockedAt } from '../shared/economy';
 import { sanitizeLoadout } from '../shared/loadout';
 import { KNOCKOUT_MAPS, MAPS, homeMapFor } from '../shared/maps';
 import { randomGuestName } from '../shared/names';
-import type { ModeId } from '../shared/game/modes';
-import type { JoinRequest, ServerMessage } from '../shared/protocol';
+import { MODE_INFO, type ModeId } from '../shared/game/modes';
+import type { JoinRequest, QueueCounts, ServerMessage } from '../shared/protocol';
 import { Audio } from './audio/audio';
 import { Music } from './audio/music';
 import { ClientGame } from './game/clientGame';
@@ -21,7 +21,7 @@ import { clear } from './ui/dom';
 import { buildReconnecting } from './ui/reconnect';
 import { type AccountTab, buildAccountChip, buildAccountPanel, buildDailyCard, buildProfile, buildQueue, updateQueue } from './ui/accountUi';
 import { buildFaceScan } from './ui/faceScan';
-import { buildFriends } from './ui/friends';
+import { buildFriends, buildInvites } from './ui/friends';
 import { type TeamLobbyData, buildTeamLobby } from './ui/teamLobby';
 import { buildLocker } from './ui/locker';
 import { Hud } from './ui/hud';
@@ -33,6 +33,7 @@ import {
   buildHowTo,
   buildMainMenu,
   setActiveCount,
+  setModeCounts,
   setFriendBadge,
   buildPause,
   buildReplayBanner,
@@ -120,6 +121,28 @@ let pendingJoin: JoinRequest | null = null;
 /** The room you were last playing in, so a dropped connection can put you back. */
 let lastRoom: { code: string; isPrivate: boolean; mode: ModeId; ranked: boolean } | null = null;
 let reconnectTimer: number | null = null;
+/** Set while being moved into a busier room (the welcome that follows says so). */
+let movedReason: string | null = null;
+/** Sudden Death's "one life" banner waits for the first round you're in. */
+let sdIntro = false;
+/** Waiting alone in a public room: since when, and whether the hint showed. */
+let aloneSince = 0;
+let aloneHinted = false;
+
+/** After a while alone in a public room, say what you can do about it (once per room). */
+window.setInterval(() => {
+  const room = game.room;
+  const alone = screen === 'playing' && !!room && !room.isPrivate && !room.ranked && game.match.phase === 'waiting' && [...game.roster.values()].filter((r) => !r.bot).length <= 1;
+  if (!alone) {
+    aloneSince = 0;
+    return;
+  }
+  if (!aloneSince) aloneSince = Date.now();
+  if (aloneHinted || Date.now() - aloneSince < 20_000) return;
+  aloneHinted = true;
+  const key = touchMode ? 'Tap ❚❚' : padPlay ? 'Press Menu' : 'Press Esc';
+  hud.callout('NOBODY ELSE YET', `${key}: copy an invite link for friends, or vote for bots to play now`, 6, '#ffd60a');
+}, 1000);
 let scoreboardOpen = false;
 /** Playing with a controller: no pointer lock needed. */
 let padPlay = false;
@@ -232,10 +255,63 @@ function setPath(path: string): void {
 
 // --- Screens -----------------------------------------------------------------------------------
 
-/** Friend requests show up on the menu within half a minute (accounts only). */
+/**
+ * Friends: requests and invites show up on the menu within ten seconds (accounts only), and an
+ * invite that arrives mid-match pops up as a toast.
+ */
+let friendsPolledAt = 0;
 window.setInterval(() => {
-  if (screen === 'menu' && account.account && overlay !== 'friends') void account.loadFriends().catch(() => undefined);
-}, 30_000);
+  if (!account.account || overlay === 'friends' || document.hidden) return;
+  const every = screen === 'menu' ? 10_000 : screen === 'playing' ? 20_000 : 0;
+  if (!every || Date.now() - friendsPolledAt < every) return;
+  friendsPolledAt = Date.now();
+  void account.loadFriends().catch(() => undefined);
+}, 2000);
+
+/** Invites already seen (by friend and time), and ones dismissed on the menu. */
+const invitesSeen = new Set<string>();
+const invitesDismissed = new Set<string>();
+const inviteKey = (f: { id: number; invite?: { at: number } }) => `${f.id}:${f.invite?.at ?? 0}`;
+
+/** Redraws the menu's invite cards, and toasts new invites during a match. */
+function showInvites(): void {
+  const fresh = account.invites.filter((f) => !invitesDismissed.has(inviteKey(f)));
+  if (screen === 'playing') {
+    for (const f of fresh) {
+      if (invitesSeen.has(inviteKey(f))) continue;
+      invitesSeen.add(inviteKey(f));
+      if (f.playing?.code !== game.room?.code) hud.toast(`🎮 ${f.name} invited you to ${MODE_INFO[f.invite!.mode as ModeId]?.name ?? 'a match'}! Esc → 👥 Invite to join them.`, 6000);
+    }
+    return;
+  }
+  for (const f of fresh) invitesSeen.add(inviteKey(f));
+  menuLayer.querySelector('.invites')?.remove();
+  if (screen !== 'menu' || !fresh.length) return;
+  menuLayer.append(
+    buildInvites(
+      fresh,
+      (id) => startJoin(identity.name, { kind: 'friend', id }),
+      (f) => {
+        invitesDismissed.add(inviteKey(f));
+        showInvites();
+      },
+    ),
+  );
+}
+
+/** Live player counts for the menu's mode buttons, every few seconds while it shows. */
+let countsAt = 0;
+function pollCounts(force = false): void {
+  if (screen !== 'menu' || document.hidden || (!force && Date.now() - countsAt < 8000)) return;
+  countsAt = Date.now();
+  fetch('/api/counts', { cache: 'no-store' })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((c: QueueCounts | null) => {
+      if (c && screen === 'menu') setModeCounts(c);
+    })
+    .catch(() => undefined);
+}
+window.setInterval(pollCounts, 2000);
 
 function showMenu(notice?: MenuNotice | string): void {
   stopReconnecting();
@@ -250,6 +326,11 @@ function showMenu(notice?: MenuNotice | string): void {
 function renderMenu(notice?: MenuNotice | string): void {
   showPickedMap();
   clear(menuLayer);
+  window.setTimeout(() => {
+    setModeCounts();
+    pollCounts(true);
+    showInvites();
+  }, 0);
   menuLayer.append(
     buildMainMenu(identity.name, {
       onLoadout: () => setOverlay('loadout'),
@@ -284,6 +365,7 @@ function openAccount(tab: AccountTab): void {
 let lastAccountName: string | null = null;
 account.onChange(() => {
   setActiveCount(account.active);
+  showInvites();
   setFriendBadge(account.friendRequests);
   // Drop anything the saved loadout has that isn't unlocked yet.
   const allowed = unlockedAt(unlockLevelOf(account.profile));
@@ -326,6 +408,7 @@ function startJoin(name: string, join: JoinRequest): void {
   else input.requestLock();
   screen = 'connecting';
   pendingJoin = join;
+  if (join.kind === 'quick') lastQuick = join;
   clear(menuLayer);
   if (join.kind === 'ranked') {
     input.exitLock();
@@ -362,7 +445,7 @@ function scheduleReconnect(): void {
   if (reconnectTimer !== null) return;
   const room = lastRoom;
   if (!room || reconnectAttempt >= RECONNECT_DELAYS.length) {
-    const retry: JoinRequest | null = room ? (room.isPrivate ? { kind: 'code', code: room.code } : quickJoin(room.mode)) : null;
+    const retry: JoinRequest | null = room ? rejoinFor(room) : null;
     showMenu({
       title: 'Lost connection',
       text: "Couldn't reach the server. Check your Wi-Fi and try again.",
@@ -378,7 +461,7 @@ function scheduleReconnect(): void {
   reconnectTimer = window.setTimeout(() => {
     reconnectTimer = null;
     if (screen !== 'reconnecting') return;
-    const join: JoinRequest = room.isPrivate ? { kind: 'code', code: room.code } : quickJoin(room.mode);
+    const join = rejoinFor(room);
     pendingJoin = join;
     const tried = reconnectAttempt;
     net.join(identity.name, identity.guestId, join, game.loadout, account.token ?? undefined).catch(() => {
@@ -402,10 +485,22 @@ function stopReconnecting(): void {
 let reconnectAttempt = 0;
 let reconnectUpdating = false;
 
+/**
+ * Getting back into a room after the connection dropped: private rooms by code; public ones the
+ * way you first joined (same mode, map and bots switch), trying the same room first so friends
+ * who were playing together land together again (even after a server restart).
+ */
+function rejoinFor(room: { code: string; isPrivate: boolean; mode: ModeId }): JoinRequest {
+  if (room.isPrivate) return { kind: 'code', code: room.code };
+  const how = lastQuick && (lastQuick.mode === room.mode || (lastQuick.any && room.mode === 'suddenDeath')) ? lastQuick : quickJoin(room.mode);
+  return { ...how, room: room.code };
+}
+/** The last quick-play request (rejoins go back the same way). */
+let lastQuick: Extract<JoinRequest, { kind: 'quick' }> | null = null;
+
 /** Joining again after a dropped connection: the same private room, or the same kind of match. */
 function rejoinRequest(): JoinRequest | null {
-  const room = game.room;
-  if (room?.isPrivate && !room.ranked) return { kind: 'code', code: room.code };
+  if (screen === 'playing' && lastRoom && !lastRoom.ranked) return rejoinFor(lastRoom);
   return pendingJoin;
 }
 
@@ -466,11 +561,14 @@ function setOverlay(next: typeof overlay): void {
     case 'friends': {
       const friends = buildFriends({
         account,
-        onJoin: (code) => {
+        onJoin: (id) => {
           setOverlay('none');
           if (screen === 'playing') leaveMatch();
-          startJoin(identity.name, { kind: 'code', code });
+          startJoin(identity.name, { kind: 'friend', id });
         },
+        // In a match: invite friends into it (they see it on their menu).
+        onInvite: screen === 'playing' && game.room && !game.room.ranked ? (id) => account.inviteFriend(id) : null,
+        roomCode: () => game.room?.code ?? '',
         onSignup: () => openAccount('signup'),
         onClose: back,
       });
@@ -504,7 +602,12 @@ function setOverlay(next: typeof overlay): void {
               resume();
             } else net.send({ type: 'host', action: 'settings', settings: action });
           },
-        }, { waiting: game.inLobby, players: game.roster.size }),
+          onBots: (on) => {
+            audio.uiClick();
+            net.send({ type: 'bots', on });
+          },
+          onFriends: account.account ? () => setOverlay('friends') : undefined,
+        }, { waiting: game.inLobby, players: game.roster.size, you: game.youId, humans: [...game.roster.values()].filter((r) => !r.bot).length }),
       );
       break;
     case 'settings':
@@ -571,7 +674,23 @@ function setOverlay(next: typeof overlay): void {
       );
       break;
     case 'click':
-      overlayLayer.append(buildClickToPlay(game.alive ? 'READY?' : 'WAITING...', resume));
+      overlayLayer.append(
+        buildClickToPlay(
+          game.alive ? 'READY?' : 'WAITING...',
+          resume,
+          input.lastDevice === 'pad',
+          settings.deviceAsked || touchMode
+            ? undefined
+            : {
+                current: settings.device,
+                onPick: (d) => {
+                  settings.device = d;
+                  settings.deviceAsked = true;
+                  applySettings(settings);
+                },
+              },
+        ),
+      );
       break;
     case 'teams': {
       const view = buildTeamLobby(teamLobbyData, {
@@ -591,6 +710,13 @@ function setOverlay(next: typeof overlay): void {
         onCopyLink: copyInvite,
         onLeave: leaveMatch,
         onCountdownTick: () => audio.beep(null),
+        onBots: (on) => {
+          audio.uiClick();
+          // Public rooms vote; in a private room the host just switches them.
+          if (game.room?.isPrivate) net.send({ type: 'host', action: 'settings', settings: { bots: on } });
+          else net.send({ type: 'bots', on });
+        },
+        onFriends: account.account ? () => setOverlay('friends') : null,
       });
       teamsView = view;
       overlayLayer.append(view.root);
@@ -726,8 +852,52 @@ input.onMenuButton = () => {
     setOverlay('none');
   }
 };
+/**
+ * Controller menus: the d-pad moves focus through whatever buttons are showing and A presses the
+ * focused one; B backs out (results: MENU, replay: skip).
+ */
+function padMenuItems(): HTMLElement[] {
+  const root = screen === 'playing' || overlay !== 'none' ? overlayLayer : menuLayer;
+  return [...root.querySelectorAll<HTMLElement>('button:not([disabled]), select, input[type="checkbox"]')].filter((e) => e.offsetParent !== null);
+}
+function padFocus(dir: 1 | -1): boolean {
+  const items = padMenuItems();
+  if (!items.length) return false;
+  const i = items.indexOf(document.activeElement as HTMLElement);
+  (items[i < 0 ? (dir > 0 ? 0 : items.length - 1) : (i + dir + items.length) % items.length] ?? items[0]).focus();
+  return true;
+}
+/** Menus a controller can move around in (not the game itself, the click prompt or the team lobby's own buttons). */
+const padNavigable = () => screen === 'menu' || screen === 'room-join' || (screen === 'playing' && overlay !== 'none' && overlay !== 'click' && overlay !== 'teams');
+
 input.onPadButton = (b) => {
   audio.unlock();
+  if (padNavigable()) {
+    if (b === PAD.UP || b === PAD.LEFT) {
+      if (padFocus(-1)) return;
+    } else if (b === PAD.DOWN || b === PAD.RIGHT) {
+      if (padFocus(1)) return;
+    } else if (b === PAD.A) {
+      const focused = document.activeElement as HTMLElement | null;
+      if (focused && focused !== document.body && padMenuItems().includes(focused)) {
+        padPlay = true;
+        focused.click();
+        return;
+      }
+    }
+  }
+  if (overlay === 'results' && (b === PAD.A || b === PAD.B)) {
+    const btn = overlayLayer.querySelector<HTMLButtonElement>(b === PAD.A ? '.play-again:not([disabled])' : '.results-menu');
+    if (btn) {
+      padPlay = true;
+      btn.click();
+      return;
+    }
+  }
+  if (overlay === 'replay' && (b === PAD.A || b === PAD.B)) {
+    overlayLayer.querySelector<HTMLButtonElement>('.replay-banner button')?.click();
+    return;
+  }
   if (screen === 'menu' && overlay === 'none' && b === PAD.A) {
     const play = document.querySelector<HTMLButtonElement>('.menu .btn.big');
     play?.click();
@@ -834,6 +1004,8 @@ function teamLobbyData(): TeamLobbyData {
     lobby: L,
     startsIn: L && L.startsAt > 0 ? Math.max(0, (L.startsAt - now) / BALANCE.tickRate) : null,
     autoReadyIn: L && L.autoReadyAt > 0 ? Math.max(0, (L.autoReadyAt - now) / BALANCE.tickRate) : null,
+    botsOn: !!room?.settings.bots,
+    botVotes: room?.botVotes ?? null,
   };
 }
 
@@ -959,6 +1131,13 @@ net.handlers = {
       net.warm().catch(() => undefined);
       return;
     }
+    if (msg.type === 'moved') {
+      // Folded into a busier room of the same mode: its welcome comes next and sets everything up.
+      game.leave();
+      pendingJoin = null;
+      movedReason = msg.reason;
+      return;
+    }
     if (msg.type === 'welcome') {
       // The scoreboard's add-friend buttons need to know who's a friend already.
       if (account.account) void account.loadFriends().catch(() => undefined);
@@ -987,9 +1166,16 @@ net.handlers = {
       } else if (msg.room.ranked) {
         hud.callout('RANKED 1v1', `First to ${BALANCE.modes.duel.target} knockouts. Click to play!`, 4);
         audio.goalHorn();
+      } else if (movedReason) {
+        hud.callout(movedReason, `${MODE_INFO[msg.room.settings.mode].name} · ${MAPS[msg.room.mapId]?.name ?? ''}`, 3.5, '#35d07f');
+        audio.goalHorn();
       } else if (msg.room.settings.mode === 'suddenDeath') {
-        hud.callout('SUDDEN DEATH', "One life. Get knocked out and you're out. Last one standing wins!", 4, '#ff3b5c');
+        // Shown once a round is actually on (not while waiting for a second player).
+        sdIntro = true;
       }
+      movedReason = null;
+      aloneSince = 0;
+      aloneHinted = false;
       return;
     }
     if (msg.type === 'error') {
@@ -1036,6 +1222,10 @@ net.handlers = {
 
 game.onMatchChange = (m) => {
   if (m.phase === 'playing') game.lastProgress = null;
+  if (sdIntro && m.phase === 'playing' && game.mode === 'suddenDeath' && overlay !== 'results' && overlay !== 'replay') {
+    sdIntro = false;
+    hud.callout('SUDDEN DEATH', "One life. Get knocked out and you're out. Last one standing wins!", 4, '#ff3b5c');
+  }
   if (m.phase !== 'results') game.againIds.clear();
   // Team Knockout: the team lobby covers the map until the match starts.
   if (game.inTeamLobby) {
@@ -1065,6 +1255,7 @@ game.onMatchChange = (m) => {
     // "click to play" takes it again.
     input.exitLock();
   } else if (overlay === 'results' || overlay === 'replay') {
+    sdIntro = false;
     game.stopReplay();
     setOverlay(input.locked || touchMode ? 'none' : 'click');
     if (m.phase === 'playing' && game.mode === 'suddenDeath') hud.callout('SUDDEN DEATH!', "One life. Get knocked out and you're out. Last one standing wins!", 2.4, '#ff3b5c');
@@ -1156,4 +1347,4 @@ if (splash) {
 }
 
 // Expose for debugging and automated tests.
-(window as unknown as { bubba: unknown }).bubba = { game, net, input, renderer, settings, perf, account, touch };
+(window as unknown as { bubba: unknown }).bubba = { game, net, input, renderer, settings, perf, account, touch, setOverlay };

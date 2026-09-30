@@ -101,6 +101,12 @@ function serveStatic(req: IncomingMessage, res: ServerResponse): void {
     res.end(JSON.stringify({ ok: true, ...lobby.stats(), ...store.storageInfo() }));
     return;
   }
+  if (path === '/api/counts') {
+    // Who's playing what right now, for the menu's mode buttons (polled every few seconds).
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(JSON.stringify(lobby.counts()));
+    return;
+  }
   if (path === '/admin') {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-robots-tag': 'noindex', 'x-frame-options': 'DENY' });
     res.end(ADMIN_HTML);

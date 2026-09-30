@@ -19,6 +19,10 @@ export interface TeamLobbyData {
   startsIn: number | null;
   /** Public rooms: seconds until everyone counts as ready anyway (null: not running). */
   autoReadyIn: number | null;
+  /** Bots are filling the empty seats. */
+  botsOn: boolean;
+  /** Public rooms: who voted for bots (they fill in once every player here does); null in private rooms. */
+  botVotes: number[] | null;
 }
 
 export interface TeamLobbyActions {
@@ -32,6 +36,10 @@ export interface TeamLobbyActions {
   onLeave: () => void;
   /** A second of the countdown went by (for a tick sound). */
   onCountdownTick: (n: number) => void;
+  /** Your bots vote (public rooms), or the host's bots switch (private rooms). */
+  onBots: (on: boolean) => void;
+  /** Invite friends from your list (accounts only). */
+  onFriends: (() => void) | null;
 }
 
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
@@ -61,6 +69,11 @@ export function buildTeamLobby(data: () => TeamLobbyData, act: TeamLobbyActions)
   const ready = el('button', { class: 'btn big tl-ready', on: { click: () => act.onReady(!isReady()) } }) as HTMLButtonElement;
   const shuffle = el('button', { class: 'btn small', text: '🔀 Shuffle', on: { click: act.onShuffle }, attrs: { title: 'Deal everyone onto new even teams' } });
   const lock = el('button', { class: 'btn small', on: { click: () => act.onLock(!data().lobby?.locked) } }) as HTMLButtonElement;
+  // Bots: a vote in public rooms (they fill in once everyone agrees), the host's switch in private ones.
+  const botsBtn = el('button', { class: 'btn small tl-bots', on: { click: () => act.onBots(!botsMine()) } }) as HTMLButtonElement;
+  const botsNote = el('span', { class: 'tl-bots-note' });
+  const invite = act.onFriends ? el('button', { class: 'btn small ghost', text: '👥 Invite friends', on: { click: act.onFriends } }) : null;
+  const botsRow = el('div', { class: 'tl-botsrow' }, botsBtn, botsNote, invite);
   const hostRow = el('div', { class: 'tl-host' }, el('span', { class: 'label', text: '👑 Host' }), shuffle, lock);
   const foot = el(
     'div',
@@ -79,6 +92,7 @@ export function buildTeamLobby(data: () => TeamLobbyData, act: TeamLobbyActions)
       el('div', { class: 'tl-teams' }, cols[0].box, vs, cols[1].box),
       status,
       ready,
+      botsRow,
       hostRow,
       foot,
     ),
@@ -89,6 +103,10 @@ export function buildTeamLobby(data: () => TeamLobbyData, act: TeamLobbyActions)
     const d = data();
     return !!d.lobby?.ready.includes(d.youId);
   };
+  const botsMine = () => {
+    const d = data();
+    return d.botVotes ? d.botVotes.includes(d.youId) : d.botsOn;
+  };
   let lastCount = -1;
 
   const update = () => {
@@ -98,8 +116,7 @@ export function buildTeamLobby(data: () => TeamLobbyData, act: TeamLobbyActions)
     const me = d.roster.find((r) => r.id === d.youId);
     const min = L?.minPerSide ?? BALANCE.modes.teamKnockout.minPerSide;
     sub.textContent = `${d.mapName} · first team to ${BALANCE.modes.teamKnockout.target} knockouts`;
-    code.classList.toggle('hidden', !d.isPrivate);
-    code.textContent = `ROOM ${d.code} · copy invite`;
+    code.textContent = `ROOM ${d.code} · copy invite link`;
     for (const t of [0, 1] as const) {
       const c = cols[t];
       const color = hex(d.colors[t] ?? 0xffffff);
@@ -149,6 +166,24 @@ export function buildTeamLobby(data: () => TeamLobbyData, act: TeamLobbyActions)
         ? `${waiting} · starting in ${Math.ceil(d.autoReadyIn)}s anyway`
         : waiting || 'Ready when you are';
     status.classList.toggle('go', counting);
+    // Bots: who wants them, and what they'd do.
+    const humans = d.roster.filter((r) => !r.bot).length;
+    const wantBots = botsMine();
+    const canSwitch = !!d.botVotes || d.isHost;
+    botsBtn.classList.toggle('hidden', !canSwitch);
+    botsBtn.textContent = d.botsOn ? (wantBots ? '🤖 Bots on ✓' : '🤖 Turn bots back on') : wantBots ? '🤖 Want bots ✓' : '🤖 Fill with bots';
+    botsBtn.classList.toggle('green', wantBots);
+    botsBtn.title = d.botVotes ? 'Bots fill the empty seats once everyone here wants them, and step aside as players join.' : 'Bots fill the empty seats.';
+    const votes = d.botVotes?.length ?? 0;
+    botsNote.textContent = d.botsOn
+      ? 'Bots fill the empty seats and step aside as players join'
+      : d.botVotes && humans > 1 && votes > 0
+        ? `${votes}/${humans} want bots`
+        : !canSwitch && !d.botsOn
+          ? ''
+          : check.teamsOk
+            ? ''
+            : 'No one else around? Invite friends, or fill with bots';
     const mine = isReady();
     ready.textContent = mine ? 'READY ✓' : 'READY UP';
     ready.classList.toggle('green', !mine);
