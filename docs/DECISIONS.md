@@ -483,3 +483,27 @@ Measured with scripted matches and bot soaks:
 - The first "click to play" asks once whether you aim with a mouse or a trackpad (the default was
   trackpad, which turned 62% faster than mouse users expect).
 - On a phone held upright, the pause button stays reachable above "turn your phone sideways".
+
+## Bots and maps audit fixes
+
+About 700 bot-hours of headless soaks per map and mode (deaths, who caused them, stuck time,
+engagement ranges, spawn deaths; spawns and aim were fine). Fixes:
+
+- **Bots look before they leap.** The edge probe checks every half meter (not 3 points) and lets
+  bots step down up to 7 m (they were stuck on roofs); random hops and dashes check the path they
+  will actually take (the final input after edge avoidance, and their momentum), 11 m for a dash
+  and its slide; a pad that throws you away from home counts as a hole; a way around a drop is kept
+  for 1.5 s (two equal choices made bots freeze at island edges), and with no way home on foot they
+  use a pad on their piece that throws them home; walking into a crate, they hop it. Same seeds,
+  18 minutes each, voluntary bot deaths before → after: Pump Station 24 → 13, Sugar Rush 23 → 10,
+  Face-Off 70 → 61.
+- **Face-Off:** the flank pads throw a meter farther (bots landed 0.6 m inside the islands and
+  strafed off), the islands have a pad back, and the spawn list is symmetric (lost bots head for the
+  middle, not a corner of a base).
+- **Pump Station:** pads back from the giants' pedestals (a 5 m gap with no way across).
+- **Fair bot teams.** Team modes add bots in twins (same skill and loadout, one per team), and
+  shuffles keep twins apart: with random splits, the team with more total bot skill won 19 of 19
+  Team Knockout matches.
+- **Knockout credit.** A knockout counts for the last attacker within 8 s of the hit, or up to 20 s
+  if the victim hasn't landed in control since (Bounce Castle: 30 of 34 uncredited deaths were
+  bots still bouncing 8 to 12 s after the hit). Uncredited deaths there: 11 → 5.

@@ -41,6 +41,9 @@ export const PUMP_ARENA: MapDef = {
     { x: 20, y: 0, z: -8, half: 1.1, strength: 18, pushX: -9, pushZ: 0 },
     { x: 0, y: 0.8, z: -20, half: 1.1, strength: 18, pushX: 0, pushZ: 9 },
     { x: 0, y: 0.8, z: 20, half: 1.1, strength: 18, pushX: 0, pushZ: -9 },
+    // A way back from the giants' pedestals (a 5 m gap with no way across stranded people there).
+    { x: -46.5, y: 0.5, z: 0, half: 1.1, strength: 17, pushX: 10, pushZ: 0 },
+    { x: 46.5, y: 0.5, z: 0, half: 1.1, strength: 17, pushX: -10, pushZ: 0 },
   ],
   spawns: [
     [-32, 0, -6, 0],

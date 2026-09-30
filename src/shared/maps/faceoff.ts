@@ -12,7 +12,8 @@ import type { DecorDef, MapDef, SolidDef, Vec3Tuple } from './types';
  * - **The middle:** a low hill in the center worth holding, crates for cover either side of it,
  *   and hop-over walls in front of each base. Open edges north and south to knock people off.
  * - **Flanks:** long walkways along both sides, a jump away from the middle, with cover in the
- *   middle and pads out to two little islands (a soda can each) that sink at half time.
+ *   middle and pads out to two little islands (a soda can each, and a pad back) that sink at
+ *   half time.
  *
  * Collapse: the islands sink at half time; in the final 30 seconds the flanks and the plank go,
  * then the bases (you respawn at the back of your half of the middle), then the middle crumbles.
@@ -72,8 +73,8 @@ for (const [x, team] of [
   for (const z of [-13.5, 13.5]) decor.push({ type: 'teamFlag', x, y: 0, z, rotY: x < 0 ? 0 : Math.PI, data: { team } });
   for (const z of [-17.5, 17.5]) decor.push({ type: 'tubeMan', x: x < 0 ? -40 : 40, y: 0, z, data: { team } });
 }
-decor.push({ type: 'balloons', x: 0, y: 0.4, z: 29, color: 0xffd60a });
-decor.push({ type: 'balloons', x: 0, y: 0.4, z: -29, color: 0xffd60a });
+decor.push({ type: 'balloons', x: 2.2, y: 0.4, z: 28.6, color: 0xffd60a });
+decor.push({ type: 'balloons', x: -2.2, y: 0.4, z: -28.6, color: 0xffd60a });
 
 /** Where each team comes back in: its base first, then the back of its half of the middle. */
 const home = (sgn: 1 | -1): [number, number, number][] => [
@@ -95,11 +96,14 @@ export const FACEOFF: MapDef = {
     // Base launch pads: over the moat into your half of the middle.
     { x: -36, y: 0, z: 0, half: 1.2, strength: 16, pushX: 13, pushZ: 0 },
     { x: 36, y: 0, z: 0, half: 1.2, strength: 16, pushX: -13, pushZ: 0 },
-    // Flank pads out to the little islands.
-    { x: 0, y: 0, z: 17.5, half: 1.1, strength: 17, pushX: 0, pushZ: 6 },
-    { x: 0, y: 0, z: -17.5, half: 1.1, strength: 17, pushX: 0, pushZ: -6 },
+    // Flank pads out to the little islands (landing well inside them), and back from the far end.
+    { x: 0, y: 0, z: 17.5, half: 1.1, strength: 17, pushX: 0, pushZ: 7 },
+    { x: 0, y: 0, z: -17.5, half: 1.1, strength: 17, pushX: 0, pushZ: -7 },
+    { x: 0, y: 0.4, z: 29, half: 0.8, strength: 17, pushX: 0, pushZ: -9 },
+    { x: 0, y: 0.4, z: -29, half: 0.8, strength: 17, pushX: 0, pushZ: 9 },
   ],
-  spawns: [...home(-1).slice(0, 3), ...home(1).slice(0, 3), [-12, 0, 6, 0], [-12, 0, -6, 0], [12, 0, 6, 0], [12, 0, -6, 0]].map(
+  // Symmetric front to back too (the spawns' middle is where bots head when lost: z = 0).
+  spawns: [...home(-1).slice(0, 2), ...home(1).slice(0, 2), [-12, 0, 6, 0], [-12, 0, -6, 0], [12, 0, 6, 0], [12, 0, -6, 0]].map(
     ([x, y, z]) => [x, y, z, 0] as [number, number, number, number],
   ),
   teamSpawns: [home(-1), home(1)],

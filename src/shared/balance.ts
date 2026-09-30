@@ -117,6 +117,8 @@ export const BALANCE = {
     doubleOverMoveMult: 0.3,
     /** Seconds a hitter keeps credit for a knockout after their last hit. */
     creditWindow: 8,
+    /** ...or this long if they haven't landed in control since the hit. */
+    creditWindowAirborne: 20,
   },
 
   blastJump: {

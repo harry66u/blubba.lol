@@ -359,11 +359,17 @@ export class Room {
   balanceBots(): void {
     const want = this.wantedBots();
     let bots = this.sim.bots.size;
+    const teams = MODE_INFO_TEAMS.has(this.mode);
     while (bots < want && this.playerCount < BALANCE.match.maxPlayers) {
       // A spread of skill so new players can win fights and good players still get a challenge.
-      const skill = [0.25, 0.45, 0.65, 0.35][bots % 4];
-      this.sim.addBot(skill);
+      const skill = [0.25, 0.45, 0.65, 0.35][(teams ? bots >> 1 : bots) % 4];
+      const bot = this.sim.addBot(skill);
       bots++;
+      // Team modes add bots in twins (same skill and loadout, one per team) so they're fair.
+      if (teams && bots < want && this.playerCount < BALANCE.match.maxPlayers) {
+        this.sim.addBot(skill, bot);
+        bots++;
+      }
     }
     while (bots > want) {
       // Mid-match in Sudden Death only bots that are already out can go; the rest leave after it.
@@ -589,7 +595,7 @@ export class Room {
   // --- Team Knockout lobby ---------------------------------------------------------------------
 
   private seats(): LobbySeat[] {
-    return [...this.sim.players.values()].map((p) => ({ id: p.id, team: p.team, bot: p.isBot }));
+    return [...this.sim.players.values()].map((p) => ({ id: p.id, team: p.team, bot: p.isBot, twin: p.twinId >= 0 ? p.twinId : undefined }));
   }
 
   /**

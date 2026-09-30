@@ -40,4 +40,26 @@ describe('team lobby rules', () => {
     }
     expect(MAX_PER_SIDE).toBe(5);
   });
+
+  it('shuffles keep bot twins on opposite teams', () => {
+    let seed = 7;
+    const rng = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    const seats = [
+      { id: 1, team: 0, bot: false },
+      { id: 2, team: 0, bot: false },
+      { id: 3, team: 1, bot: false },
+      { id: 10, team: 0, bot: true, twin: 11 },
+      { id: 11, team: 1, bot: true, twin: 10 },
+      { id: 12, team: 0, bot: true, twin: 13 },
+      { id: 13, team: 1, bot: true, twin: 12 },
+      { id: 14, team: 1, bot: true },
+    ];
+    for (let i = 0; i < 20; i++) {
+      const t = shuffleTeams(seats, rng);
+      expect(t.get(10)).not.toBe(t.get(11));
+      expect(t.get(12)).not.toBe(t.get(13));
+      const n0 = [...t.values()].filter((x) => x === 0).length;
+      expect(Math.abs(n0 - (seats.length - n0))).toBeLessThanOrEqual(1);
+    }
+  });
 });

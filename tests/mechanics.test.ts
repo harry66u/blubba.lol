@@ -97,3 +97,30 @@ describe('audit fixes', () => {
     expect(a.state.spawnProt).toBeCloseTo(BALANCE.modes.suddenDeath.spawnProtection, 1);
   });
 });
+
+describe('bots and maps audit fixes', () => {
+  it('team-mode bots come in twins (same skill and loadout, one per team)', () => {
+    const sim = new GameSim({ map: DEALERSHIP, mode: 'teamKnockout', durationSec: 999 });
+    const a = sim.addBot(0.65);
+    const b = sim.addBot(0.65, a);
+    expect(b.twinId).toBe(a.id);
+    expect(a.twinId).toBe(b.id);
+    expect(b.loadout.weapon).toBe(a.loadout.weapon);
+    expect(b.team).toBe(1 - a.team);
+    sim.removePlayer(a.id);
+    expect(b.twinId).toBe(-1);
+  });
+
+  it("a knockout still counts for the attacker while the victim hasn't landed in control", () => {
+    const { sim, ps } = setup(2);
+    const [a, b] = ps;
+    b.lastAttacker = a.id;
+    b.lastAttackTime = sim.time;
+    b.footedAt = sim.time - 1;
+    // 12 s later, never landed since the hit: still a.'s knockout.
+    sim.time += 12;
+    const before = a.stats.kos;
+    sim.knockout(b);
+    expect(a.stats.kos).toBe(before + 1);
+  });
+});

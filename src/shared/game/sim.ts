@@ -79,6 +79,10 @@ export interface SimPlayer {
   name: string;
   color: number;
   isBot: boolean;
+  /** Team modes: the bot's twin on the other team (same skill and loadout), or -1. */
+  twinId: number;
+  /** Last time they stood on solid (not bouncy) ground in control: a knockout before that is still their attacker's. */
+  footedAt: number;
   state: PlayerState;
   lastInput: InputFrame;
   queue: InputFrame[];
@@ -444,6 +448,8 @@ export class GameSim {
       name,
       color: opts.color ?? this.freeColor(),
       isBot: !!opts.isBot,
+      twinId: -1,
+      footedAt: 0,
       state,
       lastInput: emptyInput(),
       queue: [],
@@ -499,7 +505,12 @@ export class GameSim {
     return p;
   }
 
-  addBot(skill = 0.5): SimPlayer {
+  /**
+   * Adds a bot. With a `twin` (team modes), it copies that bot's skill and loadout and plays for
+   * the other team, so the bots never tip a match one way (random skill and weapon splits decided
+   * every bot-filled Team Knockout match in testing).
+   */
+  addBot(skill = 0.5, twin?: SimPlayer): SimPlayer {
     const used = new Set([...this.players.values()].map((p) => p.name));
     const name = BOT_NAMES.find((n) => !used.has(n)) ?? `Bot ${this.players.size + 1}`;
     // Bots bring a mix of weapons and utilities so every loadout shows up in public games.
@@ -512,7 +523,7 @@ export class GameSim {
       const slot = pick(PART_SLOTS);
       parts[slot] = pick(SLOT_PARTS[slot].slice(1));
     }
-    const loadout = sanitizeLoadout({ weapon: pick(WEAPON_IDS), parts, utils: [utils[0], utils[1]], ult: pick(ULT_IDS) });
+    const loadout = twin ? { ...twin.loadout } : sanitizeLoadout({ weapon: pick(WEAPON_IDS), parts, utils: [utils[0], utils[1]], ult: pick(ULT_IDS) });
     // Bots dress up too, so every look shows up in public games.
     const cos = { ...DEFAULT_COSMETICS };
     for (const slot of COSMETIC_SLOTS) {
@@ -523,12 +534,19 @@ export class GameSim {
     }
     const p = this.addPlayer(name, { isBot: true, loadout, cos });
     this.bots.set(p.id, new BotBrain(skill, p.id * 7919 + this.tick));
+    if (twin && this.teams) {
+      p.twinId = twin.id;
+      twin.twinId = p.id;
+      if (twin.team === 0 || twin.team === 1) this.setTeam(p.id, twin.team === 0 ? 1 : 0);
+    }
     return p;
   }
 
   removePlayer(id: number): void {
     const p = this.players.get(id);
     if (!p) return;
+    const twin = this.players.get(p.twinId);
+    if (twin) twin.twinId = -1;
     this.releaseInvolving(p);
     this.players.delete(id);
     this.bots.delete(id);
@@ -717,6 +735,7 @@ export class GameSim {
     this.stepGadgets();
     this.expireDynamics();
     this.recordHistory();
+    this.trackFooting();
     this.recordReplayFrame();
     this.checkBlastZones();
     // After every knockout this tick, so players popped together count as going out together.
@@ -1651,6 +1670,14 @@ export class GameSim {
         p.stats.hits++;
         this.events.push({ t: 'blow', tick: this.tick, id: p.id, target: o.id });
       }
+    }
+  }
+
+  /** Who has their feet under them (see knockout credit). */
+  private trackFooting(): void {
+    for (const p of this.players.values()) {
+      const s = p.state;
+      if (s.onGround && s.launchTimer <= 0 && !((this.world.solids[s.groundId]?.bounce ?? 0) > 0)) p.footedAt = this.time;
     }
   }
 
@@ -2761,7 +2788,10 @@ export class GameSim {
   knockout(p: SimPlayer, tag?: string): void {
     const s = p.state;
     this.releaseInvolving(p);
-    const credit = p.lastAttacker >= 0 && this.time - p.lastAttackTime <= BALANCE.knockback.creditWindow;
+    // The last attacker gets the knockout within a few seconds of their hit, or for longer if the
+    // victim never got their feet back under them since (bouncing around a bouncy castle, say).
+    const since = this.time - p.lastAttackTime;
+    const credit = p.lastAttacker >= 0 && (since <= BALANCE.knockback.creditWindow || (p.footedAt < p.lastAttackTime && since <= BALANCE.knockback.creditWindowAirborne));
     let killer = credit ? this.players.get(p.lastAttacker) : undefined;
     let points = 0;
     const tags: string[] = tag ? [tag] : [];

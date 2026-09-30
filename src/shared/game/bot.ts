@@ -128,6 +128,10 @@ export class BotBrain {
   private fleeing = false;
   /** When a full ult meter was first noticed (bots don't pop it the very same instant). */
   private ultSeenAt = -1;
+  /** Seconds spent walking into something without moving (then hop over it). */
+  private blockedFor = 0;
+  /** A way around a drop we picked recently (kept for a moment so two equal choices don't flicker). */
+  private detour: { x: number; z: number; until: number } | null = null;
 
   private press(key: 'jump' | 'dash' | 'brace' | 'grab' | 'grapple' | 'util1' | 'util2' | 'ult'): void {
     this.input[key] = (this.input[key] + 1) & 255;
@@ -304,6 +308,8 @@ export class BotBrain {
       this.strafeSign = rnd() < 0.5 ? -1 : 1;
       this.strafeUntil = sim.time + 0.6 + rnd() * 1.6;
     }
+    /** A dash we'd like (checked for a drop along the way below, once the direction is final). */
+    let wantDash = false;
     if (obj?.move) {
       // Head for the objective (behind the ball, onto a pump), expressed relative to our yaw.
       const hx = obj.move.x - s.px;
@@ -313,7 +319,7 @@ export class BotBrain {
         const k = Math.min(1, hl / 2) / (hl || 1);
         f.moveZ = (hx * -Math.sin(f.yaw) + hz * -Math.cos(f.yaw)) * k;
         f.moveX = (hx * Math.cos(f.yaw) + hz * -Math.sin(f.yaw)) * k;
-        if (hl > 12 && s.onGround && s.dashCharges > 0 && rnd() < 0.01 * this.skill) this.press('dash');
+        if (hl > 12 && s.onGround && s.dashCharges > 0 && rnd() < 0.01 * this.skill) wantDash = true;
       } else if (obj.hold) {
         f.moveX = f.moveZ = 0;
       } else {
@@ -327,7 +333,7 @@ export class BotBrain {
       const k = me.weapon.kind;
       if ((k === 'cone' || k === 'spread' || k === 'stream') && dist > this.desiredDist + 5 && dist < 22 && s.onGround && s.dashCharges > 1 && rnd() < 0.012 * this.skill) {
         f.moveX = 0;
-        this.press('dash');
+        wantDash = true;
       }
     } else {
       f.moveZ = 0.5;
@@ -338,10 +344,21 @@ export class BotBrain {
     const wx = cosY * f.moveX - sinY * f.moveZ;
     const wz = -sinY * f.moveX - cosY * f.moveZ;
     const probe = 2.5 + Math.hypot(s.vx, s.vz) * 0.35;
-    // Check along the way, not just the far end: a narrow gap between two floors looks safe from
-    // its far side.
-    const along = (ax: number, az: number, d: number) => world.groundBelow(s.px + ax * d, s.py + 0.6, s.pz + az * d, 4);
-    const g = along(wx, wz, 1.2) !== null && along(wx, wz, probe * 0.55) !== null ? along(wx, wz, probe) : null;
+    // A pad that throws you away from home (out to an island, say) counts as a hole: bots walking
+    // past one kept getting flung somewhere they couldn't come back from.
+    const badPad = (x: number, z: number) =>
+      world.pads.some(
+        (p) => p.owner < 0 && Math.abs(x - p.x) <= p.half + 0.25 && Math.abs(z - p.z) <= p.half + 0.25 && Math.abs(s.py - p.y) < 0.6 && (p.pushX ?? 0) * (home.x - p.x) + (p.pushZ ?? 0) * (home.z - p.z) <= 0,
+      );
+    // Ground within a 7 m drop (so bots can step down off a roof).
+    const along = (ax: number, az: number, d: number) => (badPad(s.px + ax * d, s.pz + az * d) ? null : world.groundBelow(s.px + ax * d, s.py + 0.6, s.pz + az * d, 7));
+    // Every half meter of the way, not just the far end: a narrow gap between two floors (or a
+    // corner cut diagonally) looks safe from its far side.
+    const pathOk = (ax: number, az: number, len: number) => {
+      for (let d = 0.5; d < len; d += 0.5) if (along(ax, az, d) === null) return false;
+      return along(ax, az, len) !== null;
+    };
+    const g = pathOk(wx, wz, probe) ? along(wx, wz, probe) : null;
     // The map is shrinking: get off pieces that are about to fall, and back from deck edges that
     // are about to crumble (bots see the same warning players do).
     const doomed = s.onGround === 1 && doomedSpot(sim, s.px, s.pz, s.groundId);
@@ -354,8 +371,12 @@ export class BotBrain {
       let dz = hz / hl;
       // Unless home is across a drop too (on a bridge over a moat, say): then whichever way has
       // ground under it and heads most nearly home, or stand still if there's none.
-      const safe = (ax: number, az: number) => along(ax, az, 1.2) !== null && along(ax, az, probe * 0.55) !== null && along(ax, az, probe) !== null;
-      if (!doomed && !safe(dx, dz)) {
+      const safe = (ax: number, az: number) => pathOk(ax, az, probe);
+      if (!doomed && !safe(dx, dz) && this.detour && sim.time < this.detour.until && safe(this.detour.x, this.detour.z)) {
+        // Keep going the way we picked a moment ago.
+        dx = this.detour.x;
+        dz = this.detour.z;
+      } else if (!doomed && !safe(dx, dz)) {
         let best: [number, number] = [0, 0];
         let bestDot = -Infinity;
         for (let k = 0; k < 8; k++) {
@@ -368,6 +389,24 @@ export class BotBrain {
           }
         }
         [dx, dz] = best;
+        this.detour = { x: dx, z: dz, until: sim.time + 1.5 };
+        if (bestDot <= 0.2) {
+          // Nothing on foot gets us closer to home: use a pad on this piece that throws us home.
+          const gs = world.solids[s.groundId];
+          const pad =
+            gs &&
+            world.pads.find(
+              (p) => p.owner < 0 && p.x >= gs.minX && p.x <= gs.maxX && p.z >= gs.minZ && p.z <= gs.maxZ && Math.abs(p.y - gs.maxY) < 0.3 && (p.pushX ?? 0) * (home.x - p.x) + (p.pushZ ?? 0) * (home.z - p.z) > 0,
+            );
+          if (pad) {
+            const px = pad.x - s.px;
+            const pz = pad.z - s.pz;
+            const pl = Math.hypot(px, pz) || 1;
+            dx = px / pl;
+            dz = pz / pl;
+            this.detour = null;
+          }
+        }
       }
       const fx = -sinY;
       const fz = -cosY;
@@ -403,11 +442,31 @@ export class BotBrain {
       }
     }
 
-    // --- Jump and dash to dodge (not toward a drop: a hop carries further than the edge check looks). ---
-    const landing = world.groundBelow(s.px + wx * (probe + 4), s.py + 0.6, s.pz + wz * (probe + 4), 4) !== null;
-    if (s.onGround && landing && rnd() < 0.006 + this.skill * 0.006) this.press('jump');
+    // --- Jump and dash to dodge (not toward a drop: a hop or a dash carries further than the edge
+    // check looks). Checked along where we'll actually go: the final input (after edge avoidance)
+    // and our momentum.
+    const fmx = cosY * f.moveX - sinY * f.moveZ;
+    const fmz = -sinY * f.moveX - cosY * f.moveZ;
+    const fml = Math.hypot(fmx, fmz);
+    const vsp = Math.hypot(s.vx, s.vz);
+    const clearAhead = (len: number) => (fml < 0.1 || pathOk(fmx / fml, fmz / fml, len)) && (vsp < 0.5 || pathOk(s.vx / vsp, s.vz / vsp, len));
+    // (The dice come first: the path checks are the expensive part.)
+    if (s.onGround && rnd() < 0.006 + this.skill * 0.006 && clearAhead(probe + 4)) this.press('jump');
     else if (!s.onGround && s.jumpsUsed === 1 && s.vy < 0 && rnd() < 0.02) this.press('jump');
-    if (s.onGround && s.dashCharges === BALANCE.dash.charges && rnd() < 0.003 * this.skill && g !== null && landing) this.press('dash');
+    // A dash and its slide carry about 10 m.
+    if (wantDash && clearAhead(11)) this.press('dash');
+    else if (s.onGround && s.dashCharges === BALANCE.dash.charges && rnd() < 0.003 * this.skill && g !== null && clearAhead(11)) this.press('dash');
+    // Walking into something (a crate, a wall): hop it if there's floor beyond.
+    const pushing = s.onGround && fml > 0.5 && vsp < 1.2;
+    this.blockedFor = pushing ? this.blockedFor + sim.dt : 0;
+    if (this.blockedFor > 0.3) {
+      const bx = s.px + (fmx / fml) * 2.6;
+      const bz = s.pz + (fmz / fml) * 2.6;
+      if (world.groundBelow(bx, s.py + 2.2, bz, 3) !== null) {
+        this.press('jump');
+        this.blockedFor = -0.6;
+      }
+    }
 
     // --- Brace against incoming shots (skilled bots only). ---
     if (this.skill > 0.5 && s.braceCool <= 0) {

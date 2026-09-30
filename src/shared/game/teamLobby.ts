@@ -5,6 +5,8 @@ export interface LobbySeat {
   id: number;
   team: number;
   bot: boolean;
+  /** A bot's twin (same skill and loadout): shuffles keep the two on opposite teams. */
+  twin?: number;
 }
 
 export interface LobbyCheck {
@@ -37,7 +39,7 @@ export function checkTeamLobby(seats: LobbySeat[], ready: ReadonlySet<number>, m
 
 /**
  * New even teams: everyone shuffled, then dealt alternately (humans first so both sides get a
- * fair share of real players, then bots to even the numbers).
+ * fair share of real players, then bots to even the numbers). Twin bots go one to each side.
  */
 export function shuffleTeams(seats: LobbySeat[], rng: () => number = Math.random): Map<number, 0 | 1> {
   const mix = <T>(xs: T[]) => {
@@ -51,10 +53,29 @@ export function shuffleTeams(seats: LobbySeat[], rng: () => number = Math.random
   const out = new Map<number, 0 | 1>();
   const first: 0 | 1 = rng() < 0.5 ? 0 : 1;
   const counts = [0, 0];
-  for (const s of [...mix(seats.filter((x) => !x.bot)), ...mix(seats.filter((x) => x.bot))]) {
+  const deal = (id: number) => {
     const team: 0 | 1 = counts[0] === counts[1] ? first : counts[0] < counts[1] ? 0 : 1;
-    out.set(s.id, team);
+    out.set(id, team);
     counts[team]++;
+  };
+  for (const s of mix(seats.filter((x) => !x.bot))) deal(s.id);
+  const bots = seats.filter((x) => x.bot);
+  const ids = new Set(bots.map((b) => b.id));
+  const paired = new Set<number>();
+  const singles: LobbySeat[] = [];
+  for (const b of mix(bots)) {
+    if (paired.has(b.id)) continue;
+    if (b.twin !== undefined && ids.has(b.twin) && !paired.has(b.twin)) {
+      // One twin each side keeps the bots even, whatever the humans are.
+      const t: 0 | 1 = rng() < 0.5 ? 0 : 1;
+      out.set(b.id, t);
+      out.set(b.twin, t === 0 ? 1 : 0);
+      counts[0]++;
+      counts[1]++;
+      paired.add(b.id);
+      paired.add(b.twin);
+    } else singles.push(b);
   }
+  for (const s of singles) deal(s.id);
   return out;
 }
