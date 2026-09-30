@@ -367,6 +367,26 @@ describe('dealing ults', () => {
     }
     for (const u of PLAYABLE_ULTS) expect(Math.abs((counts.get(u) ?? 0) / N - 1 / PLAYABLE_ULTS.length)).toBeLessThan(0.03);
   });
+
+  it('the next ult is dealt the moment you pop one, and a respawn never hands back the one you used', () => {
+    const { sim, ps, ds } = setup([{ ult: 'juice' }, {}]);
+    const [a] = ps;
+    for (let i = 0; i < 40; i++) {
+      const used = ULT_IDS[a.state.ultKind];
+      popUlt(sim, ds, ds[0]);
+      // The ult you hold now is a different one (a long life fills the meter again).
+      expect(ULT_IDS[a.state.ultKind]).not.toBe(used);
+      expect(a.lastUsedUlt).toBe(used);
+      // Dying and coming back: neither the one you held nor the one you just used.
+      const held = ULT_IDS[a.state.ultKind];
+      sim.respawn(a);
+      expect(ULT_IDS[a.state.ultKind]).not.toBe(held);
+      expect(ULT_IDS[a.state.ultKind]).not.toBe(used);
+      // Let the ult run out before the next one.
+      Object.assign(a.state, { juiceTimer: 0, chaseTimer: 0, chaseTarget: -1, fartTimer: 0, robotTimer: 0, prideTimer: 0, gasTimer: 0 });
+      a.bigUntil = 0;
+    }
+  });
 });
 
 describe('The Chase', () => {
@@ -621,6 +641,8 @@ describe('bots and ults', () => {
         if (e.t === 'ult' && e.id === a.id) used = true;
         if (e.t === 'shot' && e.owner === a.id && e.w === PROJ_BIG_BLOW) fired = true;
       }
+      // Knocked off the deck before popping it (b fights back): put it back, the test is about the ult.
+      if (a.state.py < -1.5 && !used) Object.assign(a.state, { px: 0, py: 0, pz: 3, vx: 0, vy: 0, vz: 0, onGround: 1, launchTimer: 0, hitStop: 0 });
       // Keep them close so there's always someone to use it on.
       if (Math.hypot(a.state.px - b.state.px, a.state.pz - b.state.pz) > 6 && !used) Object.assign(b.state, { px: a.state.px, py: a.state.py, pz: a.state.pz - 3 });
     }

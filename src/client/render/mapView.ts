@@ -824,7 +824,8 @@ export class MapView {
 
   private buildClouds(): void {
     const cloud = this.map.theme.cloud;
-    const mat = new THREE.MeshStandardMaterial({ color: cloud, roughness: 1, emissive: cloud === 0xffffff ? 0xdde9ff : cloud, emissiveIntensity: 0.35, flatShading: false });
+    // A faint glow keeps their shade side from going grey; any more and sunlit clouds glared.
+    const mat = new THREE.MeshStandardMaterial({ color: cloud, roughness: 1, emissive: cloud === 0xffffff ? 0xdde9ff : cloud, emissiveIntensity: 0.12, flatShading: false });
     const puff = new THREE.IcosahedronGeometry(1, 2);
     const geos: THREE.BufferGeometry[] = [];
     const m = new THREE.Matrix4();

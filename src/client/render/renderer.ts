@@ -94,7 +94,8 @@ export class Renderer {
       stencil: false,
     });
     this.renderer.toneMapping = THREE.NeutralToneMapping;
-    this.renderer.toneMappingExposure = 0.95;
+    // A touch under 1: bright white decks and clouds under a strong sun washed everything out.
+    this.renderer.toneMappingExposure = 0.9;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
     this.camera = new THREE.PerspectiveCamera(this.baseFov, 1, 0.1, 900);
@@ -102,12 +103,12 @@ export class Renderer {
 
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    this.scene.environmentIntensity = 0.4;
+    this.scene.environmentIntensity = 0.3;
     pmrem.dispose();
 
-    this.hemi = new THREE.HemisphereLight(0xcfe8ff, 0x8a7fa5, 1.0);
+    this.hemi = new THREE.HemisphereLight(0xcfe8ff, 0x8a7fa5, 0.9);
     this.scene.add(this.hemi);
-    this.sun = new THREE.DirectionalLight(0xfff1d6, 2.1);
+    this.sun = new THREE.DirectionalLight(0xfff1d6, 1.8);
     this.sun.position.set(30, 60, 25);
     this.sun.target.position.set(0, 0, 0);
     const sc = this.sun.shadow.camera;
@@ -178,8 +179,9 @@ export class Renderer {
         this.composer.addPass(this.ao);
       }
       if (p.bloom) {
-        // Low enough that bright, saturated colors (players, balloons) glow a little.
-        this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.4, 0.55, 0.8);
+        // Only what's brighter than white glows (neon, bulbs, pads, ult effects), softly and close
+        // in: at a lower threshold every sunlit white deck, cloud and pillar grew a haze (glare).
+        this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.22, 0.35, 1.25);
         this.composer.addPass(this.bloom);
       }
       this.composer.addPass(new ShaderPass(GRADE_SHADER));
@@ -280,7 +282,7 @@ function makeSky(): THREE.Mesh {
         float h = vDir.y;
         vec3 col = h > 0.0 ? mix(horizon, top, pow(h, 0.6)) : mix(horizon, bottom, pow(-h, 0.5));
         float sun = max(dot(normalize(vDir), sunDir), 0.0);
-        col += vec3(1.0, 0.95, 0.8) * (pow(sun, 400.0) * 1.5 + pow(sun, 12.0) * 0.18);
+        col += vec3(1.0, 0.95, 0.8) * (pow(sun, 400.0) * 1.0 + pow(sun, 12.0) * 0.08);
         gl_FragColor = vec4(col, 1.0);
         #include <colorspace_fragment>
       }

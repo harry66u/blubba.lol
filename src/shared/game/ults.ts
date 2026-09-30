@@ -31,11 +31,11 @@ export const ULT_CHARACTER: Partial<Record<UltId, { body: string; name: string; 
 export const PLAYABLE_ULTS: readonly UltId[] = ['juice', 'chase', 'cropDuster', 'robot', 'pride'];
 
 /**
- * Deals an ult: every playable one equally likely, never the one you just had (`except`), so the
- * same ult can't come up twice in a row.
+ * Deals an ult: every playable one equally likely, never one in `except` (the one you just had,
+ * and the one you last used), so the same ult can't come up twice in a row.
  */
-export function randomUlt(except?: UltId): UltId {
-  const pool = PLAYABLE_ULTS.filter((u) => u !== except);
+export function randomUlt(...except: (UltId | null | undefined)[]): UltId {
+  const pool = PLAYABLE_ULTS.filter((u) => !except.includes(u));
   return pool[Math.floor(Math.random() * pool.length)];
 }
 

@@ -50,7 +50,7 @@ import { collapsePlan } from './shrink';
 import type { GameEvent, LootKind } from './events';
 import { type AirMine, LOOT_KINDS, type LootCrate, type Tornado, floorBelow, lostBelow, pickLootSpot, rollLoot, stepCrate, stepTornado } from './loot';
 import { UltSystem } from './ultSim';
-import { ULT_IDS, isUltProjectile, randomUlt, ultIndex, ultMassMult, ultPowerMult } from './ults';
+import { ULT_IDS, type UltId, isUltProjectile, randomUlt, ultIndex, ultMassMult, ultPowerMult } from './ults';
 
 export type { ModeId } from './modes';
 export type MatchPhase = 'waiting' | 'playing' | 'results';
@@ -81,6 +81,8 @@ export interface SimPlayer {
   isBot: boolean;
   /** Team modes: the bot's twin on the other team (same skill and loadout), or -1. */
   twinId: number;
+  /** The ult they popped last (the next ones dealt are never it, nor the one they hold). */
+  lastUsedUlt: UltId | null;
   /** Last time they stood on solid (not bouncy) ground in control: a knockout before that is still their attacker's. */
   footedAt: number;
   state: PlayerState;
@@ -449,6 +451,7 @@ export class GameSim {
       color: opts.color ?? this.freeColor(),
       isBot: !!opts.isBot,
       twinId: -1,
+      lastUsedUlt: null,
       footedAt: 0,
       state,
       lastInput: emptyInput(),
@@ -3115,8 +3118,9 @@ export class GameSim {
       this.emitLoadout(p);
     }
     p.weapon = computeWeaponStats(p.loadout.weapon, p.loadout.parts);
-    // Ults are dealt at random each spawn (all equally likely), never the same one twice in a row.
-    s.ultKind = ultIndex(randomUlt(lastUlt));
+    // Ults are dealt at random each spawn (all equally likely), never the one you held nor the
+    // one you last popped, so you don't get the same one twice in a row.
+    s.ultKind = ultIndex(randomUlt(lastUlt, p.lastUsedUlt));
     s.hoverTimer = p.weapon.hoverTime;
     const sp = this.pickSpawn(p.id);
     s.px = sp[0];

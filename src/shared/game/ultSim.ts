@@ -1,7 +1,7 @@
 import { BALANCE } from '../balance';
 import { MODE_DEAD, MODE_HANG, MODE_NORMAL, type ShotSpec, type StepResult, eyeHeight, lookDir, playerHeight, playerRadius } from '../player';
 import type { GameSim, Projectile, SimPlayer } from './sim';
-import { PROJ_BIG_BLOW, PROJ_ROCKET, ULT_CHARACTER, chargeUlt, steerToward, ultOf, ultPowerMult } from './ults';
+import { PROJ_BIG_BLOW, PROJ_ROCKET, ULT_CHARACTER, chargeUlt, randomUlt, steerToward, ultIndex, ultOf, ultPowerMult } from './ults';
 
 /** A Crop Duster's lingering gas: inflates and slows enemies standing in it. */
 export interface GasCloud {
@@ -86,6 +86,9 @@ export class UltSystem {
       this.prideBurst(p);
     }
     this.sim.events.push({ t: 'ult', tick: this.sim.tick, id: p.id, kind, x: s.px, y: s.py, z: s.pz, targets });
+    // The next ult is dealt right away (a long life fills the meter again): never the same one.
+    p.lastUsedUlt = kind;
+    s.ultKind = ultIndex(randomUlt(kind));
   }
 
   // --- Meter ---------------------------------------------------------------------------------

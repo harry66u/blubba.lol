@@ -507,3 +507,16 @@ engagement ranges, spawn deaths; spawns and aim were fine). Fixes:
 - **Knockout credit.** A knockout counts for the last attacker within 8 s of the hit, or up to 20 s
   if the victim hasn't landed in control since (Bounce Castle: 30 of 34 uncredited deaths were
   bots still bouncing 8 to 12 s after the hit). Uncredited deaths there: 11 → 5.
+
+## Less glare; no repeat ults
+
+- **Glare.** On Medium and High the bloom pass started at 80% brightness, so every sunlit white
+  deck, cloud and pillar (and the sky around the sun) grew a white haze, and highlights washed the
+  colors out. Bloom now only picks up what's brighter than white (neon, bulbs, pads, ult effects),
+  softer and closer in (threshold 1.25, strength 0.22, radius 0.35; was 0.8, 0.4, 0.55); the sun is
+  a little softer (1.8, was 2.1), the sky light 0.9 (was 1.0), exposure 0.9 (was 0.95), reflections
+  0.3 (was 0.4), clouds glow less (0.12, was 0.35), and the sky's halo around the sun is smaller.
+- **No same ult twice in a row.** Ults were re-dealt each spawn, but a long life refills the meter
+  and you'd pop the same one again, and a respawn could hand back the one you'd just used. Now the
+  next ult is dealt the moment you pop one, and a respawn deals neither the one you held nor the one
+  you last used (the rest stay equally likely).
