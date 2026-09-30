@@ -15,9 +15,14 @@ export class FlexTube {
   readonly normals: Float32Array;
   readonly binormals: Float32Array;
   private readonly pos: THREE.BufferAttribute;
+  private readonly nrm: THREE.BufferAttribute;
   /** Cross-section: radius multiplier at each vertex around a ring (null = round). */
   private section: Float32Array | null = null;
   private sectionFn: ((a: number) => number) | null = null;
+  /** The cross-section's widest point (radius multiplier), for the bounding sphere. */
+  private sectionMax = 1;
+  /** Kept around the tube as it flexes, so the renderer can skip tubes that are off screen. */
+  private readonly sphere = new THREE.Sphere();
 
   constructor(
     readonly rings: number,
@@ -52,12 +57,16 @@ export class FlexTube {
     this.pos.setUsage(THREE.DynamicDrawUsage);
     this.geometry.setAttribute('position', this.pos);
     this.geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-    const normalAttr = new THREE.BufferAttribute(new Float32Array(vcount * 3), 3);
-    normalAttr.setUsage(THREE.DynamicDrawUsage);
-    this.geometry.setAttribute('normal', normalAttr);
+    this.nrm = new THREE.BufferAttribute(new Float32Array(vcount * 3), 3);
+    this.nrm.setUsage(THREE.DynamicDrawUsage);
+    this.geometry.setAttribute('normal', this.nrm);
     this.geometry.setIndex(index);
+    this.geometry.boundingSphere = this.sphere;
     this.mesh = new THREE.Mesh(this.geometry, material);
-    this.mesh.frustumCulled = false;
+    // Culled against the camera like anything else (the sphere follows the flexing tube), so
+    // players behind you aren't drawn; the sun's shadow pass culls on its own, so their
+    // shadows still show.
+    this.mesh.frustumCulled = true;
   }
 
   /**
@@ -68,11 +77,13 @@ export class FlexTube {
     this.sectionFn = fn;
     if (!fn) {
       this.section = null;
+      this.sectionMax = 1;
       return;
     }
     const s = new Float32Array(this.segs + 1);
     for (let j = 0; j <= this.segs; j++) s[j] = fn((j / this.segs) * Math.PI * 2);
     this.section = s;
+    this.sectionMax = Math.max(...s.map(Math.abs));
   }
 
   /** The cross-section's radius multiplier at angle `a` (1 for a round tube). */
@@ -142,7 +153,101 @@ export class FlexTube {
       }
     }
     this.pos.needsUpdate = true;
-    this.geometry.computeVertexNormals();
+    this.computeNormals();
+    this.fitSphere();
+  }
+
+  /** A sphere around every ring (its center plus its widest radius). */
+  private fitSphere(): void {
+    const { rings, spine, radii } = this;
+    let minX = Infinity;
+    let minY = Infinity;
+    let minZ = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    let maxZ = -Infinity;
+    for (let i = 0; i < rings; i++) {
+      const x = spine[i * 3];
+      const y = spine[i * 3 + 1];
+      const z = spine[i * 3 + 2];
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      if (z < minZ) minZ = z;
+      if (z > maxZ) maxZ = z;
+    }
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const cz = (minZ + maxZ) / 2;
+    let r = 0;
+    for (let i = 0; i < rings; i++) {
+      const d = Math.hypot(spine[i * 3] - cx, spine[i * 3 + 1] - cy, spine[i * 3 + 2] - cz) + Math.abs(radii[i]) * this.sectionMax;
+      if (d > r) r = d;
+    }
+    this.sphere.center.set(cx, cy, cz);
+    // A hair of margin for rounding.
+    this.sphere.radius = r * 1.001 + 1e-3;
+  }
+
+  /**
+   * Smooth normals, exactly what BufferGeometry.computeVertexNormals gives (the same sums in the
+   * same order, so the shading is identical), but straight on the arrays: that generic version
+   * reads and writes every vertex through Vector3 accessors, and with a dozen tube men flexing
+   * every frame it was the biggest single cost on the CPU (a battery drain on laptops and phones).
+   */
+  private computeNormals(): void {
+    const { rings, segs } = this;
+    const p = this.pos.array as Float32Array;
+    const n = this.nrm.array as Float32Array;
+    n.fill(0);
+    const w = segs + 1;
+    // Adds (pC - pB) x (pA - pB) to all three corners' normals.
+    const tri = (a: number, b: number, c: number) => {
+      const ia = a * 3;
+      const ib = b * 3;
+      const ic = c * 3;
+      const bx = p[ib];
+      const by = p[ib + 1];
+      const bz = p[ib + 2];
+      const cbx = p[ic] - bx;
+      const cby = p[ic + 1] - by;
+      const cbz = p[ic + 2] - bz;
+      const abx = p[ia] - bx;
+      const aby = p[ia + 1] - by;
+      const abz = p[ia + 2] - bz;
+      const x = cby * abz - cbz * aby;
+      const y = cbz * abx - cbx * abz;
+      const z = cbx * aby - cby * abx;
+      n[ia] += x;
+      n[ia + 1] += y;
+      n[ia + 2] += z;
+      n[ib] += x;
+      n[ib + 1] += y;
+      n[ib + 2] += z;
+      n[ic] += x;
+      n[ic + 1] += y;
+      n[ic + 2] += z;
+    };
+    // The index order from the constructor.
+    for (let i = 0; i < rings - 1; i++) {
+      for (let j = 0; j < segs; j++) {
+        const a = i * w + j;
+        const b = a + w;
+        tri(a, a + 1, b);
+        tri(b, a + 1, b + 1);
+      }
+    }
+    for (let k = 0; k < n.length; k += 3) {
+      const x = n[k];
+      const y = n[k + 1];
+      const z = n[k + 2];
+      const inv = 1 / (Math.sqrt(x * x + y * y + z * z) || 1);
+      n[k] = x * inv;
+      n[k + 1] = y * inv;
+      n[k + 2] = z * inv;
+    }
+    this.nrm.needsUpdate = true;
   }
 
   dispose(): void {

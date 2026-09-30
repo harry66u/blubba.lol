@@ -206,17 +206,39 @@ function mapPicker(initial: string | null, onChange: (map: string | null) => voi
 /** `side` sits beside the main card on wide screens and below it on narrow ones (the daily challenges). */
 /** "🟢 37 active": players who opened the game today. Hidden until the count arrives. */
 function activePill(n: number | null): HTMLElement {
-  const pill = el('div', { class: 'active-pill', attrs: { title: 'Players today' } }, el('span', { class: 'dot', attrs: { 'aria-hidden': 'true' } }), el('span', { class: 'n' }), el('span', { class: 'w', text: ' active' }));
+  const pill = el('div', { class: 'active-pill', attrs: { title: 'Players today' } }, el('span', { class: 'dot', attrs: { 'aria-hidden': 'true' } }), el('span', { class: 'n' }), el('span', { class: 'w', text: ' active today' }));
   setActiveCount(n, pill);
   return pill;
 }
 
-/** Updates the menu's active count in place (it arrives after the menu is drawn). */
-export function setActiveCount(n: number | null, pill: Element | null = document.querySelector('.active-pill')): void {
-  if (!pill || pill.classList.contains('live')) return;
-  pill.classList.toggle('hidden', !n);
+/** Players who opened the game today (from /api/me) and who's on right now (from /api/counts). */
+let pillToday: number | null = null;
+let pillOnline: number | null = null;
+
+/** "🟢 3 online · 37 today": right now first, then today. Hidden until either count arrives. */
+function drawPill(pill: Element | null = document.querySelector('.active-pill')): void {
+  if (!pill) return;
+  const online = pillOnline ?? 0;
+  const today = Math.max(pillToday ?? 0, online);
+  pill.classList.toggle('hidden', !online && !today);
   const num = pill.querySelector('.n');
-  if (num && n) num.textContent = n.toLocaleString();
+  const word = pill.querySelector('.w');
+  if (!num || !word) return;
+  if (online) {
+    num.textContent = online.toLocaleString();
+    word.textContent = today ? ` online · ${today.toLocaleString()} today` : ' online';
+    pill.setAttribute('title', 'Playing right now, and players today');
+  } else if (today) {
+    num.textContent = today.toLocaleString();
+    word.textContent = ' active today';
+    pill.setAttribute('title', 'Players today');
+  }
+}
+
+/** Updates the menu's "today" count in place (it arrives after the menu is drawn). */
+export function setActiveCount(n: number | null, pill: Element | null = document.querySelector('.active-pill')): void {
+  if (n !== null) pillToday = n;
+  drawPill(pill);
 }
 
 /** Players in a mode right now: [in a match, waiting for more players]. */
@@ -263,16 +285,8 @@ export function setModeCounts(c: QueueCounts | null = lastCounts): void {
   const on = document.querySelector<HTMLElement>('.mode-picker button.on');
   const live = document.querySelector('.mode-live');
   if (live && on) live.textContent = liveText(c, on.dataset.mode as PlayMode);
-  const pill = document.querySelector('.active-pill');
-  if (pill && c.online > 0) {
-    pill.classList.add('live');
-    pill.classList.remove('hidden');
-    pill.setAttribute('title', 'Playing right now');
-    const num = pill.querySelector('.n');
-    if (num) num.textContent = c.online.toLocaleString();
-    const word = pill.querySelector('.w');
-    if (word) word.textContent = ' online';
-  }
+  pillOnline = c.online;
+  drawPill();
 }
 
 export function buildMainMenu(

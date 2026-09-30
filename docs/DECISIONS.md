@@ -520,3 +520,25 @@ engagement ranges, spawn deaths; spawns and aim were fine). Fixes:
   and you'd pop the same one again, and a respawn could hand back the one you'd just used. Now the
   next ult is dealt the moment you pop one, and a respawn deals neither the one you held nor the one
   you last used (the rest stay equally likely).
+
+## Battery: less work for the same picture
+
+Only work nobody can see was cut; nothing changes on screen and nothing gets slower:
+
+- **Tube-man normals** were recomputed every frame with three.js's generic `computeVertexNormals`,
+  which reads and writes every vertex through Vector3 accessors: about 4.5 ms of a 10 ms frame of
+  game code in a profiled bot match. `FlexTube` now does the same sums in the same order straight
+  on the arrays (a test checks the result is bit-for-bit what three.js gives): about 1 ms.
+- **Tube men off screen aren't drawn.** They were never frustum culled because their shape changes
+  every frame; each tube now keeps a bounding sphere around its rings (a test checks every vertex
+  is inside), so players behind you are skipped. The sun's shadow pass culls on its own, so their
+  shadows still show.
+- **No multisampled canvas.** Medium and High draw the scene into post-processing buffers and only
+  a full-screen picture reaches the canvas, so its 4× anti-aliasing buffer changed nothing but cost
+  memory bandwidth every frame. Low keeps anti-aliasing when it had it (after starting higher, it
+  renders into a multisampled buffer instead).
+- **Nothing is drawn under the team lobby** (it covers the screen with a solid background).
+- **Menu music pauses in a hidden tab** (and picks up when you come back). In a match or a lobby the
+  sound keeps going, so you still hear a match start from another tab.
+
+The menu pill shows both counts now: "3 online · 37 today".

@@ -1269,6 +1269,21 @@ game.onKicked = (message) => {
   showMenu({ kind: 'info', text: message });
 };
 
+// A hidden tab on the menus stops its music (nothing to hear there). In a match or a lobby the
+// sound keeps going, so you still hear it start while you're in another tab.
+let audioPausedHidden = false;
+document.addEventListener('visibilitychange', () => {
+  const ctx = audio.ctx;
+  if (!ctx) return;
+  if (document.hidden && screen !== 'playing' && ctx.state === 'running') {
+    audioPausedHidden = true;
+    void ctx.suspend();
+  } else if (!document.hidden && audioPausedHidden) {
+    audioPausedHidden = false;
+    void ctx.resume();
+  }
+});
+
 // Warn before closing the tab mid-match (Command+W sits right next to the space bar).
 window.addEventListener('beforeunload', (e) => {
   if (screen === 'playing') {
@@ -1305,7 +1320,8 @@ function loop(now: number): void {
     lookdev(dt);
   } else game.frame(dt);
   const t1 = performance.now();
-  renderer.render();
+  // The team lobby covers the whole screen with a solid background: nothing to draw under it.
+  if (overlay !== 'teams') renderer.render();
   const t2 = performance.now();
   perf.update += t1 - t0;
   perf.render += t2 - t1;

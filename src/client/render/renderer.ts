@@ -66,6 +66,8 @@ export class Renderer {
   readonly hemi: THREE.HemisphereLight;
   private composer: EffectComposer | null = null;
   private bloom: UnrealBloomPass | null = null;
+  /** Started on Medium or High (so a later switch to Low still gets anti-aliased, as it always did). */
+  private readonly lowMsaa: boolean;
   private ao: GTAOPass | null = null;
   private sky: THREE.Mesh;
   quality: Quality;
@@ -87,9 +89,14 @@ export class Renderer {
   ) {
     this.quality = quality;
     this.profile = PROFILES[quality];
+    // No multisampled canvas: Medium and High draw the scene into the post-processing buffers and
+    // only a full-screen picture reaches the canvas, so its anti-aliasing buffer did nothing but
+    // cost memory bandwidth (battery) every frame. Low gets its anti-aliasing another way when it
+    // had it before (see applyQuality).
+    this.lowMsaa = quality !== 'low';
     this.renderer = new THREE.WebGLRenderer({
       canvas,
-      antialias: quality !== 'low',
+      antialias: false,
       powerPreference: 'high-performance',
       stencil: false,
     });
@@ -167,7 +174,12 @@ export class Renderer {
     this.composer = null;
     this.bloom = null;
     this.ao = null;
-    if (p.bloom || p.ao) {
+    if (!p.bloom && !p.ao && this.lowMsaa) {
+      // Low after starting higher: the scene into a multisampled buffer, then to the screen.
+      this.composer = new EffectComposer(this.renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 }));
+      this.composer.addPass(new RenderPass(this.scene, this.camera));
+      this.composer.addPass(new OutputPass());
+    } else if (p.bloom || p.ao) {
       this.composer = new EffectComposer(this.renderer);
       this.composer.addPass(new RenderPass(this.scene, this.camera));
       if (p.ao) {
