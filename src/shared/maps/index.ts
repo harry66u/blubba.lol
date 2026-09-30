@@ -2,6 +2,7 @@ import { BALL_ARENA } from './ballArena';
 import { BOUNCE_HOUSE } from './bounceHouse';
 import { CANDY } from './candy';
 import { DEALERSHIP } from './dealership';
+import { FACEOFF } from './faceoff';
 import { GARAGE } from './garage';
 import { MOON_BASE } from './moonBase';
 import { PIER } from './pier';
@@ -19,6 +20,7 @@ export const MAPS: Record<string, MapDef> = {
   [MOON_BASE.id]: MOON_BASE,
   [BALL_ARENA.id]: BALL_ARENA,
   [PUMP_ARENA.id]: PUMP_ARENA,
+  [FACEOFF.id]: FACEOFF,
 };
 
 /**
@@ -36,4 +38,19 @@ export function mapForMode(mode: string): string | null {
   if (mode === 'ball') return BALL_ARENA.id;
   if (mode === 'pump') return PUMP_ARENA.id;
   return null;
+}
+
+/**
+ * The map made for a mode: the one public rooms always play it on and a private room switches to
+ * when the host picks the mode (Ball, Pump and Team Knockout), or null for the knockout maps.
+ */
+export function homeMapFor(mode: string): string | null {
+  return mode === 'teamKnockout' ? FACEOFF.id : mapForMode(mode);
+}
+
+/** Maps a private room's host can pick for a mode (Team Knockout also works on the knockout maps). */
+export function mapsForMode(mode: string): string[] {
+  const forced = mapForMode(mode);
+  if (forced) return [forced];
+  return mode === 'teamKnockout' ? [FACEOFF.id, ...KNOCKOUT_MAPS] : KNOCKOUT_MAPS;
 }

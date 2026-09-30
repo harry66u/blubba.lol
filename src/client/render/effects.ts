@@ -53,7 +53,16 @@ class ParticlePool {
     }
   }
 
+  /** The camera, as of the last update (far bursts spawn fewer bits: see spawn). */
+  private cam: THREE.Vector3 | null = null;
+
   spawn(p: Partial<Particle> & { x: number; y: number; z: number }, color: number | THREE.Color): void {
+    // Far away, a burst reads just as well with a fraction of its bits, and a crowded fight on
+    // the other side of the map stops speckling the whole screen.
+    if (this.cam) {
+      const d = Math.hypot(p.x - this.cam.x, p.y - this.cam.y, p.z - this.cam.z);
+      if (d > 28 && Math.random() > Math.max(0.35, 28 / d)) return;
+    }
     const i = this.next;
     this.next = (this.next + 1) % this.capacity;
     const part = this.parts[i];
@@ -80,6 +89,7 @@ class ParticlePool {
    * `faceCam`: the camera's rotation, for billboard pools.
    */
   update(dt: number, near: THREE.Vector3 | null = null, faceCam: THREE.Quaternion | null = null): void {
+    this.cam = near;
     if (this.live === 0) return;
     for (let i = 0; i < this.capacity; i++) {
       const p = this.parts[i];

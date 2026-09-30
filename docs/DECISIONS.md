@@ -294,3 +294,67 @@ The spec leaves the tech stack and many details open. This file records what was
 - **Target pace.** About one ult per player per minute of constant bot fighting (humans shoot
   less, so slower), the first around a minute in; each ult should be worth zero to two
   knockouts. `scripts/ult-soak.ts` prints these numbers per mode for balance passes.
+
+## Screen clutter
+
+A clutter audit (a scripted player fighting 1, 4 and 9 bots, sampling the screen and the sound
+engine every second) found the screen busy mostly with things that weren't about you. The rule
+since then: **your moments are loud, everyone else's are quiet, and the match's are loudest.**
+Nothing was removed; only how and where things show changed.
+
+- **Center callouts are yours.** Big center text is for things happening to you (your knockout,
+  being grabbed, chased or locked on) and for what changes the match (final 30 seconds, the map
+  shrinking, a goal, a round won). Other people's special knockouts (double pop, crown snatched)
+  go to the feed; the announcer still calls the crown and multi-pops. Callouts have a priority
+  (`CALLOUT` in `hud.ts`): a lesser one never replaces a bigger one that's still up, and they're
+  drawn in three sizes.
+- **Random events warn in the strip under the clock,** with a second line saying what to do
+  ("Hold on to something!"), instead of a center callout repeating the banner.
+- **Comic words about other players are "minor".** By default they only show within 20 m and two
+  at a time; the screen holds at most six words (the oldest minor ones go first, your damage
+  numbers last), and words shrink with distance. Settings → Graphics → "Comic words over players"
+  offers Everyone / Mine + nearby / Only mine. Each ult name shows once (it used to show twice).
+- **One flash at a time.** Screen flashes that land within 0.45 s of another are dropped unless
+  they're longer (a bigger moment), getting hit makes one flash instead of two, and there's a
+  Screen flashes slider (0 = none).
+- **Your own shots barely shake the camera** (the gun kick and muzzle carry them); getting hit
+  still does. A Screen shake slider scales every camera jolt (shake, kick, roll, FOV punch).
+- **A sound budget for crowds.** The more other-player sounds started in the last quarter second,
+  the louder a new one must be to play: a 10-player brawl keeps the sounds near you and drops the
+  far clatter. Your own sounds always play.
+- **Far bursts use fewer bits.** Particles spawned more than 28 m from the camera are thinned
+  (down to 35% far away); close ones are unchanged.
+- **The feed keeps yours.** Four lines at most; lines about you stay longer and are the last
+  pushed out; a crop duster only adds a second line if it caught you.
+- **Left alone on purpose:** name tags and inflation percentages (they're how you read a fight),
+  your hit marker, damage numbers and hit tally, the ult meter and its "+N%" chips, first-use
+  tips (they show once), and every effect's look.
+
+## Team Knockout: Face-Off and the team lobby
+
+- **Its own map.** Team Knockout plays on Face-Off in public rooms (and a private room switches to
+  it when the host picks the mode; the host can still choose a knockout map). Two bases face each
+  other across a moat, each with three ways out: two lane bridges (safe) and a narrow center
+  plank (fast, easy to be knocked off), plus a launch pad over the moat for a quick push. The
+  middle has a low hill worth holding, crates either side and hop-over walls in front of each
+  base, with open edges north and south. Long flank walkways run along both sides, a jump from
+  the middle, with pads out to two little islands. Everything is mirrored left to right (a test
+  checks every piece, pad, can and spawn has its twin).
+- **Readable sides.** Each base, its bridges and each half of the middle and the flanks are
+  washed in the team's color (the renderer's `paint`, which follows the colorblind setting), with
+  a white halfway line and center circle, team flags at the base fronts and team-colored tube
+  men at the back.
+- **Collapse.** The islands sink at half time; in the final 30 seconds the flanks and plank go,
+  then the bases (players then come back in at the back of their own half of the middle), then
+  the middle crumbles in.
+- **The team lobby covers the map** before every Team Knockout match (public and private): both
+  teams side by side, JOIN, READY, and for a private host SHUFFLE and LOCK. The match starts
+  after a 5-second countdown once both teams have at least 2 players, differ by at most one, and
+  every human is ready; anything changing stops the countdown. Bots count as ready. After the
+  results everyone comes back to the lobby (PLAY AGAIN counts as ready).
+- **No bots unless asked.** Team Knockout quick play has its own Bots switch, off by default, and
+  a private room switched to Team Knockout turns bots off until the host turns them on. With bots
+  on they fill both teams evenly (only bots get moved to even things up in the lobby).
+- **Idle players in public rooms.** A public room can't wait forever on one person: once the teams
+  are fine and someone has readied up, everyone counts as ready after 30 seconds (the lobby shows
+  the timer). Private rooms wait; the host can kick.

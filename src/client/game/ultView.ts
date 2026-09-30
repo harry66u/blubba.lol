@@ -17,7 +17,7 @@ import type { PlayerState } from '../../shared/player';
 import type { Audio } from '../audio/audio';
 import type { Effects } from '../render/effects';
 import type { TubeManPose } from '../render/tubeMan';
-import type { Hud } from '../ui/hud';
+import { CALLOUT, type Hud } from '../ui/hud';
 import { esc, hexColor } from '../ui/dom';
 
 /** One player as the ult visuals see them (you included). */
@@ -324,7 +324,7 @@ export class UltView {
         if (target === you) this.warnChased(e.id);
         if (mine && target < 0) g.hud.toast('Nobody to sniff out... yet. Keep moving!', 2200);
         // After your splash has gone.
-        else if (mine) this.later.push({ at: this.time + 1.5, fn: () => g.hud.callout('SNIFF SNIFF...', `Got the scent of ${g.nameOf(target)}!`, 1.6, info.color) });
+        else if (mine) this.later.push({ at: this.time + 1.5, fn: () => g.hud.callout('SNIFF SNIFF...', `Got the scent of ${g.nameOf(target)}!`, 1.6, info.color, CALLOUT.info) });
         break;
       }
       case 'cropDuster':
@@ -418,11 +418,12 @@ export class UltView {
     if (e.id !== you || this.time - this.fartPredictedAt > 1) this.fartFx(e.x, e.y, e.z, e.r, e.id === you);
     this.clouds.push({ x: e.x, y: e.y, z: e.z, until: e.until, ring: 0 });
     const p = this.g.pred();
+    // The feed already said they turned into SOL: a second line only if you were caught in it.
     if (e.id !== you && this.g.alive() && Math.hypot(p.px - e.x, p.pz - e.z) < e.r + 1) {
       this.g.hud.callout('CROP DUSTED!', `${this.g.nameOf(e.id)} let one rip right next to you`, 1.6, '#8ee000');
       this.g.hud.flash('rgba(140, 224, 0, 0.55)', 700);
+      this.g.hud.addKill(`${this.nameHtml(e.id)} <b style="color:#8ee000">💨 CROP DUSTED</b> you`, true);
     }
-    if (e.id !== you) this.g.hud.addKill(`${this.nameHtml(e.id)} <b style="color:#8ee000">💨 CROP DUSTED</b> everyone nearby`, false);
   }
 
   /** The big green shockwave, cloud burst and the loudest fart in the game. */
@@ -442,9 +443,9 @@ export class UltView {
       const sp = 9 + Math.random() * 8;
       fx.puff({ x, y: y + 0.4 + Math.random() * 0.6, z, vx: Math.cos(a) * sp, vy: Math.random() * 1.5, vz: Math.sin(a) * sp, size: 0.3 + Math.random() * 0.2, grow: 1.6, max: 1 + Math.random() * 0.5, drag: 2.4, gravity: -0.4 }, new THREE.Color().setHSL(0.22 + Math.random() * 0.06, 0.65, 0.55 + Math.random() * 0.15));
     }
-    this.g.hud.popup(tmp2.set(x, y + 3.2, z), 'PFFFFRRRRRRT!!!', '#8ee000', 2.1, 1.8);
-    this.g.audio.megaFart(mine ? null : [x, y, z]);
     const d = this.g.camera.position.distanceTo(tmp2.set(x, y, z));
+    this.g.hud.popup(tmp2.set(x, y + 3.2, z), 'PFFFFRRRRRRT!!!', '#8ee000', 2.1, 1.8, !mine && d > 18);
+    this.g.audio.megaFart(mine ? null : [x, y, z]);
     if (d < 18) this.g.shake((1 - d / 18) * 0.8, mine ? 8 : 4);
   }
 
@@ -452,7 +453,7 @@ export class UltView {
     this.popAt(id, 0, 'SNIFF SNIFF', ULT_INFO.chase.color, 1);
     this.g.audio.sniff(id === this.g.youId() ? null : this.at(id));
     if (target === this.g.youId()) this.warnChased(id);
-    if (id === this.g.youId()) this.g.hud.callout('NEW SCENT!', `Now hunting ${this.g.nameOf(target)}`, 1.3, ULT_INFO.chase.color);
+    if (id === this.g.youId()) this.g.hud.callout('NEW SCENT!', `Now hunting ${this.g.nameOf(target)}`, 1.3, ULT_INFO.chase.color, CALLOUT.info);
   }
 
   private warnChased(by: number): void {

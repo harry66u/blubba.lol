@@ -9,7 +9,7 @@ import type { Tornado } from './game/loot';
 import type { Cosmetics, ProgressReport, ReportReason } from './economy';
 import { publicUlt } from './game/ults';
 
-export const PROTOCOL_VERSION = 12;
+export const PROTOCOL_VERSION = 13;
 
 // --- Binary message ids -------------------------------------------------------------------
 export const MSG_INPUTS = 1;
@@ -58,6 +58,12 @@ export type ClientMessage =
   | { type: 'host'; action: 'restart' }
   /** Private rooms wait in the lobby until the host starts the match. */
   | { type: 'host'; action: 'start' }
+  /** Team Knockout lobby, host only: deal everyone onto new even teams, or stop players switching. */
+  | { type: 'host'; action: 'shuffle' }
+  | { type: 'host'; action: 'lock'; locked: boolean }
+  /** Team Knockout lobby: pick a side, ready up. */
+  | { type: 'team'; action: 'join'; team: number }
+  | { type: 'team'; action: 'ready'; ready: boolean }
   /** Only honored when the server runs with BUBBA_DEBUG=1 (for testing events quickly). */
   | { type: 'debug'; action: 'chaos'; kind: string }
   | { type: 'debug'; action: 'endIn'; seconds: number }
@@ -111,6 +117,24 @@ export interface RoomInfo {
   ranked: boolean;
 }
 
+/**
+ * Team Knockout's lobby before each match: players pick sides and ready up, and the match starts
+ * after a short countdown once teams are even, both have enough players and everyone's ready.
+ */
+export interface TeamLobbyState {
+  /** Humans who are ready (bots always are). */
+  ready: number[];
+  /** The host locked the teams: only a shuffle moves people. */
+  locked: boolean;
+  /** Tick the match starts at, 0 while not counting down. */
+  startsAt: number;
+  /** Public rooms: tick everyone counts as ready anyway (so one idle player can't hold a room up), 0 = none. */
+  autoReadyAt: number;
+  minPerSide: number;
+  /** What it's waiting for, in a few words ('' once it's counting down). */
+  waiting: string;
+}
+
 export type ServerMessage =
   | { type: 'welcome'; v: number; you: number; room: RoomInfo; tick: number; name: string }
   | { type: 'room'; room: RoomInfo }
@@ -138,6 +162,8 @@ export type ServerMessage =
   | { type: 'chat'; from: number; id: number }
   /** Who has pressed PLAY AGAIN on the results so far. */
   | { type: 'again'; ids: number[] }
+  /** The Team Knockout lobby before each match (see TeamLobbyState). */
+  | { type: 'teamLobby'; lobby: TeamLobbyState }
   /** Your name was changed (e.g. after several players reported it). */
   | { type: 'renamed'; name: string; message: string }
   | { type: 'error'; code: 'full' | 'not_found' | 'version' | 'kicked' | 'bad_name' | 'server' | 'account_required' | 'already' | 'ranked_over'; message: string };

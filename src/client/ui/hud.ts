@@ -3,8 +3,31 @@ import { BALANCE } from '../../shared/balance';
 import { utilityIcon } from '../../shared/loadout';
 import { clear, el, formatTime } from './dom';
 import { UltHud } from './ultHud';
+import type { PopupWords } from '../settings';
 
 const ESCAPE_BAR_SEC = 0.8;
+
+/**
+ * Screen-noise budget (see docs/DECISIONS.md, "Screen clutter"). Comic words about other players
+ * ("minor") only show near you and a couple at a time; everything shrinks with distance; the
+ * screen never holds more than a handful at once, dropping the least important first.
+ */
+const POPUP_CAP = { all: 10, near: 6, mine: 5 } as const;
+const MINOR_CAP = { all: 4, near: 2, mine: 0 } as const;
+const MINOR_RANGE = { all: Infinity, near: 20, mine: 0 } as const;
+/** A new screen flash within this long of the last one is dropped unless it's stronger. */
+const FLASH_GAP_MS = 450;
+const KILLFEED_MAX = 4;
+
+/** Callout priorities: a callout never replaces a more important one that's still up. */
+export const CALLOUT = {
+  /** Small stuff about you: escaped, mine triggered, a status you picked up. */
+  info: 1,
+  /** Something happening to you right now: grabbed, chased, locked on, your knockout. */
+  you: 2,
+  /** The whole match changes: final 30 seconds, the map shrinks, a goal, a round won. */
+  match: 3,
+} as const;
 
 interface WorldPopup {
   el: HTMLElement;
@@ -13,6 +36,8 @@ interface WorldPopup {
   max: number;
   vy: number;
   scale: number;
+  minor: boolean;
+  gain: boolean;
 }
 
 export interface HudState {
@@ -116,6 +141,14 @@ export class Hud {
   private readonly chatFeed: HTMLElement;
   private readonly worldPopups: WorldPopup[] = [];
   private calloutTimer = 0;
+  private calloutPrio = 0;
+  /** Which comic words to show (settings). */
+  popupWords: PopupWords = 'near';
+  /** Screen flash strength, 0..1 (settings). */
+  flashScale = 1;
+  private lastFlash = { at: -1e9, ms: 0 };
+  /** The camera, as of the last frame (for popup distance). */
+  private readonly camPos = new THREE.Vector3();
   /** Inflation you've pumped into people with hits in quick succession, under the crosshair. */
   private readonly tally: HTMLElement;
   private readonly tallyAmt: HTMLElement;
@@ -305,7 +338,7 @@ export class Hud {
   bubble(pos: THREE.Vector3, text: string): void {
     const e = el('div', { class: 'popup speech', text });
     this.popups.append(e);
-    this.worldPopups.push({ el: e, pos: pos.clone(), life: 2.6, max: 2.6, vy: 0.15, scale: 0.8 });
+    this.worldPopups.push({ el: e, pos: pos.clone(), life: 2.6, max: 2.6, vy: 0.15, scale: 0.8, minor: false, gain: false });
   }
 
   show(v: boolean): void {
@@ -399,7 +432,10 @@ export class Hud {
 
     if (this.calloutTimer > 0) {
       this.calloutTimer -= dt;
-      if (this.calloutTimer <= 0) clear(this.calloutBox);
+      if (this.calloutTimer <= 0) {
+        clear(this.calloutBox);
+        this.calloutPrio = 0;
+      }
     }
     if (this.tallyTimer > 0) {
       this.tallyTimer -= dt;
@@ -520,9 +556,12 @@ export class Hud {
     });
   }
 
-  setEvent(text: string): void {
-    this.setIf('event', text, () => {
-      this.eventBanner.textContent = text;
+  /** The random-event strip under the clock; `sub` is a short second line (what to do about it). */
+  setEvent(text: string, sub = ''): void {
+    this.setIf('event', `${text}|${sub}`, () => {
+      clear(this.eventBanner);
+      this.eventBanner.append(text);
+      if (sub) this.eventBanner.append(el('div', { class: 'ev-sub', text: sub }));
       this.eventBanner.classList.toggle('hidden', !text);
     });
   }
@@ -542,10 +581,19 @@ export class Hud {
     this.grappleWrap.classList.toggle('hidden', !f.grapple);
   }
 
-  /** Brief full-screen tint (e.g. blue when a brace succeeds). */
-  flash(color: string, ms = 250): void {
+  /**
+   * Brief full-screen tint (e.g. blue when a brace succeeds). Flashes right on top of each other
+   * read as flicker, so one that follows another within FLASH_GAP_MS is dropped unless it lasts
+   * longer (a bigger moment). Returns whether it showed.
+   */
+  flash(color: string, ms = 250): boolean {
+    if (this.flashScale <= 0) return false;
+    const now = performance.now();
+    if (now - this.lastFlash.at < FLASH_GAP_MS && ms <= this.lastFlash.ms) return false;
+    this.lastFlash = { at: now, ms };
     this.flashEl.style.boxShadow = `inset 0 0 160px 40px ${color}`;
-    this.flashEl.animate([{ opacity: 1 }, { opacity: 0 }], { duration: ms, easing: 'ease-out' });
+    this.flashEl.animate([{ opacity: this.flashScale }, { opacity: 0 }], { duration: ms, easing: 'ease-out' });
+    return true;
   }
 
   /** `strength` 0..1: harder hits draw a bigger, hotter marker. */
@@ -560,20 +608,36 @@ export class Hud {
     window.setTimeout(() => this.crosshair.classList.remove('hit'), 90);
   }
 
+  /**
+   * A line in the feed (top right). Lines about you stay longer and are the last to be pushed out
+   * when the feed is full; other people's go after a few seconds.
+   */
   addKill(html: string, me: boolean): void {
     const item = el('div', { class: `item${me ? ' me' : ''}`, html });
     this.killfeed.prepend(item);
-    while (this.killfeed.children.length > 5) this.killfeed.lastElementChild?.remove();
-    window.setTimeout(() => item.remove(), 6000);
+    while (this.killfeed.children.length > KILLFEED_MAX) {
+      const items = [...this.killfeed.children];
+      (items.reverse().find((x) => !x.classList.contains('me')) ?? this.killfeed.lastElementChild)?.remove();
+    }
+    window.setTimeout(() => item.remove(), me ? 6000 : 4500);
   }
 
-  callout(main: string, sub = '', seconds = 2.2, color?: string): void {
+  /**
+   * Big center text. `prio` (CALLOUT.*) decides what wins when two land together: a callout
+   * doesn't replace a more important one that's still up. Less important ones are drawn smaller.
+   */
+  callout(main: string, sub = '', seconds = 2.2, color?: string, prio: number = CALLOUT.you): boolean {
+    if (this.calloutTimer > 0.3 && prio < this.calloutPrio) return false;
     clear(this.calloutBox);
     const m = el('div', { class: 'main', text: main });
     if (color) m.style.color = color;
     this.calloutBox.append(m);
     if (sub) this.calloutBox.append(el('div', { class: 'sub', text: sub }));
+    this.calloutBox.classList.toggle('small', prio <= CALLOUT.info);
+    this.calloutBox.classList.toggle('big', prio >= CALLOUT.match);
     this.calloutTimer = seconds;
+    this.calloutPrio = prio;
+    return true;
   }
 
   setRespawn(big: string | null, small = ''): void {
@@ -610,28 +674,38 @@ export class Hud {
   // --- World-space popups (comic sound-effect text) -----------------------------------------
 
   /**
-   * `minor` popups (other players' flavor text) are skipped when the screen is already busy or
-   * the same word is already showing nearby, so a crowd of bots doesn't bury the action.
+   * A comic word in the world. `minor` popups (flavor text about other players) obey the popup
+   * setting: only near you and only a couple at a time by default, never with "only mine". The
+   * same word already showing close by isn't repeated. When the screen holds too many, the oldest
+   * minor one goes first, then the oldest of the rest (your damage numbers go last).
    */
   popup(pos: THREE.Vector3, text: string, color = '#ffffff', scale = 1, life = 1, minor = false, cls = ''): void {
+    const mode = this.popupWords;
+    const live = (p: WorldPopup) => p.life > p.max * 0.3;
     if (minor) {
-      const busy = this.worldPopups.filter((p) => p.life > p.max * 0.3).length >= 4;
-      const dup = this.worldPopups.some((p) => p.el.textContent === text && p.life > p.max * 0.4 && p.pos.distanceTo(pos) < 5);
-      if (busy || dup) return;
+      if (this.camPos.distanceTo(pos) > MINOR_RANGE[mode]) return;
+      if (this.worldPopups.filter((p) => p.minor && live(p)).length >= MINOR_CAP[mode]) return;
     }
-    const e = el('div', { class: cls ? `popup ${cls}` : 'popup', text });
+    const gain = cls === 'gain';
+    if (!gain && this.worldPopups.some((p) => p.el.textContent === text && p.life > p.max * 0.4 && p.pos.distanceTo(pos) < 5)) return;
+    const e = el('div', { class: `popup${cls ? ` ${cls}` : ''}${minor ? ' minor' : ''}`, text });
     e.style.color = color;
     this.popups.append(e);
-    this.worldPopups.push({ el: e, pos: pos.clone(), life, max: life, vy: cls === 'gain' ? 2.4 : 1.4, scale });
-    if (this.worldPopups.length > 30) {
-      const old = this.worldPopups.shift();
-      old?.el.remove();
+    this.worldPopups.push({ el: e, pos: pos.clone(), life, max: life, vy: gain ? 2.4 : 1.4, scale, minor, gain });
+    while (this.worldPopups.filter(live).length > POPUP_CAP[mode]) {
+      const i = Math.max(
+        0,
+        [this.worldPopups.findIndex((p) => p.minor && live(p)), this.worldPopups.findIndex((p) => !p.gain && live(p)), this.worldPopups.findIndex(live)].find((x) => x >= 0) ?? 0,
+      );
+      this.worldPopups[i].el.remove();
+      this.worldPopups.splice(i, 1);
     }
   }
 
   updatePopups(camera: THREE.Camera, dt: number): void {
     const w = window.innerWidth;
     const h = window.innerHeight;
+    camera.getWorldPosition(this.camPos);
     for (let i = this.worldPopups.length - 1; i >= 0; i--) {
       const p = this.worldPopups[i];
       p.life -= dt;
@@ -650,8 +724,10 @@ export class Hud {
       const pop = t < 0.15 ? 0.4 + (t / 0.15) * 0.8 : 1.2 - Math.min(0.2, (t - 0.15) * 0.5);
       const x = (v.x * 0.5 + 0.5) * w;
       const y = (-v.y * 0.5 + 0.5) * h;
-      p.el.style.opacity = String(Math.min(1, p.life / (p.max * 0.35)));
-      p.el.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px) scale(${pop * p.scale}) rotate(${Math.sin(p.max * 7) * 8}deg)`;
+      // Far away reads small: the words stay with what they're about instead of covering the screen.
+      const far = Math.max(p.gain ? 0.7 : 0.5, Math.min(1, 16 / Math.max(1, this.camPos.distanceTo(p.pos))));
+      p.el.style.opacity = String(Math.min(p.minor ? 0.85 : 1, p.life / (p.max * 0.35)));
+      p.el.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px) scale(${pop * p.scale * far}) rotate(${Math.sin(p.max * 7) * 8}deg)`;
     }
   }
 

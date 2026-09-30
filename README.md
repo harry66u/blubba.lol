@@ -22,6 +22,13 @@ Open http://localhost:8080, pick a mode (Knockout, Team Knockout, Ball, Pump, 1v
 `http://host/r/ABCDE`). **1v1 challenge** copies a `http://host/c/ABCDE` link: whoever opens it
 plays you one-on-one.
 
+**Team Knockout** plays on its own map, **Face-Off** (two bases across a contested middle,
+mirrored so neither side has an edge), and starts from a team lobby: pick a side, press
+**READY** (or **R**; **A** on a controller, bumpers to switch teams), and the match counts down
+once both teams have at least two players, they're even, and everyone is ready. There are no
+bots unless you switch them on (the menu's Bots switch for quick play, the host's settings in a
+private room). A private room's host can **Shuffle** and **Lock** the teams.
+
 Controls are listed under **How to play** in the menu and every ability shows its key on the
 HUD. Press **V** to switch between first and third person (the choice is remembered). Phones and
 tablets get on-screen touch controls automatically (hold the phone sideways).

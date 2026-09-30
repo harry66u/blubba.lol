@@ -42,6 +42,7 @@ import {
   type RosterEntry,
   type ServerMessage,
   type Snapshot,
+  type TeamLobbyState,
 } from '../../shared/protocol';
 import { type MatchPhase, type MatchResult, type RoundInfo, rayCapsule } from '../../shared/game/sim';
 import { World } from '../../shared/world';
@@ -81,7 +82,7 @@ import { Human, characterPhoto, characterPhotoUrl, isHumanKey } from '../render/
 import { ViewModel } from '../render/viewModel';
 import { type Settings, saveSettings } from '../settings';
 import { esc, hexColor } from '../ui/dom';
-import type { Hud, Nametag } from '../ui/hud';
+import { CALLOUT, type Hud, type Nametag } from '../ui/hud';
 import { CRACKED_SHOT_DIST, koVerb } from '../ui/koWords';
 import type { TeamView } from '../ui/menus';
 import { CHASE, aimFromCamera, chaseCamera, rebaseMove } from './chaseCam';
@@ -328,6 +329,9 @@ export class ClientGame {
   /** Who pressed PLAY AGAIN on the current results. */
   againIds = new Set<number>();
   onAgainChange?: () => void;
+  /** Team Knockout's lobby before each match (null until the server sends it). */
+  teamLobby: TeamLobbyState | null = null;
+  onTeamLobby?: () => void;
   /** Players whose quick chat you've hidden (this session). */
   readonly muted = new Set<number>();
   showChat = true;
@@ -502,6 +506,7 @@ export class ClientGame {
   enter(msg: Extract<ServerMessage, { type: 'welcome' }>): void {
     this.youId = msg.you;
     this.room = msg.room;
+    this.teamLobby = null;
     this.setMap(msg.room.mapId);
     this.setupModeProps();
     this.applyWeapon(this.loadout);
@@ -596,6 +601,8 @@ export class ClientGame {
           this.round = next;
           if (newRound) this.spectateId = -1;
           this.match = { phase: msg.phase, endsAtTick: msg.endsAtTick, number: msg.number, result: msg.result };
+          // The team lobby's state is for the next lobby only (its countdown is done).
+          if (msg.phase !== 'waiting') this.teamLobby = null;
           // The server's collapse plan: our world sinks and crumbles exactly like its world.
           this.world.setCollapse(msg.collapse ?? []);
           if (msg.phase === 'playing' && (!next || newRound)) this.announcer.say(next ? `Round ${next.n}! Go!` : 'Go!', 2);
@@ -659,6 +666,10 @@ export class ClientGame {
       case 'again':
         this.againIds = new Set(msg.ids);
         this.onAgainChange?.();
+        break;
+      case 'teamLobby':
+        this.teamLobby = msg.lobby;
+        this.onTeamLobby?.();
         break;
       case 'renamed':
         this.onRenamed?.(msg.name, msg.message);
@@ -856,7 +867,6 @@ export class ClientGame {
     if (id === this.youId) this.effects.airPuff(x, y + 1.2, z, 8, 3.5, 0.22);
     else this.effects.airPuff(x, y + 1.2, z, 12, 7, 0.3);
     this.effects.confettiBurst(x, y + 1.5, z, id === this.youId ? 14 : 24);
-    if (id !== this.youId) this.hud.popup(tmpV.set(x, y + 3.4, z), `${c.name}!`, c.color, 1.4, 1.3, false);
   }
 
   /** The face lent to the character a player turned into, if an admin approved one. */
@@ -924,9 +934,36 @@ export class ClientGame {
     return def.map((d, i) => named?.[i]?.toUpperCase() || d);
   }
 
-  /** Private room, waiting for the host to press START (nothing counts yet). */
+  /** Private room, waiting for the host to press START (nothing counts yet). Team Knockout has its own lobby. */
   get inLobby(): boolean {
-    return !!this.room?.isPrivate && !this.room.challenge && !this.room.ranked && this.match.phase === 'waiting';
+    return !!this.room?.isPrivate && !this.room.challenge && !this.room.ranked && this.match.phase === 'waiting' && this.room.settings.mode !== 'teamKnockout';
+  }
+
+  /** Team Knockout between matches: picking teams and readying up (see ui/teamLobby.ts). */
+  get inTeamLobby(): boolean {
+    const r = this.room;
+    return !!r && r.settings.mode === 'teamKnockout' && !r.ranked && !r.challenge && this.match.phase === 'waiting';
+  }
+
+  /** Team lobby: switch to a team (the server says no if the teams are locked or full). */
+  joinTeam(team: 0 | 1): void {
+    if (this.inTeamLobby) this.net.send({ type: 'team', action: 'join', team });
+  }
+
+  setReady(ready: boolean): void {
+    if (!this.inTeamLobby) return;
+    this.net.send({ type: 'team', action: 'ready', ready });
+    // Show it right away; the server's next update confirms.
+    if (this.teamLobby) {
+      const ids = new Set(this.teamLobby.ready);
+      if (ready) ids.add(this.youId);
+      else ids.delete(this.youId);
+      this.teamLobby = { ...this.teamLobby, ready: [...ids] };
+    }
+  }
+
+  get ready(): boolean {
+    return !!this.teamLobby?.ready.includes(this.youId);
   }
 
   get isHost(): boolean {
@@ -1181,8 +1218,8 @@ export class ClientGame {
           fx.groundRing(e.x, e.y, e.z, 2, 0xff5a7a);
           fx.airPuff(e.x, e.y + 0.3, e.z, 16, 7, 0.3);
           a.kaboom(e.owner === you ? null : [e.x, e.y, e.z]);
-          this.hud.popup(tmpV.set(e.x, e.y + 2, e.z), 'KA-BLAM!', '#ff5a7a', 1.5, 1.1);
-          if (e.owner === you) this.hud.callout('MINE TRIGGERED!', '', 1.2, '#ff5a7a');
+          this.hud.popup(tmpV.set(e.x, e.y + 2, e.z), 'KA-BLAM!', '#ff5a7a', 1.5, 1.1, e.owner !== you);
+          if (e.owner === you) this.hud.callout('MINE TRIGGERED!', '', 1.2, '#ff5a7a', CALLOUT.info);
         } else {
           fx.airPuff(e.x, e.y + 0.2, e.z, 5, 1.2, 0.18);
         }
@@ -1202,7 +1239,7 @@ export class ClientGame {
       case 'floaty': {
         this.floaters.set(e.id, e.until);
         if (e.id === you) {
-          this.hud.callout('FLOATING!', 'Helium! You drift up and fly farther when hit. Dash to steer.', 1.8, '#ff8fd8');
+          this.hud.callout('FLOATING!', 'Helium! You drift up and fly farther when hit. Dash to steer.', 1.8, '#ff8fd8', CALLOUT.info);
         } else {
           const p = this.posOf(e.id);
           if (p) this.hud.popup(tmpV.set(p.x, p.y + 2.8, p.z), 'WHEEE!', '#ff8fd8', 0.9, 1, true);
@@ -1237,15 +1274,13 @@ export class ClientGame {
       case 'chaos': {
         this.chaos = this.chaos.filter((c) => c.endTick > e.tick);
         this.chaos.push({ kind: e.kind, announceTick: e.announceTick, startTick: e.startTick, endTick: e.endTick, dirX: e.dirX, dirZ: e.dirZ });
-        const info = CHAOS_INFO[e.kind];
-        this.hud.callout(info.title, `${info.sub} (in ${Math.round((e.startTick - e.tick) * DT)}s)`, 3, '#ff9f1c');
         a.siren();
         const lines: Record<string, string> = { fan: 'Giant fan incoming!', lowGravity: 'Low gravity!', ice: 'Ice rink!', maxInflate: 'Maximum pressure!' };
         this.announcer.say(lines[e.kind], 3);
         break;
       }
       case 'chain': {
-        this.hud.popup(tmpV.set(e.x, e.y + 1, e.z), 'CHAIN!', '#ff5fd2', 1.2, 0.9);
+        this.hud.popup(tmpV.set(e.x, e.y + 1, e.z), 'CHAIN!', '#ff5fd2', 1.2, 0.9, e.by !== you && e.id !== you && e.target !== you);
         fx.shockwave(e.x, e.y + 0.8, e.z, 3.5, 0.35, 0xff5fd2, false, this.r.camera.position);
         // Big moment for whoever started it (and whoever got bowled over).
         if (e.by === you && e.target !== you && this.time - this.lastChainCallout > 2.5) {
@@ -1285,6 +1320,7 @@ export class ClientGame {
           own ? `Own goal by ${scorer}! Point to ${names[e.team]}.` : scorer ? `${e.scorer === you ? 'You' : scorer} scored for ${names[e.team]}!` : `Point to ${names[e.team]}!`,
           2.6,
           this.teamHex(e.team),
+          CALLOUT.match,
         );
         fx.confettiBurst(e.x, e.y + 1, e.z, 140, [this.teamColors[e.team], 0xffffff, 0xffd60a]);
         fx.shockwave(e.x, e.y, e.z, 8, 0.6, this.teamColors[e.team]);
@@ -1308,7 +1344,7 @@ export class ClientGame {
       case 'pumpFull': {
         const mine = this.teamOf(you);
         const names = this.teamNames();
-        this.hud.callout(`${names[e.team]} GIANT IS FULL!`, e.team === mine ? 'Your team wins!' : 'Their tube man towers over you...', 3, this.teamHex(e.team));
+        this.hud.callout(`${names[e.team]} GIANT IS FULL!`, e.team === mine ? 'Your team wins!' : 'Their tube man towers over you...', 3, this.teamHex(e.team), CALLOUT.match);
         a.goalHorn();
         const g = this.map.giants?.find((x) => x.team === e.team);
         if (g) fx.confettiBurst(g.x, g.y + 10, g.z, 200, [this.teamColors[e.team], 0xffffff]);
@@ -1316,10 +1352,10 @@ export class ClientGame {
       }
       case 'final':
         if (this.mode === 'suddenDeath') {
-          this.hud.callout('FINAL 30 SECONDS!', 'Still standing at the buzzer? Most knockouts wins.', 3, '#ff3b5c');
+          this.hud.callout('FINAL 30 SECONDS!', 'Still standing at the buzzer? Most knockouts wins.', 3, '#ff3b5c', CALLOUT.match);
           this.announcer.say('Final thirty seconds!', 4);
         } else {
-          this.hud.callout('FINAL 30 SECONDS!', 'The map is collapsing!', 3, '#ff3b5c');
+          this.hud.callout('FINAL 30 SECONDS!', 'The map is collapsing!', 3, '#ff3b5c', CALLOUT.match);
           this.announcer.say('Final thirty seconds! The map is collapsing!', 4);
         }
         a.siren();
@@ -1330,7 +1366,7 @@ export class ClientGame {
         const sub = e.sink.length
           ? `Pieces flashing red fall in ${secs}s${e.deck > 0 ? ' and the edges crumble' : ''}. Get off them!`
           : `The edges crumble in ${secs}s. Get to the middle!`;
-        this.hud.callout('THE MAP IS SHRINKING!', sub, 3.2, '#ff3b5c');
+        this.hud.callout('THE MAP IS SHRINKING!', sub, 3.2, '#ff3b5c', CALLOUT.match);
         a.siren();
         this.announcer.say('The map is shrinking!', 4);
         this.trauma = Math.min(1, this.trauma + 0.2);
@@ -1407,10 +1443,10 @@ export class ClientGame {
         if (e.target === you) this.feelHit(e);
         if (e.low) {
           a.groan(e.target === you ? null : pos);
-          this.hud.popup(tmpV.set(e.x, e.y + 1.2, e.z), 'OOF!', '#ff9f1c', 1.3, 1.1);
+          this.hud.popup(tmpV.set(e.x, e.y + 1.2, e.z), 'OOF!', '#ff9f1c', 1.3, 1.1, e.attacker !== you && e.target !== you);
         } else if (e.braced) {
           a.clang(e.target === you ? null : pos);
-          this.hud.popup(tmpV.set(e.x, e.y + 1.2, e.z), 'BRACED!', '#9fe8ff', 1, 0.9);
+          this.hud.popup(tmpV.set(e.x, e.y + 1.2, e.z), 'BRACED!', '#9fe8ff', 1, 0.9, e.attacker !== you && e.target !== you);
           if (e.target === you) this.hud.flash('rgba(120, 220, 255, 0.55)', 350);
         } else if (e.direct && (e.attacker === you || e.target === you || e.speed > 18)) {
           this.hud.popup(tmpV.set(e.x, e.y + 1.6, e.z), e.speed > 20 ? 'WHAM!' : 'BOP!', '#ffffff', 0.7 + Math.min(0.6, e.speed * 0.02), 0.7, e.attacker !== you && e.target !== you);
@@ -1439,7 +1475,7 @@ export class ClientGame {
           a.powerUp();
           this.announcer.say(e.kind === 'both' ? 'Unstoppable!' : e.kind === 'turbo' ? 'Turbo tank!' : 'Mega blast!', 3);
         } else {
-          if (p) this.hud.popup(tmpV.set(p.x, p.y + 3.2, p.z), title, '#ffb020', 1, 1.3);
+          if (p) this.hud.popup(tmpV.set(p.x, p.y + 3.2, p.z), title, '#ffb020', 1, 1.3, true);
           const nm = this.nameOf(e.id);
           this.hud.addKill(`<b style="color:${hexColor(this.colorOf(e.id))}">${esc(nm)}</b> is on a ${e.n}-pop streak: <b>${title.replace('!', '')}</b> ⚡`, false);
         }
@@ -1472,10 +1508,10 @@ export class ClientGame {
           const pack = cosmeticKey(kc, 'sound');
           if (pack !== 'classic') {
             a.koSound(pack, e.killer === you || e.victim === you ? null : [fxX, fxY, fxZ]);
-            this.hud.popup(tmpV.set(fxX, fxY + 4, fxZ), PACK_TEXT[pack] ?? '', '#ffd60a', 1.3, 1.4);
+            this.hud.popup(tmpV.set(fxX, fxY + 4, fxZ), PACK_TEXT[pack] ?? '', '#ffd60a', 1.3, 1.4, e.killer !== you && e.victim !== you);
           }
         }
-        this.hud.popup(tmpV.set(e.x, Math.max(e.y, -8) + 2, e.z), 'WHEEEE!', '#ffffff', 1.2, 1.4);
+        this.hud.popup(tmpV.set(e.x, Math.max(e.y, -8) + 2, e.z), 'WHEEEE!', '#ffffff', 1.2, 1.4, e.killer !== you && e.victim !== you);
         if (e.victim === you) {
           this.deathAt = this.time;
           this.killerId = e.tags.includes('sd') ? -1 : e.killer;
@@ -1549,7 +1585,7 @@ export class ClientGame {
       case 'grab': {
         const p = this.posOf(e.target);
         a.stretch(e.id === you || e.target === you ? null : p ? [p.x, p.y, p.z] : null);
-        if (p) this.hud.popup(tmpV.set(p.x, p.y + 2.6, p.z), e.drag ? 'TAKE YOU WITH ME!' : 'GOTCHA!', e.drag ? '#ff5fd2' : '#ffffff', e.drag ? 1.1 : 0.9, 1.1);
+        if (p) this.hud.popup(tmpV.set(p.x, p.y + 2.6, p.z), e.drag ? 'TAKE YOU WITH ME!' : 'GOTCHA!', e.drag ? '#ff5fd2' : '#ffffff', e.drag ? 1.1 : 0.9, 1.1, e.id !== you && e.target !== you);
         if (e.target === you) {
           this.trauma = Math.min(1, this.trauma + 0.3);
           this.hud.callout(e.drag ? 'DRAGGED!' : 'GRABBED!', 'Dash when the marker hits green!', 1.4, '#ff9f1c');
@@ -1562,7 +1598,7 @@ export class ClientGame {
         const p = this.posOf(e.target);
         if (p) {
           a.whoosh(1, e.target === you ? null : [p.x, p.y, p.z]);
-          this.hud.popup(tmpV.set(p.x, p.y + 2.4, p.z), 'YEET!', '#ffd60a', 1.3, 1.1);
+          this.hud.popup(tmpV.set(p.x, p.y + 2.4, p.z), 'YEET!', '#ffd60a', 1.3, 1.1, e.id !== you && e.target !== you);
         }
         break;
       }
@@ -1571,17 +1607,17 @@ export class ClientGame {
         if (p) {
           fx.fartCloud(p.x, p.y, p.z, 0, 0, false);
           a.fart(e.id === you ? null : [p.x, p.y, p.z]);
-          this.hud.popup(tmpV.set(p.x, p.y + 2.4, p.z), 'BROKE FREE!', '#5ee05e', 1, 1);
+          this.hud.popup(tmpV.set(p.x, p.y + 2.4, p.z), 'BROKE FREE!', '#5ee05e', 1, 1, e.id !== you && e.from !== you);
         }
-        if (e.id === you) this.hud.callout('ESCAPED!', '', 1.2, '#5ee05e');
+        if (e.id === you) this.hud.callout('ESCAPED!', '', 1.2, '#5ee05e', CALLOUT.info);
         break;
       }
       case 'escapeFail':
-        if (e.id === you) this.hud.callout(e.early ? 'TOO EARLY!' : 'TOO LATE!', 'One try per grab', 1.2, '#ff3b5c');
+        if (e.id === you) this.hud.callout(e.early ? 'TOO EARLY!' : 'TOO LATE!', 'One try per grab', 1.2, '#ff3b5c', CALLOUT.info);
         break;
       case 'stomp': {
         a.thud(e.id === you || e.target === you ? null : [e.x, e.y, e.z], 14);
-        this.hud.popup(tmpV.set(e.x, e.y + 1, e.z), 'STOMP!', '#ff9f1c', 1.3, 1);
+        this.hud.popup(tmpV.set(e.x, e.y + 1, e.z), 'STOMP!', '#ff9f1c', 1.3, 1, e.id !== you && e.target !== you);
         fx.groundRing(e.x, e.y, e.z, 0.8);
         if (e.target === you) this.hud.callout('STOMPED!', '', 1.2, '#ff9f1c');
         break;
@@ -1604,7 +1640,7 @@ export class ClientGame {
         const to = e.target >= 0 ? () => (this.posOf(e.target) ? tmpV3.copy(this.posOf(e.target)!).add(UP_ONE) : null) : () => fixed;
         fx.rope(from, to, e.miss ? 0.25 : e.target >= 0 ? 0.45 : 0.35);
         a.thwip(e.id === you ? null : [e.x, e.y, e.z]);
-        if (e.target === you) this.hud.callout('YOINK!', '', 1, '#ffd60a');
+        if (e.target === you) this.hud.callout('YOINK!', '', 1, '#ffd60a', CALLOUT.info);
         break;
       }
       default:
@@ -1709,12 +1745,17 @@ export class ClientGame {
       line = 'First pop!';
       priority = 2;
     }
-    if (main) {
+    const involved = e.killer === you || e.victim === you;
+    if (main && involved) {
       const far = longShot ? ` from ${Math.round(last.dist)} m` : '';
       sub = e.killer === you ? `You ${verb} ${victimName}${far}${pts}` : `${killerName} ${verb} ${victimName}`;
       this.hud.callout(main, sub, 2, color);
       this.announcer.say(line, priority);
       this.audio.koConfirm();
+    } else if (main) {
+      // Someone else's knockout is in the feed. The announcer only calls the ones that change the
+      // match for everyone (the crown is up for grabs, a multi-pop).
+      if (tags.includes('crown') || priority >= 4) this.announcer.say(line, priority - 1);
     } else if (mine) {
       this.audio.koConfirm();
       this.hud.callout(`${verb.toUpperCase()}!`, `${victimName}${pts}`, 1.8);
@@ -1747,13 +1788,21 @@ export class ClientGame {
         this.hud.popup(tmpV.set(this.pred.px, this.pred.py + 3, this.pred.pz), 'PSSSHHH!', '#ffffff', 1.4, 1.2);
       }
     }
+    // The event strip under the clock carries the whole warning: what's coming, when, and (until
+    // it's been going a few seconds) what it does. No center text: that's kept for your own moments.
     let banner = '';
-    if (active) banner = `${CHAOS_INFO[active.kind].title.replace('!', '')} · ${Math.ceil((active.endTick - tick) * DT)}s`;
-    else if (upcoming) banner = `${CHAOS_INFO[upcoming.kind].title.replace('!', '')} in ${Math.ceil((upcoming.startTick - tick) * DT)}...`;
+    let how = '';
+    if (active) {
+      banner = `${CHAOS_INFO[active.kind].title.replace('!', '')} · ${Math.ceil((active.endTick - tick) * DT)}s`;
+      if ((tick - active.startTick) * DT < 3) how = CHAOS_INFO[active.kind].sub;
+    } else if (upcoming) {
+      banner = `${CHAOS_INFO[upcoming.kind].title.replace('!', '')} in ${Math.ceil((upcoming.startTick - tick) * DT)}...`;
+      how = CHAOS_INFO[upcoming.kind].sub;
+    }
     const t = tick * DT;
     const st = this.match.phase === 'playing' ? shrinkStageNear(this.world.plan, t) : null;
     const shrinkText = st ? (t < st.at ? `MAP SHRINKING in ${Math.ceil(st.at - t)}...` : 'MAP SHRINKING!') : '';
-    this.hud.setEvent([shrinkText, banner].filter(Boolean).join('  ·  '));
+    this.hud.setEvent([shrinkText, banner].filter(Boolean).join('  ·  '), how);
     this.updateCollapseFx(t, dt);
   }
 
@@ -1822,11 +1871,11 @@ export class ClientGame {
       .map(([id, n]) => `${who(id)} ${n}`)
       .join(' · ');
     if (e.over && w >= 0) {
-      this.hud.callout(mine ? 'YOU WIN THE MATCH!' : `${this.nameOf(w).toUpperCase()} WINS!`, score, 4, '#ffd60a');
+      this.hud.callout(mine ? 'YOU WIN THE MATCH!' : `${this.nameOf(w).toUpperCase()} WINS!`, score, 4, '#ffd60a', CALLOUT.match);
       this.announcer.say(mine ? 'You win the match!' : `${this.nameOf(w)} wins the match!`, 5);
     } else {
       const title = w < 0 ? `ROUND ${e.n}: NOBODY` : mine ? `ROUND ${e.n} IS YOURS!` : `ROUND ${e.n}: ${this.nameOf(w).toUpperCase()}`;
-      this.hud.callout(title, `${e.timeUp ? "Time's up · " : ''}${score || 'No points yet'}`, 3.5, '#ff5fd2');
+      this.hud.callout(title, `${e.timeUp ? "Time's up · " : ''}${score || 'No points yet'}`, 3.5, '#ff5fd2', CALLOUT.match);
       this.announcer.say(w < 0 ? 'Nobody takes the round!' : mine ? 'You win the round!' : `${this.nameOf(w)} wins the round!`, 4);
     }
     this.audio.goalHorn();
@@ -1845,11 +1894,11 @@ export class ClientGame {
     if (n === 0) return;
     const youIn = left.includes(you);
     if (n === 2) {
-      this.hud.callout('FINAL SHOWDOWN!', left.map((id) => (id === you ? 'YOU' : this.nameOf(id))).join('  vs  '), 3, '#ff5fd2');
+      this.hud.callout('FINAL SHOWDOWN!', left.map((id) => (id === you ? 'YOU' : this.nameOf(id))).join('  vs  '), 3, '#ff5fd2', CALLOUT.match);
       this.announcer.say('Final showdown!', 4);
       this.audio.siren();
     } else if (n === 3) {
-      this.hud.callout('LAST 3!', youIn ? "You're still in. Stay on!" : 'Three tube men left standing', 2.5, '#ff9f1c');
+      this.hud.callout('LAST 3!', youIn ? "You're still in. Stay on!" : 'Three tube men left standing', 2.5, '#ff9f1c', CALLOUT.match);
       this.announcer.say('Last three!', 3);
     }
     this.hud.addKill(`<b>${n}</b> players left`, false);
@@ -2030,7 +2079,7 @@ export class ClientGame {
     if (w.kind === 'cone') {
       this.viewModel.kick(f.power * 1.5);
       this.audio.airBlast(f.power, null);
-      this.trauma = Math.min(1, this.trauma + 0.15 + f.power * 0.25);
+      this.trauma = Math.min(1, this.trauma + 0.08 + f.power * 0.12);
       this.punchV += 0.8 + f.power * 1.6;
       this.fovKick += 2 + f.power * 4;
       this.muzzlePos(tmpV);
@@ -2043,7 +2092,7 @@ export class ClientGame {
       // Bubble Shotgun: the same fixed pellet ring the server uses, drawn to where each pellet stops.
       this.viewModel.kick(f.power * 1.3);
       this.audio.bubbleBlast(f.power, null);
-      this.trauma = Math.min(1, this.trauma + 0.1 + f.power * 0.2);
+      this.trauma = Math.min(1, this.trauma + 0.05 + f.power * 0.1);
       this.punchV += 0.7 + f.power * 1.4;
       this.fovKick += 1.5 + f.power * 3;
       this.muzzlePos(tmpV);
@@ -2060,7 +2109,7 @@ export class ClientGame {
     if (w.kind === 'hitscan') {
       this.viewModel.kick(f.power);
       this.audio.pew(f.power, null);
-      this.trauma = Math.min(1, this.trauma + 0.06 + f.power * 0.12);
+      this.trauma = Math.min(1, this.trauma + 0.03 + f.power * 0.06);
       this.punchV += 0.6 + f.power * 1.2;
       this.muzzlePos(tmpV);
       const end = this.localRay(f.ox, f.oy, f.oz, f.dx, f.dy, f.dz, w.range, w.rayRadius);
@@ -2075,7 +2124,7 @@ export class ClientGame {
     if (style === 'cork') this.audio.popShot(null);
     else if (style === 'balloon') this.audio.mortarLaunch(f.power, null);
     else this.audio.shoot(f.power, null);
-    this.trauma = Math.min(1, this.trauma + (0.1 + f.power * 0.2) * kick);
+    this.trauma = Math.min(1, this.trauma + (0.05 + f.power * 0.1) * kick);
     this.punchV += (0.5 + f.power * 1.3) * kick;
     this.fovKick += (1 + f.power * 3) * kick;
     const key = -this.seq;
@@ -2663,8 +2712,8 @@ export class ClientGame {
     this.rollV += -side * (3 + k * 9) * jolt;
     this.fovKick += (4 + k * 12) * jolt;
     if (!e.braced) {
-      this.hud.flash(`rgba(255, ${Math.round(90 - e.infl * 60)}, 90, ${(0.3 + k * 0.35).toFixed(2)})`, 220 + k * 200);
-      if (e.speed > 12) this.hud.flash('rgba(255, 255, 255, 0.5)', 140);
+      const g = e.speed > 12 ? 150 : Math.round(90 - e.infl * 60);
+      this.hud.flash(`rgba(255, ${g}, ${e.speed > 12 ? 140 : 90}, ${(0.26 + k * 0.32).toFixed(2)})`, 220 + k * 200);
     }
     if ((e.gain ?? 0) > 0.001) this.hud.selfHit(e.gain, e.infl, k);
     // Direction the hit came from relative to where we're looking.
@@ -2702,10 +2751,10 @@ export class ClientGame {
       'gain',
     );
     this.audio.impact(e.speed, null, 1.3);
-    this.trauma = Math.min(1, this.trauma + 0.2 + k * 0.5);
+    this.trauma = Math.min(1, this.trauma + 0.08 + k * 0.3);
     this.fovKick -= 1 + k * 4;
     this.viewModel.hitStop(Math.min(BALANCE.knockback.hitStopMax, BALANCE.knockback.hitStopBase + e.speed * BALANCE.knockback.hitStopPerSpeed));
-    if (e.combo >= 2) this.hud.callout(`${e.combo}x COMBO!`, e.combo >= 3 ? 'Juggle master!' : 'Keep them in the air!', 1.2, e.combo >= 3 ? '#ff5fd2' : '#ffd60a');
+    if (e.combo >= 2) this.hud.callout(`${e.combo}x COMBO!`, e.combo >= 3 ? 'Juggle master!' : 'Keep them in the air!', 1.2, e.combo >= 3 ? '#ff5fd2' : '#ffd60a', CALLOUT.info);
   }
 
   /** Third-person camera is on and you're alive (so shots aim along the camera's center ray). */
@@ -2857,11 +2906,13 @@ export class ClientGame {
     this.punch += this.punchV * pdt;
     this.rollV += (-260 * this.rollP - 22 * this.rollV) * pdt;
     this.rollP += this.rollV * pdt;
-    const shake = this.trauma * this.trauma;
+    // The Screen shake setting scales every camera jolt: shake, kick, roll and the FOV punch.
+    const jolt = Math.max(0, Math.min(1, this.settings.screenShake ?? 1));
+    const shake = this.trauma * this.trauma * jolt;
     const alive = p.mode !== MODE_DEAD && this.havePred;
     const third = alive && this.wantThird;
     this.viewModel.root.visible = alive && !third;
-    let fov = this.settings.fov + this.fovKick + (p.launchTimer > 0 ? 6 : 0);
+    let fov = this.settings.fov + this.fovKick * jolt + (p.launchTimer > 0 ? 6 : 0);
     const flying = alive && p.launchTimer > 0 ? (p.hitStop > 0 ? Math.hypot(p.hsVx, p.hsVy, p.hsVz) : Math.hypot(p.vx, p.vy, p.vz)) : 0;
     this.hud.setSpeedLines(Math.max(0, Math.min(1, (flying - 9) / 22)));
     if (alive) {
@@ -2869,7 +2920,7 @@ export class ClientGame {
       const y = this.prevY + (p.py - this.prevY) * alpha + this.errY;
       const z = this.prevZ + (p.pz - this.prevZ) * alpha + this.errZ;
       cam.position.set(x, y + eyeHeight(p), z);
-      let roll = (Math.random() - 0.5) * shake * 0.1 + this.rollP;
+      let roll = (Math.random() - 0.5) * shake * 0.1 + this.rollP * jolt;
       if (third) {
         // Pull back further for the bigger character bodies.
         const scale = inflationScale(p.inflation) * (this.transformOf(this.youId) ? 1.6 : 1);
@@ -2881,7 +2932,7 @@ export class ClientGame {
       }
       this.camPos.copy(cam.position);
       this.camLive = true;
-      cam.rotation.set(this.input.pitch + this.punch + (Math.random() - 0.5) * shake * 0.08, this.input.yaw + (Math.random() - 0.5) * shake * 0.08, roll);
+      cam.rotation.set(this.input.pitch + this.punch * jolt + (Math.random() - 0.5) * shake * 0.08, this.input.yaw + (Math.random() - 0.5) * shake * 0.08, roll);
       this.poseSelf(dt, x, y, z, third && this.camDist > 0.7 * inflationScale(p.inflation));
     } else {
       // Spectate: watch the balloon fly off, then look at whoever popped you.

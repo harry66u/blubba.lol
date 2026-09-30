@@ -2,6 +2,8 @@ import type { VolumeSettings } from './audio/audio';
 
 export type QualitySetting = 'auto' | 'low' | 'medium' | 'high';
 export type PointerDevice = 'trackpad' | 'mouse';
+/** Which comic words float over players: all of them, the ones near you, or only yours. */
+export type PopupWords = 'all' | 'near' | 'mine';
 
 export interface Settings {
   device: PointerDevice;
@@ -23,6 +25,11 @@ export interface Settings {
   /** Show other players' face scans (off: everyone else wears the cartoon face). */
   showFaces: boolean;
   showFps: boolean;
+  /** Camera shake strength, 0..1. */
+  screenShake: number;
+  /** Full-screen color flashes strength, 0..1 (0: none). */
+  screenFlashes: number;
+  popupWords: PopupWords;
   bindings: Record<string, string[]>;
   padBindings: Record<string, number[]>;
 }
@@ -43,6 +50,9 @@ export const DEFAULT_SETTINGS: Settings = {
   showQuickChat: true,
   showFaces: true,
   showFps: false,
+  screenShake: 1,
+  screenFlashes: 1,
+  popupWords: 'near',
   bindings: {},
   padBindings: {},
 };

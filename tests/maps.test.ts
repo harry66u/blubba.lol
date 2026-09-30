@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BALANCE } from '../src/shared/balance';
 import { GameSim } from '../src/shared/game/sim';
 import { collapsePlan } from '../src/shared/game/shrink';
-import { KNOCKOUT_MAPS, MAPS, getMap } from '../src/shared/maps';
+import { KNOCKOUT_MAPS, MAPS, getMap, homeMapFor, mapsForMode } from '../src/shared/maps';
 import type { MapDef } from '../src/shared/maps/types';
 import { MODE_DEAD } from '../src/shared/player';
 import { World } from '../src/shared/world';
@@ -218,4 +218,91 @@ it('every map id is unique and knockout maps are all registered', () => {
   for (const id of KNOCKOUT_MAPS) expect(MAPS[id]?.id).toBe(id);
   expect(new Set(KNOCKOUT_MAPS).size).toBe(KNOCKOUT_MAPS.length);
   expect(KNOCKOUT_MAPS.length).toBeGreaterThanOrEqual(7);
+});
+
+describe('Face-Off (the Team Knockout map)', () => {
+  const map = getMap('faceoff');
+
+  it('is where Team Knockout plays, and stays out of the free-for-all rotation', () => {
+    expect(map.id).toBe('faceoff');
+    expect(homeMapFor('teamKnockout')).toBe('faceoff');
+    expect(mapsForMode('teamKnockout')[0]).toBe('faceoff');
+    expect(mapsForMode('knockout')).not.toContain('faceoff');
+    expect(KNOCKOUT_MAPS).not.toContain('faceoff');
+    expect(map.teamSpawns).toBeTruthy();
+  });
+
+  it('is mirrored left to right: every piece, pad, can and spawn has a twin, with the team paint swapped', () => {
+    const same = (a: number[], b: number[]) => a.every((v, i) => Math.abs(v - b[i]) < 1e-6);
+    for (const s of map.solids) {
+      const twin = map.solids.find(
+        (t) => t.kind === s.kind && t.collapse === s.collapse && same(t.min, [-s.max[0], s.min[1], s.min[2]]) && same(t.max, [-s.min[0], s.max[1], s.max[2]]),
+      );
+      expect(twin, `${s.kind} ${s.min} ${s.max}`).toBeTruthy();
+      const swapped = s.paint === 0 ? 1 : s.paint === 1 ? 0 : s.paint;
+      expect(twin!.paint, `${s.kind} ${s.min}`).toBe(swapped);
+    }
+    for (const p of map.bouncePads) expect(map.bouncePads.some((q) => same([q.x, q.y, q.z, q.pushX ?? 0], [-p.x, p.y, p.z, -(p.pushX ?? 0)]))).toBe(true);
+    for (const [x, y, z] of map.pickups) expect(map.pickups.some((q) => same(q, [-x, y, z]))).toBe(true);
+    const [red, blue] = map.teamSpawns!;
+    expect(red).toHaveLength(blue.length);
+    for (const [x, y, z] of red) expect(blue.some((q) => same(q, [-x, y, z]))).toBe(true);
+  });
+
+  it('each team spawns on its own side, standing on ground that lasts until the final 30 seconds', () => {
+    const world = new World(map);
+    const sim = new GameSim({ map, mode: 'teamKnockout', durationSec: 999 });
+    sim.eventMult = 0;
+    const p = sim.addPlayer('p');
+    const d = new Driver(sim, p);
+    map.teamSpawns!.forEach((list, team) => {
+      for (const [x, y, z] of list) {
+        expect(team === 0 ? x < -25 : x > 25, `${x},${z}`).toBe(true);
+        const under = world.solids.find((s) => Math.abs(s.maxY - y) < 0.01 && x >= s.minX && x <= s.maxX && z >= s.minZ && z <= s.maxZ);
+        expect(under?.collapse, `${x},${z}`).toBeLessThanOrEqual(1);
+        place(sim, p.id, x, y, z);
+        run(sim, [d], 120);
+        expect(p.state.mode, `${x},${z}`).not.toBe(MODE_DEAD);
+        expect(p.state.onGround, `${x},${z}`).toBe(1);
+      }
+    });
+  });
+
+  it('both bases reach each other and the center hill on foot (no pads needed)', () => {
+    const graph = standGraph(map);
+    const red = graph.at(...map.teamSpawns![0][0]);
+    const blue = graph.at(...map.teamSpawns![1][0]);
+    const hill = graph.at(0, 1.1, 0);
+    for (const i of [red, blue, hill]) expect(i).toBeGreaterThanOrEqual(0);
+    const fromRed = graph.reach(red);
+    const toRed = graph.reach(red, true);
+    for (const i of [blue, hill]) {
+      expect(fromRed[i]).toBe(1);
+      expect(toRed[i]).toBe(1);
+    }
+  });
+
+  it('shrinks like the knockout maps, and both teams can still come back in at the very end', () => {
+    const orders = new Set(map.solids.map((s) => s.collapse).filter((c) => c !== undefined));
+    expect([...orders].sort()).toEqual([0, 1, 2, 3]);
+    expect(map.solids.filter((s) => s.collapse === 0)).toHaveLength(1);
+    const plan = collapsePlan('teamKnockout', map, 240, 240);
+    // Half time: only the little islands (the highest order) go.
+    expect(plan.find((st) => st.announce)).toMatchObject({ at: 120, sink: [3] });
+    const sim = new GameSim({ map, mode: 'teamKnockout', durationSec: 240 });
+    sim.eventMult = 0;
+    const a = sim.addPlayer('a');
+    const b = sim.addPlayer('b');
+    a.team = 0;
+    b.team = 1;
+    sim.world.setCollapse(plan);
+    sim.world.setTime(239.9);
+    // Every base spawn is gone by now; each team comes back in on its own half of the middle.
+    for (const [x, y, z] of [...map.teamSpawns![0], ...map.teamSpawns![1]]) expect(sim.world.groundBelow(x, y + 0.1, z, 0.6)).toBeNull();
+    for (const p of [a, b]) {
+      const [x, y, z] = (sim as unknown as { pickSpawn(id: number): [number, number, number, number] }).pickSpawn(p.id);
+      expect(sim.world.groundBelow(x, y + 0.1, z, 0.6), `${x},${z}`).not.toBeNull();
+      expect(p.team === 0 ? x < 0 : x > 0).toBe(true);
+    }
+  });
 });

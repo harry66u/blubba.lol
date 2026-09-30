@@ -4,7 +4,7 @@ import { MODE_IDS, MODE_INFO, type ModeId } from '../../shared/game/modes';
 import type { MatchResult } from '../../shared/game/sim';
 import { type ProgressReport, REPORT_REASONS, REPORT_REASON_TEXT, type ReportReason } from '../../shared/economy';
 import { buildProgressBox } from './accountUi';
-import { KNOCKOUT_MAPS, MAPS, mapForMode } from '../../shared/maps';
+import { KNOCKOUT_MAPS, MAPS, homeMapFor, mapsForMode } from '../../shared/maps';
 import { checkName, randomGuestName } from '../../shared/names';
 import type { EventFrequency, JoinRequest, RoomInfo, RosterEntry } from '../../shared/protocol';
 import { ACTION_LABELS, type Action, DEFAULT_BINDINGS, codeLabel } from '../input/input';
@@ -27,7 +27,7 @@ export interface MenuCallbacks {
   onMapChange: (map: string | null) => void;
   onCreate: (name: string) => void;
   /** The Bots switch for quick play (off: only real players). */
-  onBotsChange: (on: boolean) => void;
+  onBotsChange: (on: boolean, mode: PlayMode) => void;
   onJoinCode: (name: string, code: string) => void;
   onSettings: () => void;
   onHowTo: () => void;
@@ -158,7 +158,7 @@ function mapPicker(initial: string | null, onChange: (map: string | null) => voi
   const tiles = el('div', { class: 'map-tiles', attrs: { role: 'radiogroup', 'aria-label': 'Map' } });
   const wrap = el('div', { class: 'map-picker' }, el('div', { class: 'map-head' }, el('span', { class: 'label', text: 'Map' }), name), tiles);
   const refresh = () => {
-    const forced = mode === 'ranked' ? null : mapForMode(mode);
+    const forced = mode === 'ranked' ? null : homeMapFor(mode);
     const fixed = mode === 'ranked' || !!forced;
     wrap.classList.toggle('fixed', fixed);
     name.textContent = forced ? `${MAPS[forced].name} (its own arena)` : mode === 'ranked' ? 'Picked for you' : label(picked);
@@ -226,7 +226,7 @@ export function buildMainMenu(
   side: HTMLElement | null = null,
   initialMap: string | null = null,
   active: number | null = null,
-  botsOn = false,
+  botsFor: (m: PlayMode) => boolean = () => false,
 ): HTMLElement {
   const err = el('div', { class: 'error-text' });
   const nameInput = nameField(accountName ?? name, cb.onNameChange, err);
@@ -264,7 +264,8 @@ export function buildMainMenu(
       },
     },
   });
-  // Quick play is real players only, unless you switch bots on.
+  // Quick play is real players only, unless you switch bots on (Team Knockout has its own switch).
+  let botsOn = botsFor(mode);
   const botsLabel = el('span', { class: 'bots-state' });
   const botsBtn = el('button', {
     class: 'bots-switch',
@@ -272,7 +273,7 @@ export function buildMainMenu(
     on: {
       click: () => {
         botsOn = !botsOn;
-        cb.onBotsChange(botsOn);
+        cb.onBotsChange(botsOn, mode);
         drawBots();
       },
     },
@@ -295,6 +296,8 @@ export function buildMainMenu(
     maps.setMode(m);
     // Ranked never has bots.
     botsRow.classList.toggle('hidden', m === 'ranked');
+    botsOn = botsFor(m);
+    drawBots();
   };
   for (const m of [...MODE_IDS, 'ranked'] as PlayMode[]) {
     const b = el(
@@ -531,13 +534,13 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
       }
       mode.addEventListener('change', () => cb.onHost({ mode: mode.value as ModeId }));
       const map = el('select', { class: 'field', attrs: { 'aria-label': 'Map' } });
-      const forced = mapForMode(room.settings.mode);
-      for (const id of forced ? [forced] : KNOCKOUT_MAPS) {
+      const choices = mapsForMode(room.settings.mode);
+      for (const id of choices) {
         const o = el('option', { text: MAPS[id].name, attrs: { value: id } });
         if (id === room.settings.mapId) o.selected = true;
         map.append(o);
       }
-      map.disabled = !!forced;
+      map.disabled = choices.length < 2;
       map.addEventListener('change', () => cb.onHost({ mapId: map.value }));
       const time = el('select', { class: 'field', attrs: { 'aria-label': 'Match length' } });
       // Sudden Death always runs its own short length.
@@ -1104,6 +1107,14 @@ export function buildSettings(s: Settings, cb: SettingsCallbacks, tab: 'controls
         ['medium', 'Medium'],
         ['low', 'Low (fastest)'],
       ], () => s.quality, (v) => (s.quality = v as Settings['quality']));
+      const pctOff = (v: number) => (v === 0 ? 'Off' : `${Math.round(v * 100)}%`);
+      slider('Screen shake', 0, 1, 0.05, () => s.screenShake, (v) => (s.screenShake = v), pctOff);
+      slider('Screen flashes', 0, 1, 0.05, () => s.screenFlashes, (v) => (s.screenFlashes = v), pctOff);
+      select('Comic words over players', [
+        ['near', 'Mine + nearby (recommended)'],
+        ['all', 'Everyone'],
+        ['mine', 'Only mine'],
+      ], () => s.popupWords, (v) => (s.popupWords = v as Settings['popupWords']));
       check('Colorblind-friendly team colors', () => s.colorblindTeams, (v) => (s.colorblindTeams = v));
       check("Show other players' quick chat", () => s.showQuickChat, (v) => (s.showQuickChat = v));
       check("Show other players' face scans", () => s.showFaces, (v) => (s.showFaces = v));

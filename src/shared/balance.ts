@@ -685,7 +685,14 @@ export const BALANCE = {
     /** Knockout: first to this many knockouts wins (or the most when time runs out). */
     knockout: { target: 10 },
     /** Team Knockout: first team to this many knockouts wins. */
-    teamKnockout: { target: 20 },
+    teamKnockout: {
+      target: 20,
+      /** The team lobby (before each match): fewest players a side needs, and the countdown once everyone's ready. */
+      minPerSide: 2,
+      countdown: 5,
+      /** Public rooms: once teams are valid and someone is ready, everyone counts as ready after this long (AFK guard). */
+      autoReady: 30,
+    },
     /** One life each, everyone at 100% inflation, last tube man standing wins. */
     suddenDeath: {
       /** Rounds: last one standing wins a round; the first to this many round wins takes the match. */

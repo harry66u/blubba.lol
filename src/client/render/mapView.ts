@@ -38,6 +38,54 @@ function uvScale(geo: THREE.BufferGeometry, su: number, sv: number): THREE.Buffe
 
 type DeckStyle = SurfaceLook | 'field' | 'quilt';
 
+/** Team paint on a top (see SolidDef.paint), in the current team colors. */
+interface TeamTint {
+  paint: 0 | 1 | 'split';
+  colors: number[];
+}
+
+/**
+ * Washes a top in team color so sides read at a glance: one team's color with a solid band along
+ * the edges, or (split) team 0's on the west half and team 1's on the east with a bright halfway
+ * line and a center circle marking the contested middle.
+ */
+function paintTeams(g: CanvasRenderingContext2D, cw: number, ch: number, w: number, d: number, t: TeamTint): void {
+  const sx = cw / w;
+  const sz = ch / d;
+  const css = (c: number, a: number) => {
+    const col = new THREE.Color(c);
+    return `rgba(${Math.round(col.r * 255)},${Math.round(col.g * 255)},${Math.round(col.b * 255)},${a})`;
+  };
+  if (t.paint === 'split') {
+    g.fillStyle = css(t.colors[0], 0.3);
+    g.fillRect(0, 0, cw / 2, ch);
+    g.fillStyle = css(t.colors[1], 0.3);
+    g.fillRect(cw / 2, 0, cw / 2, ch);
+    // A darker band along each end, so the far side's color still shows at a shallow angle.
+    g.fillStyle = css(t.colors[0], 0.55);
+    g.fillRect(0, 0, 1.4 * sx, ch);
+    g.fillStyle = css(t.colors[1], 0.55);
+    g.fillRect(cw - 1.4 * sx, 0, 1.4 * sx, ch);
+    if (w > 12) {
+      g.strokeStyle = 'rgba(255,255,255,0.95)';
+      g.lineWidth = 0.35 * sx;
+      g.beginPath();
+      g.moveTo(cw / 2, 0);
+      g.lineTo(cw / 2, ch);
+      g.stroke();
+      g.beginPath();
+      g.arc(cw / 2, ch / 2, Math.min(6, d * 0.3) * sx, 0, Math.PI * 2);
+      g.stroke();
+    }
+    return;
+  }
+  g.fillStyle = css(t.colors[t.paint], 0.34);
+  g.fillRect(0, 0, cw, ch);
+  g.strokeStyle = css(t.colors[t.paint], 0.8);
+  g.lineWidth = 0.6 * sx;
+  g.strokeRect(0.9 * sx, 0.9 * sz, cw - 1.8 * sx, ch - 1.8 * sz);
+}
+
 /** Edge stripes per surface (easy-to-read drops), or none. Everything else gets hazard stripes. */
 const EDGES: Partial<Record<DeckStyle, [string, string] | null>> = {
   quilt: null,
@@ -66,7 +114,7 @@ function blob(g: CanvasRenderingContext2D, x: number, y: number, r: number, seed
  * Canvas texture for a deck top: painted parking lines (or a pitch, quilting, planks, frosting,
  * cookie, concrete, moon dust...) and, with `edge`, stripes around the edge.
  */
-function deckTexture(w: number, d: number, color: number, style: DeckStyle, edge = true): THREE.CanvasTexture {
+function deckTexture(w: number, d: number, color: number, style: DeckStyle, edge = true, tint?: TeamTint): THREE.CanvasTexture {
   const ppm = 24; // pixels per meter
   const cw = Math.min(2048, Math.round(w * ppm));
   const ch = Math.min(2048, Math.round(d * ppm));
@@ -341,6 +389,7 @@ function deckTexture(w: number, d: number, color: number, style: DeckStyle, edge
       g.fill();
     }
   }
+  if (tint) paintTeams(g, cw, ch, w, d, tint);
   // Bright stripes around the edge so drops are easy to read.
   const colors = style in EDGES ? EDGES[style] : ['#ffd23f', '#2b2d42'];
   if (!edge || !colors) {
@@ -442,7 +491,7 @@ interface WarnView {
 }
 
 /** Props that animate themselves or get updated every frame; every other prop is merged by material. */
-const LIVE_DECOR = new Set<DecorDef['type']>(['tubeMan', 'balloons', 'flag', 'ferrisWheel', 'net', 'space']);
+const LIVE_DECOR = new Set<DecorDef['type']>(['tubeMan', 'balloons', 'flag', 'teamFlag', 'ferrisWheel', 'net', 'space']);
 
 /** Builds and animates the visible map from a MapDef. */
 export class MapView {
@@ -463,6 +512,10 @@ export class MapView {
   private readonly pumpPads: { ring: THREE.Mesh; core: THREE.Mesh; team: 0 | 1; plunger: THREE.Object3D }[] = [];
   private readonly giants: { man: TubeMan; pose: TubeManPose; team: 0 | 1; fill: number; shown: number }[] = [];
   private teamColors: number[] = [0xff3b5c, 0x2ec5ff];
+  /** Tops painted in team colors, repainted when the colors change (colorblind setting). */
+  private readonly teamTops: { mat: THREE.MeshStandardMaterial; w: number; d: number; color: number; look: DeckStyle; edge: boolean; paint: 0 | 1 | 'split' }[] = [];
+  /** Props in a team's color (flags, tube men at the bases). */
+  private readonly teamProps: { team: number; recolor: (c: number) => void }[] = [];
   private fanBlades: THREE.Object3D | null = null;
   private readonly sky: SkyLife;
   /** Billboards, signs and deck banners around the map (placed from its bounds, so any map). */
@@ -570,8 +623,9 @@ export class MapView {
       } else if (isDeck) {
         // Top slab with painted texture, then a chunky floating-rock underside.
         const look = def.look ?? (def.kind === 'lot' ? style : 'plain');
-        const topMat = new THREE.MeshStandardMaterial({ map: deckTexture(w, d, color, look), roughness: 0.85 });
+        const topMat = new THREE.MeshStandardMaterial({ map: this.topTexture(w, d, color, look, true, def.paint), roughness: 0.85 });
         this.deckTops.push(topMat);
+        if (def.paint !== undefined) this.teamTops.push({ mat: topMat, w, d, color, look, edge: true, paint: def.paint });
         const slab = new THREE.Mesh(new RoundedBoxGeometry(w, 0.6, d, 2, 0.12), matFor(def.kind, color));
         slab.position.set(cx, def.max[1] - 0.3, cz);
         slab.receiveShadow = true;
@@ -649,7 +703,9 @@ export class MapView {
         group.add(mesh);
         if (def.look) {
           // A painted top (wafer, chocolate, candy stripes, deck plates...).
-          const top = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.1, d - 0.1), new THREE.MeshStandardMaterial({ map: deckTexture(w, d, color, def.look, false), roughness: 0.6 }));
+          const topMat = new THREE.MeshStandardMaterial({ map: this.topTexture(w, d, color, def.look, false, def.paint), roughness: 0.6 });
+          if (def.paint !== undefined) this.teamTops.push({ mat: topMat, w, d, color, look: def.look, edge: false, paint: def.paint });
+          const top = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.1, d - 0.1), topMat);
           top.rotation.x = -Math.PI / 2;
           top.position.set(cx, def.max[1] + 0.004, cz);
           top.receiveShadow = true;
@@ -877,7 +933,9 @@ export class MapView {
       case 'car':
         return makeCar(d, k);
       case 'tubeMan': {
-        const man = new TubeMan(d.color ?? 0xff3b30, { seed: d.x * 3.1 + d.z });
+        const team = typeof d.data?.team === 'number' ? d.data.team : -1;
+        const man = new TubeMan(team >= 0 ? (this.teamColors[team] ?? 0xff3b30) : (d.color ?? 0xff3b30), { seed: d.x * 3.1 + d.z });
+        if (team >= 0) this.teamProps.push({ team, recolor: (c) => man.setColor(c) });
         man.group.position.set(d.x, d.y, d.z);
         man.group.scale.setScalar(d.scale ?? 1.6);
         const pose = defaultPose();
@@ -935,6 +993,31 @@ export class MapView {
           g.add(t);
         }
         g.position.set(d.x, d.y, d.z);
+        return g;
+      }
+      case 'teamFlag': {
+        // A tall pole with a big flag in a team's color, marking whose side this is.
+        const team = Number(d.data?.team ?? 0);
+        const g = new THREE.Group();
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 7, 8), new THREE.MeshStandardMaterial({ color: 0xe8ecf5, metalness: 0.4, roughness: 0.4 }));
+        pole.position.y = 3.5;
+        const ball = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 8), new THREE.MeshStandardMaterial({ color: 0xffd60a, metalness: 0.5, roughness: 0.3 }));
+        ball.position.y = 7.1;
+        const cloth = new THREE.MeshStandardMaterial({ color: this.teamColors[team] ?? 0xffffff, side: THREE.DoubleSide, roughness: 0.6, emissive: this.teamColors[team] ?? 0xffffff, emissiveIntensity: 0.15 });
+        const flag = new THREE.Mesh(new THREE.PlaneGeometry(3, 1.8, 10, 1), cloth);
+        flag.position.set(1.55, 6, 0);
+        this.teamProps.push({
+          team,
+          recolor: (c) => {
+            cloth.color.setHex(c);
+            cloth.emissive.setHex(c);
+          },
+        });
+        g.userData.flag = flag;
+        g.add(pole, ball, flag);
+        g.position.set(d.x, d.y, d.z);
+        g.rotation.y = d.rotY ?? 0;
+        this.balloons.push(g);
         return g;
       }
       case 'flag': {
@@ -1082,7 +1165,18 @@ export class MapView {
     this.applyTeamColors();
   }
 
+  private topTexture(w: number, d: number, color: number, look: DeckStyle, edge: boolean, paint?: 0 | 1 | 'split'): THREE.CanvasTexture {
+    return deckTexture(w, d, color, look, edge, paint === undefined ? undefined : { paint, colors: this.teamColors });
+  }
+
   private applyTeamColors(): void {
+    for (const t of this.teamTops) {
+      const old = t.mat.map;
+      t.mat.map = this.topTexture(t.w, t.d, t.color, t.look, t.edge, t.paint);
+      t.mat.needsUpdate = true;
+      old?.dispose();
+    }
+    for (const p of this.teamProps) p.recolor(this.teamColors[p.team] ?? 0xffffff);
     for (const p of this.pumpPads) {
       const c = this.teamColors[p.team];
       (p.ring.material as THREE.MeshStandardMaterial).color.setHex(c);

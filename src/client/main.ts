@@ -1,7 +1,7 @@
 import { BALANCE } from '../shared/balance';
 import { QUICK_CHAT, unlockLevelOf, unlockedAt } from '../shared/economy';
 import { sanitizeLoadout } from '../shared/loadout';
-import { KNOCKOUT_MAPS, mapForMode } from '../shared/maps';
+import { KNOCKOUT_MAPS, MAPS, homeMapFor } from '../shared/maps';
 import { randomGuestName } from '../shared/names';
 import type { ModeId } from '../shared/game/modes';
 import type { JoinRequest, ServerMessage } from '../shared/protocol';
@@ -22,6 +22,7 @@ import { buildReconnecting } from './ui/reconnect';
 import { type AccountTab, buildAccountChip, buildAccountPanel, buildDailyCard, buildProfile, buildQueue, updateQueue } from './ui/accountUi';
 import { buildFaceScan } from './ui/faceScan';
 import { buildFriends } from './ui/friends';
+import { type TeamLobbyData, buildTeamLobby } from './ui/teamLobby';
 import { buildLocker } from './ui/locker';
 import { Hud } from './ui/hud';
 import {
@@ -104,7 +105,15 @@ uiRoot.append(hud.root, ...(touch ? [touch.root] : []), scoreLayer, menuLayer, o
 
 type Screen = 'menu' | 'room-join' | 'connecting' | 'queue' | 'playing' | 'reconnecting';
 let screen: Screen = 'menu';
-let overlay: 'none' | 'pause' | 'settings' | 'howto' | 'click' | 'results' | 'loadout' | 'replay' | 'locker' | 'profile' | 'account' | 'face' | 'friends' = 'none';
+type Overlay = 'none' | 'pause' | 'settings' | 'howto' | 'click' | 'results' | 'loadout' | 'replay' | 'locker' | 'profile' | 'account' | 'face' | 'friends' | 'teams';
+let overlay = 'none' as Overlay;
+/** The Team Knockout lobby screen while it's showing (updated in place). */
+let teamsView: { root: HTMLElement; update: () => void } | null = null;
+
+/** Where menus go back to in a match: the team lobby between Team Knockout matches, else the pause menu. */
+function matchHome(): 'teams' | 'pause' {
+  return game.inTeamLobby ? 'teams' : 'pause';
+}
 let accountTab: AccountTab = 'signup';
 let lockerDispose: (() => void) | null = null;
 let pendingJoin: JoinRequest | null = null;
@@ -136,7 +145,7 @@ function loadMode(): PlayMode {
 let lastMode = loadMode();
 /** The menu's background shows the map you'd play: the mode's own arena, or the one you picked. */
 function showPickedMap(): void {
-  game.showMenuMap(mapForMode(lastMode) ?? lastMap);
+  game.showMenuMap(homeMapFor(lastMode) ?? lastMap);
 }
 
 function rememberMode(m: PlayMode): void {
@@ -175,7 +184,7 @@ function rememberMap(m: string | null): void {
 /** Quick play for a mode on the picked map. */
 /** Quick play: the picked mode and map, with bots only if you switched them on. */
 function quickJoin(mode: ModeId): Extract<JoinRequest, { kind: 'quick' }> {
-  return { kind: 'quick', mode, ...(lastMap ? { map: lastMap } : {}), open: !botsOn };
+  return { kind: 'quick', mode, ...(lastMap ? { map: lastMap } : {}), open: !botsFor(mode) };
 }
 
 const BOTS_KEY = 'bubba.bots.v1';
@@ -188,10 +197,25 @@ let botsOn = (() => {
   }
 })();
 
-function rememberBots(on: boolean): void {
-  botsOn = on;
+/** Team Knockout has its own Bots switch, off until you turn it on (only real teams by default). */
+const BOTS_TEAM_KEY = 'bubba.bots.team.v1';
+let botsTeam = (() => {
   try {
-    window.localStorage.setItem(BOTS_KEY, on ? '1' : '0');
+    return window.localStorage.getItem(BOTS_TEAM_KEY) === '1';
+  } catch {
+    return false;
+  }
+})();
+
+function botsFor(mode: PlayMode): boolean {
+  return mode === 'teamKnockout' ? botsTeam : botsOn;
+}
+
+function rememberBots(on: boolean, mode: PlayMode): void {
+  if (mode === 'teamKnockout') botsTeam = on;
+  else botsOn = on;
+  try {
+    window.localStorage.setItem(mode === 'teamKnockout' ? BOTS_TEAM_KEY : BOTS_KEY, on ? '1' : '0');
   } catch {
     // Not remembered; fine.
   }
@@ -241,7 +265,7 @@ function renderMenu(notice?: MenuNotice | string): void {
       onSettings: () => setOverlay('settings'),
       onHowTo: () => setOverlay('howto'),
       onNameChange: rememberName,
-    }, notice, lastMode, account.account?.name ?? null, buildDailyCard(account), lastMap, account.active, botsOn),
+    }, notice, lastMode, account.account?.name ?? null, buildDailyCard(account), lastMap, account.active, botsFor),
     buildAccountChip(account, () => openAccount('signup'), () => setOverlay('profile')),
   );
 }
@@ -412,7 +436,8 @@ function setOverlay(next: typeof overlay): void {
   clear(overlayLayer);
   lockerDispose?.();
   lockerDispose = null;
-  const back = () => setOverlay(screen === 'playing' ? 'pause' : 'none');
+  const back = () => setOverlay(screen === 'playing' ? matchHome() : 'none');
+  teamsView = null;
   switch (next) {
     case 'locker': {
       const locker = buildLocker({ account, audio, weapon: game.loadout.weapon, onClose: back, onSignup: () => openAccount('signup') });
@@ -481,7 +506,7 @@ function setOverlay(next: typeof overlay): void {
       overlayLayer.append(
         buildSettings(settings, {
           onChange: applySettings,
-          onClose: () => setOverlay(screen === 'playing' ? 'pause' : 'none'),
+          onClose: () => setOverlay(screen === 'playing' ? matchHome() : 'none'),
           onRebind: (action, done) => {
             input.captureNext = (code) => {
               // A key can only do one thing: remove it from any other action first.
@@ -515,7 +540,7 @@ function setOverlay(next: typeof overlay): void {
           saveLoadout(l);
           game.setLoadout(l, true);
         },
-        onClose: () => setOverlay(screen === 'playing' ? 'pause' : 'none'),
+        onClose: () => setOverlay(screen === 'playing' ? matchHome() : 'none'),
         locked: account.locked,
         note: screen === 'playing' ? 'Changes apply the next time you respawn.' : '',
         looks: {
@@ -533,7 +558,7 @@ function setOverlay(next: typeof overlay): void {
     case 'howto':
       overlayLayer.append(
         buildHowTo(
-          () => setOverlay(screen === 'playing' ? 'pause' : 'none'),
+          () => setOverlay(screen === 'playing' ? matchHome() : 'none'),
           input.getBindings(),
           touchMode ? undefined : Object.fromEntries(Object.keys(input.getPadBindings()).map((k) => [k, input.padLabel(k as keyof ReturnType<typeof input.getPadBindings>)])),
           touchMode,
@@ -543,6 +568,29 @@ function setOverlay(next: typeof overlay): void {
     case 'click':
       overlayLayer.append(buildClickToPlay(game.alive ? 'READY?' : 'WAITING...', resume));
       break;
+    case 'teams': {
+      const view = buildTeamLobby(teamLobbyData, {
+        onJoin: (t) => {
+          audio.uiClick();
+          game.joinTeam(t);
+        },
+        onReady: (r) => {
+          audio.unlock();
+          audio.uiClick();
+          game.setReady(r);
+          teamsView?.update();
+        },
+        onShuffle: () => net.send({ type: 'host', action: 'shuffle' }),
+        onLock: (locked) => net.send({ type: 'host', action: 'lock', locked }),
+        onMenu: () => setOverlay('pause'),
+        onCopyLink: copyInvite,
+        onLeave: leaveMatch,
+        onCountdownTick: () => audio.beep(null),
+      });
+      teamsView = view;
+      overlayLayer.append(view.root);
+      break;
+    }
     case 'replay': {
       const rp = game.match.result?.replay;
       if (rp) {
@@ -602,10 +650,17 @@ function applySettings(s: Settings): void {
   game.refreshTeamColors();
   game.showChat = s.showQuickChat;
   game.showFaces = s.showFaces;
+  game.hud.popupWords = s.popupWords;
+  game.hud.flashScale = s.screenFlashes;
 }
 
 function resume(): void {
   audio.unlock();
+  // Between Team Knockout matches there's nothing to play yet: back to the team lobby.
+  if (game.inTeamLobby) {
+    setOverlay('teams');
+    return;
+  }
   if (padPlay || touchMode || input.freeAim) {
     setOverlay('none');
     return;
@@ -652,12 +707,13 @@ window.addEventListener('keydown', (e) => {
   if ((e.target as HTMLElement | null)?.tagName === 'INPUT') return;
   if (overlay === 'none' && (touchMode || input.freeAim)) setOverlay('pause');
   else if (overlay === 'pause' && e.code === 'Escape') resume();
+  else if (overlay === 'teams' && e.code === 'Escape') setOverlay('pause');
 });
 
 // Controller: Menu toggles pause, any button starts playing without a mouse, B closes menus.
 input.onMenuButton = () => {
   if (screen !== 'playing') return;
-  if (overlay === 'none') {
+  if (overlay === 'none' || overlay === 'teams') {
     padPlay = true;
     setOverlay('pause');
   } else if (overlay === 'pause' || overlay === 'click') {
@@ -678,7 +734,15 @@ input.onPadButton = (b) => {
     setOverlay('none');
     return;
   }
-  if (b === PAD.B && (overlay === 'settings' || overlay === 'howto' || overlay === 'loadout')) setOverlay(screen === 'playing' ? 'pause' : 'none');
+  if (b === PAD.B && (overlay === 'settings' || overlay === 'howto' || overlay === 'loadout')) setOverlay(screen === 'playing' ? matchHome() : 'none');
+  // Team lobby: A readies up, the bumpers pick a team.
+  if (screen === 'playing' && overlay === 'teams') {
+    padPlay = true;
+    if (b === PAD.A) game.setReady(!game.ready);
+    else if (b === PAD.LB) game.joinTeam(0);
+    else if (b === PAD.RB) game.joinTeam(1);
+    teamsView?.update();
+  }
 };
 
 function leaveMatch(): void {
@@ -701,10 +765,10 @@ function copyInvite(): void {
   else prompt('Copy this link:', link);
 }
 
-/** Private rooms go back to the lobby after the results (challenges and ranked don't). */
+/** Private rooms (and every Team Knockout room) go back to the lobby after the results (challenges and ranked don't). */
 function backToLobby(): boolean {
   const r = game.room;
-  return !!r?.isPrivate && !r.challenge && !r.ranked;
+  return !!r && (r.isPrivate || r.settings.mode === 'teamKnockout') && !r.challenge && !r.ranked;
 }
 
 /** PLAY AGAIN (and who's ready) and MENU for the results screen. */
@@ -740,6 +804,33 @@ function resultsActions(): ResultsActions {
 game.onAgainChange = () => {
   if (overlay === 'results') setOverlay('results');
 };
+
+/** Menus someone might have open over the team lobby (they go back to it when closed). */
+const MENU_OVERLAYS = new Set<Overlay>(['pause', 'settings', 'howto', 'loadout', 'locker', 'profile', 'account', 'face', 'friends']);
+
+game.onTeamLobby = () => teamsView?.update();
+
+/** What the team lobby shows right now. */
+function teamLobbyData(): TeamLobbyData {
+  const room = game.room;
+  const L = game.teamLobby;
+  const now = game.clock.tickAt(performance.now());
+  const tv = game.teamView();
+  return {
+    roster: [...game.roster.values()],
+    youId: game.youId,
+    hostId: room?.hostId ?? -1,
+    isHost: !!room?.isPrivate && room.hostId === game.youId,
+    isPrivate: !!room?.isPrivate,
+    code: room?.code ?? '',
+    mapName: MAPS[room?.mapId ?? '']?.name ?? '',
+    names: tv?.names ?? ['RED', 'BLUE'],
+    colors: tv?.colors ?? [0xff3b5c, 0x2ec5ff],
+    lobby: L,
+    startsIn: L && L.startsAt > 0 ? Math.max(0, (L.startsAt - now) / BALANCE.tickRate) : null,
+    autoReadyIn: L && L.autoReadyAt > 0 ? Math.max(0, (L.autoReadyAt - now) / BALANCE.tickRate) : null,
+  };
+}
 
 /** Ticks "Next match in..." without redrawing the results (so their entrance plays once). */
 function tickResultsCountdown(): void {
@@ -911,6 +1002,7 @@ net.handlers = {
     }
     game.onMessage(msg);
     if (msg.type === 'roster' && scoreboardOpen) renderScoreboard();
+    if ((msg.type === 'roster' || msg.type === 'room') && overlay === 'teams') teamsView?.update();
   },
   onClose: (reason, code) => {
     // Dropped mid-match: get back in automatically (ranked matches can't be rejoined).
@@ -940,6 +1032,19 @@ net.handlers = {
 game.onMatchChange = (m) => {
   if (m.phase === 'playing') game.lastProgress = null;
   if (m.phase !== 'results') game.againIds.clear();
+  // Team Knockout: the team lobby covers the map until the match starts.
+  if (game.inTeamLobby) {
+    game.stopReplay();
+    input.exitLock();
+    if (overlay !== 'teams' && !MENU_OVERLAYS.has(overlay)) setOverlay('teams');
+    return;
+  }
+  if (overlay === 'teams') {
+    // The match is on (or the host switched to another mode): off the team lobby.
+    setOverlay(input.locked || touchMode || padPlay ? 'none' : 'click');
+    if (m.phase === 'playing') hud.callout('GO!', 'Blast the other team off the map!', 1.6);
+    return;
+  }
   if (m.phase === 'results') {
     if (m.result?.replay && overlay !== 'replay') {
       game.startReplay(m.result.replay, () => {
@@ -1019,6 +1124,8 @@ function loop(now: number): void {
     fpsTime = 0;
   }
   if (overlay === 'results' && fpsFrames === 0) tickResultsCountdown();
+  // The team lobby's countdown.
+  if (overlay === 'teams' && game.teamLobby?.startsAt) teamsView?.update();
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);

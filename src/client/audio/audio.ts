@@ -191,7 +191,13 @@ export class Audio {
       const dz = pos[2] - this.lz;
       const d = Math.hypot(dx, dy, dz);
       vol *= 1 / (1 + d / 14);
-      if (vol < 0.02) return null;
+      // Crowd budget: the more other-player sounds started in the last quarter second, the louder
+      // a new one has to be to play, so a big fight keeps the sounds near you and drops the far
+      // clatter. Your own sounds (no position) always play.
+      const now = this.ctx.currentTime;
+      while (this.recent.length && now - this.recent[0] > 0.25) this.recent.shift();
+      if (vol < 0.03 + Math.max(0, this.recent.length - 3) * 0.05) return null;
+      this.recent.push(now);
       const pan = this.ctx.createStereoPanner();
       pan.pan.value = d > 0.5 ? Math.max(-0.85, Math.min(0.85, (dx * this.rightX + dz * this.rightZ) / d)) : 0;
       g.connect(pan);
@@ -201,6 +207,9 @@ export class Audio {
     node.connect(this.buses[bus]);
     return g;
   }
+
+  /** Start times of recent positional sounds (see out). */
+  private readonly recent: number[] = [];
 
   private throttle(key: string, ms: number): boolean {
     const now = performance.now();

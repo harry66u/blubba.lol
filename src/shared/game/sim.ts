@@ -321,6 +321,8 @@ export class GameSim {
    * until the host calls startMatch, and go back there after every match.
    */
   autoStart = true;
+  /** Team Knockout's lobby: players pick their sides between matches (see balanceTeams). */
+  teamPick = false;
   /** Ranked: one match with the same two players, no joining, leaving forfeits. */
   fixedLineup = false;
   matchStartedAt = 0;
@@ -607,18 +609,31 @@ export class GameSim {
     };
   }
 
-  /** Moves bots (then the newest humans) between teams until they're even. */
+  /**
+   * Moves bots (then the newest humans) between teams until they're even. In a team lobby
+   * (`teamPick`, between matches) people pick their own side, so only bots are moved.
+   */
   balanceTeams(): void {
     if (!this.teams) return;
+    const botsOnly = this.teamPick && this.phase === 'waiting';
     for (let guard = 0; guard < 10; guard++) {
       const t0 = [...this.players.values()].filter((p) => p.team === 0);
       const t1 = [...this.players.values()].filter((p) => p.team === 1);
       if (Math.abs(t0.length - t1.length) <= 1) return;
       const big = t0.length > t1.length ? t0 : t1;
-      const mover = big.find((p) => p.isBot) ?? big.sort((a, b) => b.joinedAt - a.joinedAt)[0];
+      const mover = big.find((p) => p.isBot) ?? (botsOnly ? undefined : big.sort((a, b) => b.joinedAt - a.joinedAt)[0]);
+      if (!mover) return;
       mover.team = 1 - mover.team;
       if (mover.state.mode !== MODE_DEAD) this.respawn(mover);
     }
+  }
+
+  /** Puts a player on a team (the team lobby); they come back in at that team's base. */
+  setTeam(id: number, team: 0 | 1): void {
+    const p = this.players.get(id);
+    if (!p || !this.teams || p.team === team) return;
+    p.team = team;
+    if (p.state.mode !== MODE_DEAD) this.respawn(p);
   }
 
   /** True if `a` may hit/push `b` (no friendly fire in team modes). */
@@ -2989,7 +3004,17 @@ export class GameSim {
     let best = spawns[0];
     let bestScore = -Infinity;
     // Never spawn on a piece that has fallen away (or crumbled off the deck).
-    const onMap = spawns.filter(([x, y, z]) => this.world.groundBelow(x, y + 0.1, z, 0.6) !== null);
+    const standing = (list: [number, number, number, number][]) => list.filter(([x, y, z]) => this.world.groundBelow(x, y + 0.1, z, 0.6) !== null);
+    let onMap = standing(spawns);
+    if (!onMap.length && teamSpawns?.length) {
+      // A team's home has sunk (the end of a match on a map with separate bases): come back in at
+      // whichever of the map's other spawns are closest to home.
+      const hx = teamSpawns.reduce((a, s) => a + s[0], 0) / teamSpawns.length;
+      const hz = teamSpawns.reduce((a, s) => a + s[2], 0) / teamSpawns.length;
+      onMap = standing(this.map.spawns)
+        .sort((a, b) => Math.hypot(a[0] - hx, a[2] - hz) - Math.hypot(b[0] - hx, b[2] - hz))
+        .slice(0, 2);
+    }
     for (const sp of onMap.length ? onMap : spawns) {
       let minD = 1e9;
       for (const o of this.players.values()) {

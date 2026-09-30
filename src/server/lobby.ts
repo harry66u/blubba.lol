@@ -2,7 +2,7 @@ import type { WebSocket } from 'ws';
 import { BALANCE } from '../shared/balance';
 import { RANKED } from '../shared/economy';
 import { MODE_IDS, type ModeId } from '../shared/game/modes';
-import { KNOCKOUT_MAPS, mapForMode } from '../shared/maps';
+import { KNOCKOUT_MAPS, homeMapFor } from '../shared/maps';
 import type { Loadout } from '../shared/loadout';
 import { checkName, randomGuestName } from '../shared/names';
 import { type ClientMessage, type JoinRequest, PROTOCOL_VERSION, type ServerMessage } from '../shared/protocol';
@@ -26,9 +26,9 @@ export function normalizeCode(raw: string): string {
     .slice(0, CODE_LENGTH);
 }
 
-/** A quick-play map pick that fits the mode (Ball and Pump have their own arenas), or null for any map. */
+/** A quick-play map pick that fits the mode (Ball, Pump and Team Knockout have their own maps), or null for any map. */
 export function wantedMap(mode: ModeId, map: unknown): string | null {
-  return typeof map === 'string' && mapForMode(mode) === null && KNOCKOUT_MAPS.includes(map) ? map : null;
+  return typeof map === 'string' && homeMapFor(mode) === null && KNOCKOUT_MAPS.includes(map) ? map : null;
 }
 
 /** Someone waiting for a ranked opponent. */
@@ -140,7 +140,7 @@ export class Lobby {
       if (!best || r.humanCount > best.humanCount) best = r;
     }
     if (best) return best;
-    const mapId = want ?? KNOCKOUT_MAPS[Math.floor(Math.random() * KNOCKOUT_MAPS.length)];
+    const mapId = want ?? homeMapFor(mode) ?? KNOCKOUT_MAPS[Math.floor(Math.random() * KNOCKOUT_MAPS.length)];
     const room = new Room(this.newCode(), false, { mode, mapId, bots: !open }, this.store);
     this.rooms.set(room.code, room);
     return room;

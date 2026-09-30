@@ -2,8 +2,9 @@ import type { WebSocket } from 'ws';
 import { BALANCE } from '../shared/balance';
 import { GameSim } from '../shared/game/sim';
 import { emptyInput } from '../shared/input';
-import { KNOCKOUT_MAPS, MAPS, getMap, mapForMode } from '../shared/maps';
+import { KNOCKOUT_MAPS, MAPS, getMap, homeMapFor, mapsForMode } from '../shared/maps';
 import { MODE_IDS, type ModeId } from '../shared/game/modes';
+import { type LobbySeat, MAX_PER_SIDE, checkTeamLobby, shuffleTeams } from '../shared/game/teamLobby';
 import { ULT_IDS, ultIndex } from '../shared/game/ults';
 import { type Loadout, sanitizeLoadout, weaponIndex } from '../shared/loadout';
 import { MODE_DEAD } from '../shared/player';
@@ -19,6 +20,7 @@ import {
   type RoomSettings,
   type RosterEntry,
   type ServerMessage,
+  type TeamLobbyState,
   EVENT_MULT,
   decodeInputs,
   encodeSnapshot,
@@ -94,6 +96,12 @@ export class Room {
   private readonly nameReports = new Map<number, Set<string>>();
   /** Players who pressed PLAY AGAIN on the results (cleared when the next match starts). */
   private readonly againVotes = new Set<number>();
+  /** Team Knockout's lobby before each match (see stepTeamLobby): who's ready, the host's lock, the countdown. */
+  private readonly lobbyReady = new Set<number>();
+  private teamsLocked = false;
+  private lobbyStartsAt = 0;
+  private lobbyAutoReadyAt = 0;
+  private lobbySent = '';
 
   constructor(
     readonly code: string,
@@ -104,6 +112,10 @@ export class Room {
     const clean = sanitizeSettings(settings);
     // 1v1s are shorter unless the host picked a length.
     if (clean.mode === 'duel' && clean.durationSec === undefined) clean.durationSec = BALANCE.modes.duel.durationSec;
+    // A mode with a map of its own starts there; Team Knockout has no bots unless asked for.
+    if (clean.mode && clean.mapId === undefined) clean.mapId = homeMapFor(clean.mode) ?? undefined;
+    if (clean.mode === 'teamKnockout' && clean.bots === undefined) clean.bots = false;
+    if (clean.mapId === undefined) delete clean.mapId;
     this.settings = fitMap({ ...DEFAULT_SETTINGS, ...clean });
     this.rotation = Math.max(0, KNOCKOUT_MAPS.indexOf(this.settings.mapId));
     this.sim = this.makeSim();
@@ -111,6 +123,11 @@ export class Room {
 
   get mode(): ModeId {
     return this.settings.mode;
+  }
+
+  /** Team Knockout picks teams and readies up in a lobby before every match. */
+  get usesTeamLobby(): boolean {
+    return this.settings.mode === 'teamKnockout' && !this.ranked && !this.challenge;
   }
 
   /** Most humans this room takes (a 1v1 room holds two). */
@@ -126,9 +143,12 @@ export class Room {
     });
     sim.eventMult = EVENT_MULT[this.settings.events];
     // Private rooms wait in the lobby for the host's START (challenges and ranked start by themselves).
-    sim.autoStart = !this.isPrivate || this.challenge || this.ranked;
+    // Team Knockout starts from its team lobby once everyone's ready, public or private.
+    sim.autoStart = !this.usesTeamLobby && (!this.isPrivate || this.challenge || this.ranked);
+    sim.teamPick = this.usesTeamLobby;
     sim.onPhaseChange = () => {
       if (sim.phase !== 'results') this.againVotes.clear();
+      if (sim.phase === 'waiting') this.resetTeamLobby();
       this.broadcastJson(this.matchMessage());
       this.rosterDirty = true;
       if (sim.phase === 'results' && sim === this.sim) this.awardMatch();
@@ -191,6 +211,7 @@ export class Room {
     this.send(conn, this.matchMessage());
     this.send(conn, { type: 'entities', ...this.sim.entitySnapshot() });
     this.rosterDirty = true;
+    this.lobbySent = '';
     this.balanceBots();
     // A real opponent arrived for a 1v1 that was warming up against a bot: start fresh.
     if (this.mode === 'duel' && this.humanCount === 2 && this.sim.autoStart) this.sim.startMatch();
@@ -214,6 +235,7 @@ export class Room {
     if (!conn) return;
     this.conns.delete(playerId);
     this.againVotes.delete(playerId);
+    this.lobbyReady.delete(playerId);
     // Ranked: leaving mid-match forfeits (the sim ends the match and the other player wins).
     this.sim.removePlayer(playerId);
     if (this.hostId === playerId) {
@@ -251,6 +273,13 @@ export class Room {
 
   private startNextNow(): void {
     const s = this.sim;
+    if (this.usesTeamLobby) {
+      // Team Knockout goes back to its team lobby, where pressing PLAY AGAIN counts as ready.
+      const again = [...this.againVotes];
+      s.toLobby();
+      for (const id of again) if (this.conns.has(id)) this.lobbyReady.add(id);
+      return;
+    }
     if (s.autoStart) {
       // Cut the results short: the next tick moves on just as if the countdown ran out (new map included).
       s.phaseEndsAt = Math.min(s.phaseEndsAt, s.time);
@@ -381,6 +410,9 @@ export class Room {
       case 'again':
         this.playAgain(conn.playerId);
         break;
+      case 'team':
+        this.teamAction(conn, msg);
+        break;
       case 'report':
         this.report(conn, msg.target, msg.reason);
         break;
@@ -388,8 +420,16 @@ export class Room {
         if (conn.playerId !== this.hostId || !this.isPrivate || this.ranked) return;
         if (msg.action === 'kick' && typeof msg.id === 'number') this.kick(msg.id);
         else if (msg.action === 'settings' && msg.settings && typeof msg.settings === 'object') this.applySettings(msg.settings);
-        else if (msg.action === 'restart') this.sim.startMatch();
-        else if (msg.action === 'start' && this.sim.canStart()) this.sim.startMatch();
+        else if (msg.action === 'restart') {
+          // Team Knockout restarts through its lobby (teams and ready checks first).
+          if (this.usesTeamLobby) this.sim.toLobby();
+          else this.sim.startMatch();
+        } else if (msg.action === 'start' && this.sim.canStart() && !this.usesTeamLobby) this.sim.startMatch();
+        else if (msg.action === 'shuffle' && this.usesTeamLobby && this.sim.phase === 'waiting') {
+          for (const [id, team] of shuffleTeams(this.seats())) this.sim.setTeam(id, team);
+          this.lobbyStartsAt = 0;
+          this.rosterDirty = true;
+        } else if (msg.action === 'lock' && this.usesTeamLobby) this.teamsLocked = msg.locked === true;
         break;
       default:
         break;
@@ -407,7 +447,16 @@ export class Room {
   }
 
   private applySettings(raw: Partial<RoomSettings>): void {
-    const next = fitMap({ ...this.settings, ...sanitizeSettings(raw) });
+    const clean = sanitizeSettings(raw);
+    const merged = { ...this.settings, ...clean };
+    if (clean.mode && clean.mode !== this.settings.mode) {
+      // A mode with a map of its own moves there (unless the host picked a map as well), and Team
+      // Knockout starts without bots unless the host switches them on.
+      if (!clean.mapId) merged.mapId = homeMapFor(clean.mode) ?? merged.mapId;
+      if (clean.mode === 'teamKnockout' && clean.bots === undefined) merged.bots = false;
+      this.teamsLocked = false;
+    }
+    const next = fitMap(merged);
     const needNewSim = next.mapId !== this.settings.mapId || next.mode !== this.settings.mode;
     // Renaming the teams doesn't touch the match.
     const onlyNames = !needNewSim && next.durationSec === this.settings.durationSec && next.bots === this.settings.bots && next.events === this.settings.events;
@@ -465,6 +514,83 @@ export class Room {
     this.balanceBots();
     this.broadcastJson({ type: 'room', room: this.info() });
     this.rosterDirty = true;
+  }
+
+  // --- Team Knockout lobby ---------------------------------------------------------------------
+
+  private seats(): LobbySeat[] {
+    return [...this.sim.players.values()].map((p) => ({ id: p.id, team: p.team, bot: p.isBot }));
+  }
+
+  /** Back in the lobby: nobody's ready yet (the lock stays), and everyone gets the new state. */
+  private resetTeamLobby(): void {
+    this.lobbyReady.clear();
+    this.lobbyStartsAt = 0;
+    this.lobbyAutoReadyAt = 0;
+    this.lobbySent = '';
+  }
+
+  /** Picking a side or readying up (only between matches). */
+  private teamAction(conn: Conn, msg: Extract<ClientMessage, { type: 'team' }>): void {
+    if (!this.usesTeamLobby || this.sim.phase !== 'waiting') return;
+    if (msg.action === 'ready') {
+      if (msg.ready === true) this.lobbyReady.add(conn.playerId);
+      else this.lobbyReady.delete(conn.playerId);
+      return;
+    }
+    const team = msg.team;
+    if ((team !== 0 && team !== 1) || this.teamsLocked) return;
+    const p = this.sim.players.get(conn.playerId);
+    if (!p || p.team === team) return;
+    // A side can take half the room; bots there step across to make space.
+    const humans = [...this.sim.players.values()].filter((q) => q.team === team && !q.isBot).length;
+    if (humans >= MAX_PER_SIDE) return;
+    this.sim.setTeam(p.id, team);
+    this.sim.balanceTeams();
+    // Teams changed: a countdown already running starts over, so everyone sees the new sides.
+    this.lobbyStartsAt = 0;
+    this.rosterDirty = true;
+  }
+
+  /**
+   * Runs the lobby between Team Knockout matches: once both teams have enough players, they're
+   * even, and every human is ready, a short countdown starts the match (anything changing stops
+   * it). In public rooms, one idle player can't hold everyone up: once someone is ready and the
+   * teams are fine, everyone counts as ready after a while.
+   */
+  private stepTeamLobby(): void {
+    const s = this.sim;
+    if (s.phase !== 'waiting') return;
+    const T = BALANCE.modes.teamKnockout;
+    for (const id of this.lobbyReady) if (!this.conns.has(id)) this.lobbyReady.delete(id);
+    let check = checkTeamLobby(this.seats(), this.lobbyReady);
+    if (!this.isPrivate && check.teamsOk && !check.ok && this.lobbyReady.size > 0) {
+      if (!this.lobbyAutoReadyAt) this.lobbyAutoReadyAt = s.tick + T.autoReady * BALANCE.tickRate;
+      else if (s.tick >= this.lobbyAutoReadyAt) {
+        for (const id of this.conns.keys()) this.lobbyReady.add(id);
+        check = checkTeamLobby(this.seats(), this.lobbyReady);
+      }
+    }
+    if (check.ok || !check.teamsOk || this.lobbyReady.size === 0) this.lobbyAutoReadyAt = 0;
+    if (!check.ok) this.lobbyStartsAt = 0;
+    else if (!this.lobbyStartsAt) this.lobbyStartsAt = s.tick + T.countdown * BALANCE.tickRate;
+    else if (s.tick >= this.lobbyStartsAt) {
+      this.lobbyStartsAt = 0;
+      s.startMatch();
+      return;
+    }
+    const state: TeamLobbyState = {
+      ready: [...this.lobbyReady].sort((a, b) => a - b),
+      locked: this.teamsLocked,
+      startsAt: this.lobbyStartsAt,
+      autoReadyAt: this.lobbyAutoReadyAt,
+      minPerSide: T.minPerSide,
+      waiting: check.ok ? '' : check.waiting,
+    };
+    const key = JSON.stringify(state);
+    if (key === this.lobbySent) return;
+    this.lobbySent = key;
+    this.broadcastJson({ type: 'teamLobby', lobby: state });
   }
 
   /** Quick chat: a preset index, rate limited, broadcast to the room. */
@@ -598,13 +724,14 @@ export class Room {
       this.closeRanked();
       return;
     }
-    if (!this.isPrivate && mapForMode(this.mode) === null && s.phase === 'results' && s.time + s.dt >= s.phaseEndsAt && this.humanCount > 0) {
+    if (!this.isPrivate && homeMapFor(this.mode) === null && s.phase === 'results' && s.time + s.dt >= s.phaseEndsAt && this.humanCount > 0) {
       this.rotateMap();
     } else if (s.suddenDeath && s.phase === 'results' && s.time + s.dt >= s.phaseEndsAt) {
       // Sudden Death keeps extra bots through a match (see balanceBots); settle up before the next.
       this.balanceBots();
     }
     this.sim.step();
+    if (this.usesTeamLobby) this.stepTeamLobby();
     const events = this.sim.drainEvents();
     if (events.length) {
       this.pendingEvents.push({ type: 'ev', list: events });
@@ -696,11 +823,13 @@ export class Room {
 
 const MODE_INFO_TEAMS = new Set<ModeId>(['teamKnockout', 'ball', 'pump']);
 
-/** Ball and Pump have their own arenas; the knockout modes can't use those. */
+/**
+ * Ball and Pump have their own arenas; the knockout modes can't use those. Team Knockout plays on
+ * its own map or any knockout map.
+ */
 export function fitMap(s: RoomSettings): RoomSettings {
-  const forced = mapForMode(s.mode);
-  if (forced) return { ...s, mapId: forced };
-  if (!KNOCKOUT_MAPS.includes(s.mapId)) return { ...s, mapId: KNOCKOUT_MAPS[0] };
+  const ok = mapsForMode(s.mode);
+  if (!ok.includes(s.mapId)) return { ...s, mapId: homeMapFor(s.mode) ?? ok[0] };
   return s;
 }
 

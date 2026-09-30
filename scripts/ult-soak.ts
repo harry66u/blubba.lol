@@ -4,13 +4,13 @@
 import { BALANCE } from '../src/shared/balance';
 import { GameSim } from '../src/shared/game/sim';
 import type { ModeId } from '../src/shared/game/modes';
-import { getMap, mapForMode } from '../src/shared/maps';
+import { getMap, homeMapFor } from '../src/shared/maps';
 
 const minutes = Number(process.argv[2] ?? 4);
 const bots = Number(process.argv[3] ?? 8);
 
 for (const mode of ['knockout', 'teamKnockout', 'ball', 'pump', 'duel'] as ModeId[]) {
-  const map = getMap(mapForMode(mode) ?? 'dealership');
+  const map = getMap(homeMapFor(mode) ?? 'dealership');
   const sim = new GameSim({ map, mode, durationSec: minutes * 60 });
   const n = mode === 'duel' ? 2 : bots;
   for (let i = 0; i < n; i++) sim.addBot(0.3 + (i % 4) * 0.15);

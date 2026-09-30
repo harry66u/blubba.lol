@@ -58,6 +58,12 @@ export interface SolidDef {
   bounce?: number;
   /** How the top is painted (see SurfaceLook). */
   look?: SurfaceLook;
+  /**
+   * Team paint over the top, in the current team colors (renderer only): a team's side, or
+   * 'split' for a piece that is team 0's on its west (-x) half and team 1's on the east half,
+   * with a halfway line.
+   */
+  paint?: 0 | 1 | 'split';
 }
 
 export interface BouncePadDef {
@@ -86,6 +92,8 @@ export interface DecorDef {
     | 'tires'
     | 'lines'
     | 'flag'
+    // A flag in a team's color (data.team); tube men with data.team wear it too
+    | 'teamFlag'
     | 'palm'
     | 'net'
     | 'turret'

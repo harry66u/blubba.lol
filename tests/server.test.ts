@@ -7,6 +7,7 @@ import { MSG_SNAPSHOT, PROTOCOL_VERSION, type ServerMessage, type Snapshot, deco
 import { Lobby } from '../src/server/lobby';
 import { Room } from '../src/server/room';
 import { KNOCKOUT_MAPS } from '../src/shared/maps';
+import { BALANCE } from '../src/shared/balance';
 
 let port = 0;
 const lobby = new Lobby();
@@ -236,7 +237,7 @@ describe('server', () => {
   it('private rooms wait in the lobby until the host starts, and go back after the match', async () => {
     const host = new TestClient();
     await host.open();
-    host.send({ type: 'hello', v: PROTOCOL_VERSION, name: 'Hosty', guestId: 'h1', join: { kind: 'create', settings: { mode: 'teamKnockout', bots: false } } });
+    host.send({ type: 'hello', v: PROTOCOL_VERSION, name: 'Hosty', guestId: 'h1', join: { kind: 'create', settings: { mode: 'ball', bots: false } } });
     const hw = await host.waitFor('welcome');
     const room = lobby.rooms.get(hw.room.code)!;
     const friend = new TestClient();
@@ -362,5 +363,106 @@ describe('map rotation', () => {
     }
     expect(seen[1]).toBe(KNOCKOUT_MAPS[(KNOCKOUT_MAPS.indexOf('candy') + 1) % KNOCKOUT_MAPS.length]);
     expect(new Set(seen)).toEqual(new Set(KNOCKOUT_MAPS));
+  });
+});
+
+describe('Team Knockout lobby', () => {
+  const join = async (name: string, guestId: string, join: object) => {
+    const c = new TestClient();
+    await c.open();
+    c.send({ type: 'hello', v: PROTOCOL_VERSION, name, guestId, join });
+    const w = await c.waitFor('welcome');
+    return { c, w };
+  };
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const lastLobby = (c: TestClient) => [...c.msgs].reverse().find((m) => m.type === 'teamLobby') as Extract<ServerMessage, { type: 'teamLobby' }> | undefined;
+
+  it('public rooms play on Face-Off with no bots, and start only when teams are full enough and everyone is ready', async () => {
+    const T = BALANCE.modes.teamKnockout;
+    const countdown = T.countdown;
+    T.countdown = 0.3;
+    try {
+      const players = [];
+      for (let i = 0; i < 3; i++) players.push(await join(`Teamy${i}`, `tk-open-${i}`, { kind: 'quick', mode: 'teamKnockout', open: true }));
+      const room = lobby.rooms.get(players[0].w.room.code)!;
+      expect(players.every((p) => p.w.room.code === room.code)).toBe(true);
+      expect(room.settings.mapId).toBe('faceoff');
+      expect(room.sim.bots.size).toBe(0);
+      await wait(150);
+      // Three players can't make two teams of two: still in the lobby, whatever anyone does.
+      for (const p of players) p.c.send({ type: 'team', action: 'ready', ready: true });
+      await wait(600);
+      expect(room.sim.phase).toBe('waiting');
+      expect(lastLobby(players[0].c)?.lobby.waiting).toMatch(/1 more player/);
+      // A fourth: 2 v 2, but they aren't ready yet.
+      const fourth = await join('Teamy3', 'tk-open-3', { kind: 'quick', mode: 'teamKnockout', open: true });
+      players.push(fourth);
+      await wait(150);
+      const teams = [...room.sim.players.values()].map((p) => p.team);
+      expect(teams.filter((t) => t === 0)).toHaveLength(2);
+      expect(teams.filter((t) => t === 1)).toHaveLength(2);
+      expect(room.sim.phase).toBe('waiting');
+      expect(lastLobby(fourth.c)?.lobby.waiting).toMatch(/1 to ready up/);
+      // Someone switching sides leaves the other team short (3 v 1): the countdown can't start.
+      fourth.c.send({ type: 'team', action: 'ready', ready: true });
+      const home = room.sim.players.get(players[0].w.you)!.team;
+      players[0].c.send({ type: 'team', action: 'join', team: 1 - home });
+      await wait(600);
+      expect(room.sim.phase).toBe('waiting');
+      expect(lastLobby(players[0].c)?.lobby.waiting).toBe('Need 2 per team: 1 more player');
+      // Back again: even, all ready, a short countdown, and the match is on.
+      players[0].c.send({ type: 'team', action: 'join', team: home });
+      await wait(150);
+      expect(lastLobby(players[0].c)?.lobby.startsAt).toBeGreaterThan(0);
+      await wait(700);
+      expect(room.sim.phase).toBe('playing');
+      // After the results it's back to the team lobby, with nobody ready.
+      room.sim.endMatch();
+      room.sim.phaseEndsAt = room.sim.time;
+      await wait(200);
+      expect(room.sim.phase).toBe('waiting');
+      expect(lastLobby(players[0].c)?.lobby.ready).toEqual([]);
+      for (const p of players) p.c.ws.close();
+    } finally {
+      T.countdown = countdown;
+    }
+  });
+
+  it('private rooms: bots only when the host turns them on; the host can shuffle and lock the teams', async () => {
+    const host = await join('Capt', 'tk-priv-h', { kind: 'create', settings: { mode: 'teamKnockout' } });
+    const room = lobby.rooms.get(host.w.room.code)!;
+    expect(room.settings.mapId).toBe('faceoff');
+    expect(room.settings.bots).toBe(false);
+    expect(room.sim.bots.size).toBe(0);
+    const friend = await join('Mate', 'tk-priv-f', { kind: 'code', code: room.code });
+    // START does nothing here: the team lobby decides.
+    host.c.send({ type: 'host', action: 'start' });
+    await wait(150);
+    expect(room.sim.phase).toBe('waiting');
+    // Bots on: they fill both teams evenly, and they're always ready.
+    host.c.send({ type: 'host', action: 'settings', settings: { bots: true } });
+    await wait(200);
+    expect(room.sim.bots.size).toBeGreaterThan(0);
+    const count = (t: number) => [...room.sim.players.values()].filter((p) => p.team === t).length;
+    expect(Math.abs(count(0) - count(1))).toBeLessThanOrEqual(1);
+    // Locked: nobody can switch sides.
+    host.c.send({ type: 'host', action: 'lock', locked: true });
+    await wait(100);
+    const f = room.sim.players.get(friend.w.you)!;
+    const before = f.team;
+    friend.c.send({ type: 'team', action: 'join', team: 1 - before });
+    await wait(150);
+    expect(f.team).toBe(before);
+    expect(lastLobby(friend.c)?.lobby.locked).toBe(true);
+    // Only the host shuffles, and teams stay even.
+    friend.c.send({ type: 'host', action: 'shuffle' });
+    host.c.send({ type: 'host', action: 'shuffle' });
+    await wait(150);
+    expect(Math.abs(count(0) - count(1))).toBeLessThanOrEqual(1);
+    const humans = [host.w.you, friend.w.you].map((id) => room.sim.players.get(id)!.team);
+    // Two humans are dealt one per side.
+    expect(new Set(humans).size).toBe(2);
+    host.c.ws.close();
+    friend.c.ws.close();
   });
 });

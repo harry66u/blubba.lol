@@ -213,8 +213,9 @@ export class BotBrain {
       return { ...f };
     }
     if (offStage) {
-      const dx = home.x - s.px;
-      const dz = home.z - s.pz;
+      const back = recoveryTarget(world, s.px, s.py, s.pz, home);
+      const dx = back.x - s.px;
+      const dz = back.z - s.pz;
       const yawHome = Math.atan2(-dx, -dz);
       this.aimYaw = yawHome;
       f.yaw = yawHome;
@@ -337,7 +338,10 @@ export class BotBrain {
     const wx = cosY * f.moveX - sinY * f.moveZ;
     const wz = -sinY * f.moveX - cosY * f.moveZ;
     const probe = 2.5 + Math.hypot(s.vx, s.vz) * 0.35;
-    const g = world.groundBelow(s.px + wx * probe, s.py + 0.6, s.pz + wz * probe, 4);
+    // Check along the way, not just the far end: a narrow gap between two floors looks safe from
+    // its far side.
+    const along = (ax: number, az: number, d: number) => world.groundBelow(s.px + ax * d, s.py + 0.6, s.pz + az * d, 4);
+    const g = along(wx, wz, 1.2) !== null && along(wx, wz, probe * 0.55) !== null ? along(wx, wz, probe) : null;
     // The map is shrinking: get off pieces that are about to fall, and back from deck edges that
     // are about to crumble (bots see the same warning players do).
     const doomed = s.onGround === 1 && doomedSpot(sim, s.px, s.pz, s.groundId);
@@ -346,12 +350,31 @@ export class BotBrain {
       const hx = home.x - s.px;
       const hz = home.z - s.pz;
       const hl = Math.hypot(hx, hz) || 1;
+      let dx = hx / hl;
+      let dz = hz / hl;
+      // Unless home is across a drop too (on a bridge over a moat, say): then whichever way has
+      // ground under it and heads most nearly home, or stand still if there's none.
+      const safe = (ax: number, az: number) => along(ax, az, 1.2) !== null && along(ax, az, probe * 0.55) !== null && along(ax, az, probe) !== null;
+      if (!doomed && !safe(dx, dz)) {
+        let best: [number, number] = [0, 0];
+        let bestDot = -Infinity;
+        for (let k = 0; k < 8; k++) {
+          const ax = Math.cos((k * Math.PI) / 4);
+          const az = Math.sin((k * Math.PI) / 4);
+          const dot = ax * dx + az * dz;
+          if (dot > bestDot && safe(ax, az)) {
+            bestDot = dot;
+            best = [ax, az];
+          }
+        }
+        [dx, dz] = best;
+      }
       const fx = -sinY;
       const fz = -cosY;
       const rx = cosY;
       const rz = -sinY;
-      f.moveZ = (hx * fx + hz * fz) / hl;
-      f.moveX = (hx * rx + hz * rz) / hl;
+      f.moveZ = dx * fx + dz * fz;
+      f.moveX = dx * rx + dz * rz;
       this.strafeSign = -this.strafeSign;
     }
 
@@ -380,10 +403,11 @@ export class BotBrain {
       }
     }
 
-    // --- Jump and dash to dodge. ---
-    if (s.onGround && rnd() < 0.006 + this.skill * 0.006) this.press('jump');
+    // --- Jump and dash to dodge (not toward a drop: a hop carries further than the edge check looks). ---
+    const landing = world.groundBelow(s.px + wx * (probe + 4), s.py + 0.6, s.pz + wz * (probe + 4), 4) !== null;
+    if (s.onGround && landing && rnd() < 0.006 + this.skill * 0.006) this.press('jump');
     else if (!s.onGround && s.jumpsUsed === 1 && s.vy < 0 && rnd() < 0.02) this.press('jump');
-    if (s.onGround && s.dashCharges === BALANCE.dash.charges && rnd() < 0.003 * this.skill && g !== null) this.press('dash');
+    if (s.onGround && s.dashCharges === BALANCE.dash.charges && rnd() < 0.003 * this.skill && g !== null && landing) this.press('dash');
 
     // --- Brace against incoming shots (skilled bots only). ---
     if (this.skill > 0.5 && s.braceCool <= 0) {
@@ -607,6 +631,29 @@ export class BotBrain {
 }
 
 const lookAhead = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
+
+/**
+ * Where to steer after being knocked off: a step inside the nearest platform top we can still get
+ * onto, not the map's middle, which may be across a moat or under a deck we can't climb through.
+ * Pieces we're underneath don't count until we're out from under them.
+ */
+function recoveryTarget(world: GameSim['world'], x: number, y: number, z: number, home: { x: number; z: number }): { x: number; z: number } {
+  let best = { x: home.x, z: home.z };
+  let bestD = Infinity;
+  for (const o of world.solids) {
+    if (!o || !o.enabled || !o.ledge || o.mover || o.maxY > y + 3) continue;
+    const inside = x > o.minX && x < o.maxX && z > o.minZ && z < o.maxZ;
+    if (inside && o.maxY > y) continue;
+    const tx = Math.max(o.minX + 1, Math.min(o.maxX - 1, x));
+    const tz = Math.max(o.minZ + 1, Math.min(o.maxZ - 1, z));
+    const d = Math.hypot(tx - x, tz - z);
+    if (d < bestD) {
+      bestD = d;
+      best = { x: tx, z: tz };
+    }
+  }
+  return best;
+}
 
 /** True when standing here is about to be a bad idea: the piece falls soon or the deck edge crumbles past it. */
 function doomedSpot(sim: GameSim, x: number, z: number, groundId: number): boolean {
