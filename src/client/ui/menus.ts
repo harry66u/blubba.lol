@@ -10,6 +10,8 @@ import type { EventFrequency, JoinRequest, QueueCounts, RoomInfo, RosterEntry } 
 import { ACTION_LABELS, type Action, DEFAULT_BINDINGS, codeLabel } from '../input/input';
 import type { Settings } from '../settings';
 import { add, clear, el, hexColor } from './dom';
+import { MODE_ICON, mapIcon } from './gameIcons';
+import { type IconName, icon, isIconName } from './icons';
 import { tubeMan } from './mascot';
 
 /** Everything the mode picker offers: every mode plus ranked 1v1. */
@@ -26,6 +28,8 @@ export interface MenuCallbacks {
   onModeChange: (mode: PlayMode) => void;
   /** The map picked for quick play (null: any map). */
   onMapChange: (map: string | null) => void;
+  /** Pointing at a map tile (or a mode with its own arena) previews that map behind the menu; null goes back to the picked one. */
+  onMapPreview?: (map: string | null) => void;
   onCreate: (name: string) => void;
   /** The Bots switch for quick play (off: only real players). */
   onBotsChange: (on: boolean, mode: PlayMode) => void;
@@ -44,16 +48,24 @@ export interface MenuNotice {
   action?: { label: string; run: () => void };
 }
 
-const MODE_ICON: Record<PlayMode, string> = {
-  any: '🌍',
-  knockout: '💥',
-  suddenDeath: '🔥',
-  teamKnockout: '🤝',
-  ball: '🏐',
-  pump: '🎈',
-  duel: '⚔️',
-  ranked: '🏆',
-};
+/** An icon followed by a label, for buttons and headings. */
+function iconText(name: IconName, text: string): DocumentFragment {
+  const f = document.createDocumentFragment();
+  f.append(icon(name), el('span', { text }));
+  return f;
+}
+
+/** Previews a map behind the menu while the mouse is over `target` (mice only: a tap is a click). */
+function hoverPreview(target: HTMLElement, map: () => string | null, preview: ((m: string | null) => void) | undefined): void {
+  if (!preview) return;
+  target.addEventListener('pointerenter', (e) => {
+    const m = map();
+    if (e.pointerType === 'mouse' && m) preview(m);
+  });
+  target.addEventListener('pointerleave', (e) => {
+    if (e.pointerType === 'mouse') preview(null);
+  });
+}
 
 function nameField(initial: string, onChange: (n: string) => void, errorEl: HTMLElement): HTMLInputElement {
   const input = el('input', { class: 'field grow', attrs: { maxlength: '16', spellcheck: 'false', autocomplete: 'off', 'aria-label': 'Your name' } });
@@ -110,7 +122,7 @@ function noticeBox(notice: MenuNotice | string | undefined): HTMLElement | null 
   const box = el('div', { class: `notice ${kind}`, attrs: { role: kind === 'info' ? 'status' : 'alert' } });
   add(
     box,
-    el('div', { class: 'notice-icon', text: kind === 'update' ? '✨' : kind === 'info' ? '💬' : '⚠️', attrs: { 'aria-hidden': 'true' } }),
+    el('div', { class: 'notice-icon', attrs: { 'aria-hidden': 'true' } }, icon(kind === 'update' ? 'sparkles' : kind === 'info' ? 'chat' : 'warning')),
     el('div', { class: 'notice-body' }, n.title ? el('div', { class: 'notice-title', text: n.title }) : null, el('div', { class: 'notice-text', text: n.text })),
     n.action ? el('button', { class: `btn small ${kind === 'update' ? 'purple' : 'yellow'}`, text: n.action.label, on: { click: n.action.run } }) : null,
     el('button', { class: 'notice-close', text: '✕', attrs: { 'aria-label': 'Dismiss', title: 'Dismiss' }, on: { click: () => box.remove() } }),
@@ -119,11 +131,11 @@ function noticeBox(notice: MenuNotice | string | undefined): HTMLElement | null 
 }
 
 /** A nav button with an icon (menu side column, pause menu). */
-function navButton(icon: string, label: string, onClick: () => void, extra = ''): HTMLButtonElement {
+function navButton(ico: IconName, label: string, onClick: () => void, extra = ''): HTMLButtonElement {
   return el(
     'button',
     { class: `btn small ghost nav-btn ${extra}`, on: { click: onClick } },
-    el('span', { class: 'ico', text: icon, attrs: { 'aria-hidden': 'true' } }),
+    el('span', { class: 'ico', attrs: { 'aria-hidden': 'true' } }, icon(ico)),
     el('span', { text: label }),
     el('span', { class: 'nav-badge hidden' }),
   );
@@ -152,7 +164,7 @@ export interface TeamView {
  * that map's sky colors with its icon; the picked map's name shows above. Modes with their own
  * arena (and ranked) say so instead.
  */
-function mapPicker(initial: string | null, onChange: (map: string | null) => void): { el: HTMLElement; setMode: (m: PlayMode) => void } {
+function mapPicker(initial: string | null, onChange: (map: string | null) => void, onPreview?: (map: string | null) => void): { el: HTMLElement; setMode: (m: PlayMode) => void } {
   let picked = initial;
   let mode: PlayMode = 'knockout';
   const label = (id: string | null) => (id ? MAPS[id].name : 'Any map');
@@ -185,8 +197,10 @@ function mapPicker(initial: string | null, onChange: (map: string | null) => voi
           },
         },
       },
-      el('span', { class: 'ico', text: id ? (MAPS[id].icon ?? '🗺️') : '🎲', attrs: { 'aria-hidden': 'true' } }),
+      el('span', { class: 'ico', attrs: { 'aria-hidden': 'true' } }, icon(mapIcon(id))),
     );
+    // Pointing at a map shows it behind the menu (only while maps can be picked).
+    hoverPreview(b, () => (b.disabled ? null : id), onPreview);
     if (id) {
       b.style.setProperty('--sky-top', hexColor(MAPS[id].theme.skyTop));
       b.style.setProperty('--sky-mid', hexColor(MAPS[id].theme.skyHorizon));
@@ -251,15 +265,21 @@ function modeLive(c: QueueCounts, m: PlayMode): [number, number] {
 /** What the mode's live line says ('' when nobody's on). */
 function liveText(c: QueueCounts, m: PlayMode): string {
   const [playing, waiting] = modeLive(c, m);
-  if (m === 'ranked') return waiting ? `🟢 ${waiting} searching for a ranked match` : '';
+  if (m === 'ranked') return waiting ? `${waiting} searching for a ranked match` : '';
   const parts: string[] = [];
   if (playing) parts.push(`${playing} playing now`);
   if (waiting) parts.push(m === 'teamKnockout' ? `${waiting} in the team lobby` : `${waiting} waiting for players`);
   if (!parts.length) return m === 'teamKnockout' ? 'Nobody in Team Knockout yet: invite friends or turn bots on' : '';
-  return `🟢 ${parts.join(' · ')}`;
+  return parts.join(' · ');
 }
 
 let lastCounts: QueueCounts | null = null;
+
+/** The live line under the picked mode: a green dot when people are on (not for the "nobody yet" hint). */
+function setLive(live: HTMLElement, text: string): void {
+  live.textContent = text;
+  live.classList.toggle('on', /playing|waiting|lobby|searching/.test(text));
+}
 
 /**
  * Live player counts on the menu: a badge on each mode button, a line under the picked mode, and
@@ -280,11 +300,11 @@ export function setModeCounts(c: QueueCounts | null = lastCounts): void {
     badge.textContent = n ? String(n) : '';
     badge.classList.toggle('hidden', !n);
     badge.classList.toggle('lobby', !playing && waiting > 0);
-    b.title = `${b.dataset.blurb ?? ''}${n ? ` (${liveText(c, m).replace('🟢 ', '')})` : ''}`;
+    b.title = `${b.dataset.blurb ?? ''}${n ? ` (${liveText(c, m)})` : ''}`;
   }
   const on = document.querySelector<HTMLElement>('.mode-picker button.on');
-  const live = document.querySelector('.mode-live');
-  if (live && on) live.textContent = liveText(c, on.dataset.mode as PlayMode);
+  const live = document.querySelector<HTMLElement>('.mode-live');
+  if (live && on) setLive(live, liveText(c, on.dataset.mode as PlayMode));
   pillOnline = c.online;
   drawPill();
 }
@@ -309,7 +329,6 @@ export function buildMainMenu(
   }
   const dice = el('button', {
     class: 'btn small ghost dice',
-    text: '🎲',
     attrs: { title: 'Random name', 'aria-label': 'Random name' },
     on: {
       click: () => {
@@ -322,8 +341,9 @@ export function buildMainMenu(
       },
     },
   });
+  dice.append(icon('dice'));
   let mode: PlayMode = initialMode;
-  const maps = mapPicker(initialMap, cb.onMapChange);
+  const maps = mapPicker(initialMap, cb.onMapChange, cb.onMapPreview);
   const blurb = el('div', { class: 'mode-blurb', attrs: { 'aria-live': 'polite' } });
   const live = el('div', { class: 'mode-live' });
   const picker = el('div', { class: 'mode-picker', attrs: { role: 'radiogroup', 'aria-label': 'Game mode' } });
@@ -362,7 +382,7 @@ export function buildMainMenu(
     m === 'ranked'
       ? { name: 'Ranked', blurb: 'Rated 1v1 against someone near your skill. Needs a free account.' }
       : m === 'any'
-        ? { name: 'Any mode', blurb: "Real players only, everyone online together in Sudden Death: one life, get knocked out and you're out." }
+        ? { name: 'Public Queue', blurb: 'The quickest way in: everyone online in one match, real players only. Sudden Death rules: one life each round.' }
         : MODE_INFO[m];
   const pick = (m: PlayMode) => {
     mode = m;
@@ -371,19 +391,21 @@ export function buildMainMenu(
       b.setAttribute('aria-checked', String(b.dataset.mode === m));
     }
     blurb.textContent = info(m).blurb;
-    live.textContent = lastCounts ? liveText(lastCounts, m) : '';
+    setLive(live, lastCounts ? liveText(lastCounts, m) : '');
     maps.setMode(m);
-    // Ranked and the default queue (Any mode) never have bots.
+    // Ranked and the Public Queue never have bots.
     botsRow.classList.toggle('hidden', m === 'ranked' || m === 'any');
     botsOn = botsFor(m);
     drawBots();
   };
-  // "Any mode" first (the default), then Sudden Death (the main mode), then the rest.
+  // The Public Queue first (the default, a wide button of its own), then Sudden Death (the main
+  // mode), then the rest.
   const order: PlayMode[] = ['any', 'suddenDeath', ...MODE_IDS.filter((x) => x !== 'suddenDeath'), 'ranked'];
   for (const m of order) {
     const b = el(
       'button',
       {
+        class: m === 'any' ? 'public-queue' : '',
         attrs: { 'data-mode': m, 'data-blurb': info(m).blurb, role: 'radio', title: info(m).blurb },
         on: {
           click: () => {
@@ -392,9 +414,11 @@ export function buildMainMenu(
           },
         },
       },
-      el('span', { class: 'ico', text: MODE_ICON[m], attrs: { 'aria-hidden': 'true' } }),
-      el('span', { class: 'nm', text: info(m).name }),
+      el('span', { class: 'ico', attrs: { 'aria-hidden': 'true' } }, icon(MODE_ICON[m])),
+      el('span', { class: 'nm' }, info(m).name, m === 'any' ? el('span', { class: 'pq-sub', text: 'Everyone online, one match' }) : null),
     );
+    // Modes with their own arena show it while you point at them.
+    hoverPreview(b, () => (m === 'ranked' || m === 'any' ? null : homeMapFor(m)), cb.onMapPreview);
     picker.append(b);
   }
   pick(mode);
@@ -461,12 +485,12 @@ export function buildMainMenu(
   const nav = el(
     'nav',
     { class: 'menu-nav', attrs: { 'aria-label': 'More' } },
-    navButton('🎯', 'Loadout', cb.onLoadout),
-    navButton('👕', 'Locker', cb.onLocker),
-    navButton('🏆', 'Profile', cb.onProfile),
-    navButton('👥', 'Friends', cb.onFriends, 'friends-btn'),
-    navButton('❓', 'How to play', cb.onHowTo),
-    navButton('⚙️', 'Settings', cb.onSettings),
+    navButton('target', 'Loadout', cb.onLoadout),
+    navButton('locker', 'Locker', cb.onLocker),
+    navButton('trophy', 'Profile', cb.onProfile),
+    navButton('friends', 'Friends', cb.onFriends, 'friends-btn'),
+    navButton('help', 'How to play', cb.onHowTo),
+    navButton('settings', 'Settings', cb.onSettings),
   );
   return el(
     'div',
@@ -503,14 +527,14 @@ export function buildRoomJoin(
     ? el(
         'div',
         { class: 'invite-banner challenge' },
-        el('div', { class: 'kicker', text: "⚔️ You've been challenged!" }),
+        el('div', { class: 'kicker' }, iconText('duel', "You've been challenged!")),
         el('div', { class: 'invite-title', text: '1v1 DUEL' }),
         el('div', { class: 'invite-sub', text: `First to ${BALANCE.modes.duel.target} knockouts wins.` }),
       )
     : el(
         'div',
         { class: 'invite-banner' },
-        el('div', { class: 'kicker', text: "🎉 You're invited to a room!" }),
+        el('div', { class: 'kicker' }, iconText('party', "You're invited to a room!")),
         el('div', { class: 'code-tiles', attrs: { 'aria-label': `Room code ${code}` } }, ...code.split('').map((ch) => el('span', { text: ch, attrs: { 'aria-hidden': 'true' } }))),
       );
   const card = el(
@@ -564,7 +588,7 @@ export function buildClickToPlay(text: string, onClick: () => void, pad = false,
         { class: 'device-ask' },
         el('span', { class: 'label', text: 'Aiming with' }),
         ...(['mouse', 'trackpad'] as const).map((d) =>
-          el('button', { class: `btn small${device.current === d ? ' blue' : ' ghost'}`, text: d === 'mouse' ? '🖱️ Mouse' : '💻 Trackpad', on: { click: () => device.onPick(d) } }),
+          el('button', { class: `btn small${device.current === d ? ' blue' : ' ghost'}`, on: { click: () => device.onPick(d) } }, iconText(d === 'mouse' ? 'mouse' : 'laptop', d === 'mouse' ? 'Mouse' : 'Trackpad')),
         ),
       )
     : null;
@@ -615,7 +639,7 @@ export function botsVote(room: RoomInfo, you: number, humans: number, onBots: (o
   return el('div', { class: 'bots-row vote' }, el('span', { class: 'label', text: 'Bots' }), sw, el('span', { class: 'bots-state', text }));
 }
 
-/** Funny team name pairs for the 🎲 button. */
+/** Funny team name pairs for the dice button. */
 const TEAM_NAME_PAIRS: [string, string][] = [
   ['Gusty Bois', 'Air Heads'],
   ['Big Blowers', 'Hot Air'],
@@ -649,7 +673,7 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
         { class: 'room-ticket' },
         el('div', { class: 'grow' }, el('div', { class: 'label', text: room.challenge ? '1v1 challenge' : 'Room code' }), el('div', { class: 'code', text: room.code })),
         el('button', { class: 'btn small blue', text: room.challenge ? 'Copy challenge link' : 'Copy invite link', on: { click: cb.onCopyLink } }),
-        cb.onFriends && !room.challenge ? el('button', { class: 'btn small', text: '👥 Invite', attrs: { title: 'Invite friends from your friends list' }, on: { click: cb.onFriends } }) : null,
+        cb.onFriends && !room.challenge ? el('button', { class: 'btn small', attrs: { title: 'Invite friends from your friends list' }, on: { click: cb.onFriends } }, iconText('invite', 'Invite')) : null,
       ),
     );
     if (isHost) {
@@ -714,8 +738,7 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
           });
         }
         const dice = el('button', {
-          class: 'btn small ghost',
-          text: '🎲',
+          class: 'btn small ghost dice',
           attrs: { title: 'Random team names', 'aria-label': 'Random team names' },
           on: {
             click: () => {
@@ -726,6 +749,7 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
             },
           },
         });
+        dice.append(icon('dice'));
         teamRow = el('div', { class: 'host-field team-names' }, el('span', { class: 'label', text: 'Team names' }), el('div', { class: 'row' }, inputs[0], inputs[1], dice));
       }
       const top = lobby.waiting
@@ -745,7 +769,7 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
           el(
             'div',
             { class: 'host-head' },
-            el('span', { text: '👑 Host controls' }),
+            el('span', {}, iconText('crown', 'Host controls')),
             lobby.waiting ? null : el('button', { class: 'btn small yellow', text: 'Restart match', on: { click: () => cb.onHost('restart') } }),
           ),
           el(
@@ -770,7 +794,7 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
         { class: 'room-ticket' },
         el('div', { class: 'grow' }, el('div', { class: 'label', text: 'Bring friends into this match' }), el('div', { class: 'code', text: room.code })),
         el('button', { class: 'btn small blue', text: 'Copy invite link', on: { click: cb.onCopyLink } }),
-        cb.onFriends ? el('button', { class: 'btn small', text: '👥 Invite', attrs: { title: 'Invite friends from your friends list' }, on: { click: cb.onFriends } }) : null,
+        cb.onFriends ? el('button', { class: 'btn small', attrs: { title: 'Invite friends from your friends list' }, on: { click: cb.onFriends } }, iconText('invite', 'Invite')) : null,
       ),
     );
     if (cb.onBots) panel.append(botsVote(room, lobby.you ?? -1, lobby.humans ?? 1, cb.onBots));
@@ -779,10 +803,10 @@ export function buildPause(room: RoomInfo | null, isHost: boolean, cb: PauseCall
     el(
       'div',
       { class: 'pause-nav' },
-      navButton('🎯', 'Loadout', cb.onLoadout),
-      navButton('👕', 'Locker', cb.onLocker),
-      navButton('⚙️', 'Settings', cb.onSettings),
-      navButton('❓', 'How to play', cb.onHowTo),
+      navButton('target', 'Loadout', cb.onLoadout),
+      navButton('locker', 'Locker', cb.onLocker),
+      navButton('settings', 'Settings', cb.onSettings),
+      navButton('help', 'How to play', cb.onHowTo),
     ),
     el('button', { class: 'btn small ghost leave', text: 'Leave match', on: { click: cb.onLeave } }),
   );
@@ -823,7 +847,7 @@ export function buildScoreboard(
       panel.append(head, scoreTable(sorted.filter((r) => r.team === t), youId, hostId, isPrivate, actions, teams.colors[t]));
     }
   }
-  if (actions) panel.append(el('div', { class: 'small-note sb-note', text: '🔇 hides someone’s quick chat · ⚑ reports them to us' }));
+  if (actions) panel.append(el('div', { class: 'small-note sb-note' }, icon('mute'), ' hides someone’s quick chat · ', icon('flag'), ' reports them to us'));
   else panel.append(el('div', { class: 'small-note sb-note', text: 'Press Esc to free the mouse to mute or report players.' }));
   return el('div', { class: `scoreboard${actions ? ' interactive' : ''}` }, panel);
 }
@@ -849,7 +873,7 @@ function reportMenu(target: RosterEntry, actions: ScoreActions, cell: HTMLElemen
   }
 }
 
-const MEDALS = ['🥇', '🥈', '🥉'];
+const MEDALS: IconName[] = ['medalGold', 'medalSilver', 'medalBronze'];
 
 function scoreTable(rows: RosterEntry[], youId: number, hostId: number, isPrivate: boolean, actions: ScoreActions | null, teamColor: number | null): HTMLElement {
   const onKick = actions?.onKick ?? null;
@@ -859,7 +883,7 @@ function scoreTable(rows: RosterEntry[], youId: number, hostId: number, isPrivat
     const tr = el(
       'tr',
       { class: `${r.id === youId ? 'me' : ''}${r.out ? ' out' : ''}` },
-      el('td', { class: 'rank', text: i < 3 && r.score > 0 && !r.out ? MEDALS[i] : String(i + 1) }),
+      el('td', { class: 'rank' }, i < 3 && r.score > 0 && !r.out ? icon(MEDALS[i]) : String(i + 1)),
       el(
         'td',
         { class: 'who' },
@@ -868,8 +892,8 @@ function scoreTable(rows: RosterEntry[], youId: number, hostId: number, isPrivat
         r.name,
         r.rating !== undefined ? el('span', { class: 'small-note', style: 'margin-left:6px', text: String(r.rating) }) : null,
         r.bot ? el('span', { class: 'bot-tag', text: 'BOT' }) : null,
-        r.id === hostId && isPrivate ? el('span', { style: 'margin-left:6px', text: '👑', attrs: { title: 'Host' } }) : null,
-        r.out ? el('span', { class: 'small-note', style: 'margin-left:6px', text: '💀 OUT', attrs: { title: 'Out of this Sudden Death match' } }) : null,
+        r.id === hostId && isPrivate ? el('span', { style: 'margin-left:6px', attrs: { title: 'Host' } }, icon('crown')) : null,
+        r.out ? el('span', { class: 'small-note', style: 'margin-left:6px', attrs: { title: 'Out of this Sudden Death match' } }, iconText('skull', 'OUT')) : null,
       ),
       el('td', { class: 'num score', text: String(r.score) }),
       el('td', { class: 'num', text: String(r.kos) }),
@@ -887,27 +911,29 @@ function scoreTable(rows: RosterEntry[], youId: number, hostId: number, isPrivat
       cell,
       el('button', {
         class: `btn small icon-btn${muted ? ' yellow' : ' ghost'}`,
-        text: muted ? '🔈' : '🔇',
         attrs: { title: muted ? 'Show their quick chat' : 'Hide their quick chat', 'aria-label': muted ? 'Show their quick chat' : 'Hide their quick chat' },
         on: {
           click: () => {
             actions.onMute(r.id);
           },
         },
-      }),
+      }, icon(muted ? 'sound' : 'mute')),
       r.acc && actions.onFriend && actions.friendState(r.acc) !== 'friends'
         ? actions.friendState(r.acc) === 'outgoing'
           ? el('span', { class: 'small-note', text: ' sent ' })
-          : el('button', {
-              class: 'btn small ghost icon-btn',
-              text: '👥',
-              attrs: { title: actions.friendState(r.acc) === 'incoming' ? 'Accept their friend request' : 'Add as a friend', 'aria-label': 'Add as a friend' },
-              on: { click: () => actions.onFriend?.(r) },
-            })
+          : el(
+              'button',
+              {
+                class: 'btn small ghost icon-btn',
+                attrs: { title: actions.friendState(r.acc) === 'incoming' ? 'Accept their friend request' : 'Add as a friend', 'aria-label': 'Add as a friend' },
+                on: { click: () => actions.onFriend?.(r) },
+              },
+              icon('invite'),
+            )
         : null,
       actions.reported.has(r.id)
         ? el('span', { class: 'small-note', text: ' reported' })
-        : el('button', { class: 'btn small ghost icon-btn', text: '⚑', attrs: { title: 'Report', 'aria-label': 'Report' }, on: { click: () => reportMenu(r, actions, cell) } }),
+        : el('button', { class: 'btn small ghost icon-btn', attrs: { title: 'Report', 'aria-label': 'Report' }, on: { click: () => reportMenu(r, actions, cell) } }, icon('flag')),
       onKick ? el('button', { class: 'btn small icon-btn', text: 'Kick', on: { click: () => onKick(r.id) } }) : null,
     );
     return cell;
@@ -1018,12 +1044,12 @@ export function buildResults(
         el(
           'div',
           { class: 'who' },
-          place === 1 ? el('span', { class: 'crown', text: '👑', attrs: { 'aria-hidden': 'true' } }) : null,
+          place === 1 ? el('span', { class: 'crown', attrs: { 'aria-hidden': 'true' } }, icon('crown')) : null,
           tubeMan(color, { className: place === 1 ? 'flail' : 'sway', mood: place === 1 ? 'happy' : 'wow' }),
           el('div', { class: 'nm', text: s.id === youId ? 'You' : s.name }),
           el('div', { class: 'pts', text: line }),
         ),
-        el('div', { class: 'block' }, el('span', { text: MEDALS[place - 1] })),
+        el('div', { class: 'block' }, icon(MEDALS[place - 1])),
       ),
     );
   });
@@ -1049,14 +1075,16 @@ export function buildResults(
   }
   // Your match in one line.
   const mine = me
-    ? [
-        !tr && !won && myPlace > 0 ? `${ordinal(myPlace)} of ${result.standings.length}` : '',
-        result.rounds ? `🏁 ${me.roundWins ?? 0} round${me.roundWins === 1 ? '' : 's'}` : '',
-        `💥 ${me.stats.kos} KO${me.stats.kos === 1 ? '' : 's'}`,
-        `🎈 popped ${me.stats.deaths}×`,
-      ].filter(Boolean)
+    ? (
+        [
+          !tr && !won && myPlace > 0 ? [null, `${ordinal(myPlace)} of ${result.standings.length}`] : null,
+          result.rounds ? ['finishFlag', `${me.roundWins ?? 0} round${me.roundWins === 1 ? '' : 's'}`] : null,
+          ['boom', `${me.stats.kos} KO${me.stats.kos === 1 ? '' : 's'}`],
+          ['heliumBalloon', `popped ${me.stats.deaths}×`],
+        ] as ([IconName | null, string] | null)[]
+      ).filter((x) => x !== null)
     : [];
-  const myLine = mine.length ? el('div', { class: 'my-line' }, ...mine.map((t) => el('span', { text: t }))) : null;
+  const myLine = mine.length ? el('div', { class: 'my-line' }, ...mine.map(([i, t]) => el('span', {}, i ? icon(i) : null, t))) : null;
   const countdown = el('div', { class: 'countdown', attrs: { 'data-countdown': '' } }, resultsCountdownText(secondsLeft, !!progress?.ranked, !!progress?.lobby));
   const buttons = actions
     ? el(
@@ -1099,23 +1127,25 @@ export function buildResults(
 
 export function buildHowTo(onClose: () => void, bindings: Record<Action, string[]> = DEFAULT_BINDINGS, padLabels?: Record<string, string>, touch = false): HTMLElement {
   const grid = el('div', { class: 'controls-grid two-col' });
-  const row = (keys: string[], what: string) => grid.append(el('div', { class: 'keys' }, ...keys.map((k) => el('span', { class: 'key', text: k }))), el('div', { class: 'what', text: what }));
+  // A key's label, or the icon on the touch button of that name.
+  const row = (keys: string[], what: string) =>
+    grid.append(el('div', { class: 'keys' }, ...keys.map((k) => (touch && isIconName(k) ? el('span', { class: 'key ico-key' }, icon(k)) : el('span', { class: 'key', text: k })))), el('div', { class: 'what', text: what }));
   if (touch) {
     row(['Left thumb'], 'Move (the stick appears where you touch)');
     row(['Drag right side'], 'Aim');
     row(['FIRE'], 'Fire (hold to charge, drag to aim while charging)');
     row(['JUMP'], 'Jump / double jump');
-    row(['💨'], 'Dash');
-    row(['🛡️'], 'Brace (right before a hit)');
-    row(['✊'], 'Grab / catch a ledge');
-    row(['🪝'], 'Grapple');
-    row(['↻'], 'Reload');
-    row(['🟣 💥'], 'Your two gadgets');
+    row(['dash'], 'Dash');
+    row(['shield'], 'Brace (right before a hit)');
+    row(['fist'], 'Grab / catch a ledge');
+    row(['hook'], 'Grapple');
+    row(['reload'], 'Reload');
+    row(['bouncePad', 'grenade'], 'Your two gadgets');
     row(['ULT'], 'Ultimate ability (glows when the meter is full)');
-    row(['🎥'], 'First / third person');
-    row(['💬'], 'Quick chat');
-    row(['🏆'], 'Scoreboard (hold)');
-    row(['❚❚'], 'Pause');
+    row(['video'], 'First / third person');
+    row(['chat'], 'Quick chat');
+    row(['trophy'], 'Scoreboard (hold)');
+    row(['pause'], 'Pause');
   } else {
     row(['W', 'A', 'S', 'D'], 'Move');
     row(['Trackpad'], 'Aim (or mouse)');
@@ -1124,8 +1154,8 @@ export function buildHowTo(onClose: () => void, bindings: Record<Action, string[
     }
     row(['Esc'], 'Menu');
   }
-  const card = (icon: string, title: string, html: string) =>
-    el('div', { class: 'howto-card' }, el('div', { class: 'ico', text: icon, attrs: { 'aria-hidden': 'true' } }), el('div', {}, el('div', { class: 'ttl', text: title }), el('div', { class: 'txt', html })));
+  const card = (ico: IconName, title: string, html: string) =>
+    el('div', { class: 'howto-card' }, el('div', { class: 'ico', attrs: { 'aria-hidden': 'true' } }, icon(ico)), el('div', {}, el('div', { class: 'ttl', text: title }), el('div', { class: 'txt', html })));
   return el(
     'div',
     { class: 'overlay interactive' },
@@ -1136,10 +1166,10 @@ export function buildHowTo(onClose: () => void, bindings: Record<Action, string[
       el(
         'div',
         { class: 'howto-cards' },
-        card('🎈', 'Hits inflate you', 'No health bars here. Every hit makes you <b>bigger, lighter</b> and easier to launch.'),
-        card('🌊', 'Off the edge = out', 'The only way out is off the edge! Knock everyone else off the map.'),
-        card('💨', 'Charge big shots', 'Hold fire to <b>charge</b>. Aim at feet to pop people <b>up</b>, at their side to push them <b>sideways</b>.'),
-        card('🚀', 'Blast jump', 'Shoot the ground near you to <b>blast jump</b> out of trouble.'),
+        card('heliumBalloon', 'Hits inflate you', 'No health bars here. Every hit makes you <b>bigger, lighter</b> and easier to launch.'),
+        card('wave', 'Off the edge = out', 'The only way out is off the edge! Knock everyone else off the map.'),
+        card('airCannon', 'Charge big shots', 'Hold fire to <b>charge</b>. Aim at feet to pop people <b>up</b>, at their side to push them <b>sideways</b>.'),
+        card('rocket', 'Blast jump', 'Shoot the ground near you to <b>blast jump</b> out of trouble.'),
       ),
       el('div', { class: 'label section-label', text: touch ? 'Touch controls' : 'Keyboard and mouse' }),
       grid,
@@ -1163,15 +1193,15 @@ export function buildSettings(s: Settings, cb: SettingsCallbacks, tab: 'controls
   const panel = el('div', { class: 'panel settings-panel' });
   const body = el('div');
   const tabs = el('div', { class: 'tabs', attrs: { role: 'tablist' } });
-  const tabNames: ['controls' | 'audio' | 'graphics', string][] = [
-    ['controls', '🎮 Controls'],
-    ['audio', '🔊 Audio'],
-    ['graphics', '✨ Graphics'],
+  const tabNames: ['controls' | 'audio' | 'graphics', string, IconName][] = [
+    ['controls', 'Controls', 'gamepad'],
+    ['audio', 'Audio', 'sound'],
+    ['graphics', 'Graphics', 'sparkles'],
   ];
   const render = (t: typeof tab) => {
     clear(tabs);
-    for (const [id, label] of tabNames) {
-      tabs.append(el('button', { class: `tab${id === t ? ' on' : ''}`, text: label, attrs: { role: 'tab', 'aria-selected': String(id === t) }, on: { click: () => render(id) } }));
+    for (const [id, label, ico] of tabNames) {
+      tabs.append(el('button', { class: `tab${id === t ? ' on' : ''}`, attrs: { role: 'tab', 'aria-selected': String(id === t) }, on: { click: () => render(id) } }, iconText(ico, label)));
     }
     clear(body);
     const grid = el('div', { class: 'settings-grid' });

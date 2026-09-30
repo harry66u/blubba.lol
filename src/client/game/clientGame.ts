@@ -84,6 +84,8 @@ import { Human, characterPhoto, characterPhotoUrl, isHumanKey } from '../render/
 import { ViewModel } from '../render/viewModel';
 import { type Settings, saveSettings } from '../settings';
 import { esc, hexColor } from '../ui/dom';
+import { LOOT_ICON, ULT_ICON, UTIL_ICON } from '../ui/gameIcons';
+import { type IconName, iconHtml } from '../ui/icons';
 import { CALLOUT, type Hud, type Nametag } from '../ui/hud';
 import { CRACKED_SHOT_DIST, koVerb } from '../ui/koWords';
 import type { TeamView } from '../ui/menus';
@@ -145,7 +147,7 @@ const TAUNT_TEXT: Record<string, string> = {
 /** Visual versions of every sound pack (the game is fully playable muted). */
 /** Characters taunt their own way (a taunt animation and a line), whatever taunt is equipped. */
 const CHARACTER_TAUNTS: Record<string, { style: string; text: string; color: string }> = {
-  bor: { style: 'flex', text: 'GAINS! 💉', color: '#ffd60a' },
+  bor: { style: 'flex', text: 'GAINS!', color: '#ffd60a' },
   abag: { style: 'wave', text: 'SNIFF SNIFF... FOUND YOU', color: '#ffb38a' },
   sol: { style: 'bow', text: 'PFFFFRRRRT!', color: '#8ee000' },
   kesty: { style: 'dance', text: 'BEEP BOOP', color: '#7fe0ff' },
@@ -1177,11 +1179,11 @@ export class ClientGame {
       case 'loot': {
         this.gadgets.addCrate(e.id, e.x, e.y, e.z, e.groundY, e.fall, true, e.tick);
         // Where it's coming down.
-        this.hud.popup(tmpV.set(e.x, e.groundY + 2.5, e.z), '🍔 BURGER READY!', '#ffcc14', 1.2, 2);
+        this.hud.popup(tmpV.set(e.x, e.groundY + 2.5, e.z), 'BURGER READY!', '#ffcc14', 1.2, 2, false, '', 'burger');
         // One notice per wave of drops, so a burst of crates doesn't spam the screen.
         if (this.time - this.lastDropToast > 4) {
           this.lastDropToast = this.time;
-          this.hud.toast("🍔 BURGER READY! Jo's burger is dropping in. Grab it before anyone else.", 2800);
+          this.hud.toast("BURGER READY! Jo's burger is dropping in. Grab it before anyone else.", 2800, 'burger');
           a.supplyDrop();
         }
         break;
@@ -1196,14 +1198,14 @@ export class ClientGame {
         fx.shockwave(e.x, e.y + 0.6, e.z, 2.2, 0.35, 0xffd60a, false, this.r.camera.position);
         const p = this.posOf(e.by);
         const at = p ? tmpV.set(p.x, p.y + 2.8, p.z) : tmpV.set(e.x, e.y + 2, e.z);
-        this.hud.popup(at, `${info.icon} ${info.name.toUpperCase()}!`, info.color, 1.1, 1.5, e.by !== you);
+        this.hud.popup(at, `${info.name.toUpperCase()}!`, info.color, 1.1, 1.5, e.by !== you, '', LOOT_ICON[e.kind]);
         if (e.by === you) {
-          this.hud.toast(`${info.icon} ${info.name}! ${info.blurb}.`, 3200);
+          this.hud.toast(`${info.name}! ${info.blurb}.`, 3200, LOOT_ICON[e.kind]);
           this.hud.flash('rgba(255, 214, 10, 0.35)', 300);
           a.powerUp();
         } else {
           a.lootGrab([e.x, e.y, e.z]);
-          this.hud.addKill(`<b style="color:${hexColor(this.colorOf(e.by))}">${esc(this.nameOf(e.by))}</b> grabbed ${info.icon} <b>${esc(info.name)}</b>`, false);
+          this.hud.addKill(`<b style="color:${hexColor(this.colorOf(e.by))}">${esc(this.nameOf(e.by))}</b> grabbed ${iconHtml(LOOT_ICON[e.kind])} <b>${esc(info.name)}</b>`, false);
         }
         break;
       }
@@ -1316,7 +1318,7 @@ export class ClientGame {
           this.hud.callout('YOU HAVE THE CROWN!', 'Everyone is coming for you. Stay on!', 2.2, '#ffc933');
           this.announcer.say('New champion!', 2);
         } else if (e.id >= 0) {
-          this.hud.toast(`👑 ${this.nameOf(e.id)} has the crown! Knock them off!`, 3000);
+          this.hud.toast(`${this.nameOf(e.id)} has the crown! Knock them off!`, 3000, 'crown');
         } else if (prev === you) {
           this.hud.toast('You lost the crown!', 2000);
         }
@@ -1489,7 +1491,7 @@ export class ClientGame {
         } else {
           if (p) this.hud.popup(tmpV.set(p.x, p.y + 3.2, p.z), title, '#ffb020', 1, 1.3, true);
           const nm = this.nameOf(e.id);
-          this.hud.addKill(`<b style="color:${hexColor(this.colorOf(e.id))}">${esc(nm)}</b> is on a ${e.n}-pop streak: <b>${title.replace('!', '')}</b> ⚡`, false);
+          this.hud.addKill(`<b style="color:${hexColor(this.colorOf(e.id))}">${esc(nm)}</b> is on a ${e.n}-pop streak: <b>${title.replace('!', '')}</b> ${iconHtml('bolt')}`, false);
         }
         break;
       }
@@ -1498,7 +1500,8 @@ export class ClientGame {
         const killerName = e.killer >= 0 ? this.nameOf(e.killer) : '';
         const vc = hexColor(this.colorOf(e.victim));
         const kc = e.killer >= 0 ? hexColor(this.colorOf(e.killer)) : '';
-        const icons: Record<string, string> = { crown: ' 👑', chain: ' ⛓️', revenge: ' ⚔️', final: ' ×2', pin: ' 📌', double: ' ✌️', triple: ' 🔥', multi: ' 🔥🔥' };
+        const ic = (n: IconName) => ` ${iconHtml(n)}`;
+        const icons: Record<string, string> = { crown: ic('crown'), chain: ic('link'), revenge: ic('duel'), final: ' ×2', pin: ic('pin'), double: ic('sparkles'), triple: ic('fire'), multi: ic('fire') + iconHtml('fire') };
         const suffix = e.tags.map((t) => icons[t] ?? '').join('') + (e.points > 1 ? ` <b>+${e.points}</b>` : '');
         const html =
           e.killer >= 0 && e.tags.includes('sd')
@@ -1897,7 +1900,7 @@ export class ClientGame {
     if (mine) this.hud.flash('rgba(255, 214, 10, 0.5)', 600);
     if (w >= 0) {
       this.spectateId = w;
-      this.hud.addKill(`🏁 Round ${e.n}: <b style="color:${hexColor(this.colorOf(w))}">${esc(this.nameOf(w))}</b>${e.over ? ' wins the match!' : ''}`, mine);
+      this.hud.addKill(`${iconHtml('finishFlag')} Round ${e.n}: <b style="color:${hexColor(this.colorOf(w))}">${esc(this.nameOf(w))}</b>${e.over ? ' wins the match!' : ''}`, mine);
     }
   }
 
@@ -2611,10 +2614,11 @@ export class ClientGame {
     const scale = Math.max(0.55, Math.min(1.1, 14 / Math.max(1, dist)));
     rv.tag.el.style.transform = `translate(-50%, -100%) translate(${x}px, ${y}px) scale(${scale})`;
     const pct = Math.round(c.inflation * 100);
-    const text = `${p.crowned ? '👑 ' : ''}${pct}%${p.nemesis ? ' ⚔️' : ''}${this.ultView.tagSuffix(c.ult)}`;
+    // Markup: only numbers and icons go in.
+    const text = `${p.crowned ? `${iconHtml('crown')} ` : ''}${pct}%${p.nemesis ? ` ${iconHtml('duel')}` : ''}${this.ultView.tagSuffix(c.ult)}`;
     if (text !== rv.lastTagText) {
       rv.lastTagText = text;
-      rv.tag.pct.textContent = text;
+      rv.tag.pct.innerHTML = text;
       const hue = 120 - Math.min(1, c.inflation) * 120;
       rv.tag.pct.style.color = pct === 0 ? '#ffffff' : `hsl(${hue}, 95%, 68%)`;
       rv.tag.el.classList.toggle('danger', c.inflation >= 0.75);
@@ -3143,10 +3147,10 @@ export class ClientGame {
       u2: 1 - Math.min(1, p.u2Cool / BALANCE.utilities[this.equippedUtils[1]].cooldown),
       reloading: p.reloadTimer > 0,
       features: this.ctx.features,
-      utilIcons: [UTILITY_INFO[this.equippedUtils[0]].icon, UTILITY_INFO[this.equippedUtils[1]].icon],
+      utilIcons: [UTIL_ICON[this.equippedUtils[0]], UTIL_ICON[this.equippedUtils[1]]],
       ult: alive ? Math.min(1, p.ult) : 0,
       ultReady: alive && ultReady(p),
-      ultIcon: ULT_INFO[ultOf(p)].icon,
+      ultIcon: ULT_ICON[ultOf(p)],
       ultName: ULT_INFO[ultOf(p)].name,
       ultFace: this.charFaceUrl(ultOf(p)),
     });
@@ -3290,6 +3294,11 @@ export class ClientGame {
       if (c && c.mode !== MODE_DEAD) place(c.px, c.py, c.pz, c.inflation);
     }
     this.circles.end();
+  }
+
+  /** The map showing now (behind the menu, or the match's). */
+  menuMapId(): string {
+    return this.map.id;
   }
 
   /** Menu background: shows this map (the one picked on the menu) while you're not in a match. */

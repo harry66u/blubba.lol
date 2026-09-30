@@ -1,11 +1,12 @@
 import { add, el } from './dom';
+import { type IconName, icon as iconEl } from './icons';
 
 export interface UltHudState {
   alive: boolean;
   /** Meter 0..1. */
   frac: number;
   ready: boolean;
-  icon: string;
+  icon: IconName;
   name: string;
   /** Photo of the person the ult turns you into (shown in the meter), or null for the icon. */
   face: string | null;
@@ -13,6 +14,8 @@ export interface UltHudState {
   key: string;
   /** What your ult is doing right now ('' = nothing), and whether it's a warning (being chased). */
   status: string;
+  /** The icon in front of the status line. */
+  statusIcon: IconName | null;
   warn: boolean;
   /** Screen tints: standing in a Crop Duster cloud, Robot Mode scanning, being chased. */
   gassed: boolean;
@@ -79,8 +82,8 @@ export class UltHud {
     this.setIf('look', `${s.icon}|${s.color}|${s.name}|${s.face}`, () => {
       this.icon.textContent = '';
       // Whose ult it is: their face (their icon as a badge) and their name on top.
-      if (s.face) add(this.icon, el('img', { class: 'ult-face', attrs: { src: s.face, alt: '' } }), el('span', { class: 'ult-badge', text: s.icon }));
-      else this.icon.textContent = s.icon;
+      if (s.face) add(this.icon, el('img', { class: 'ult-face', attrs: { src: s.face, alt: '' } }), el('span', { class: 'ult-badge' }, iconEl(s.icon)));
+      else this.icon.append(iconEl(s.icon));
       this.meter.style.setProperty('--ult', s.color);
       this.arc.setAttribute('stroke', s.color);
       this.meter.title = s.name;
@@ -92,8 +95,9 @@ export class UltHud {
     });
     this.setIf('key', s.key, () => (this.key.textContent = s.key));
     this.setIf('dead', s.alive, () => this.meter.classList.toggle('dead', !s.alive));
-    this.setIf('status', `${s.status}|${s.warn}`, () => {
-      this.status.textContent = s.status;
+    this.setIf('status', `${s.statusIcon}|${s.status}|${s.warn}`, () => {
+      this.status.textContent = '';
+      if (s.status) add(this.status, s.statusIcon ? iconEl(s.statusIcon) : null, s.status);
       this.status.classList.toggle('hidden', !s.status);
       this.status.classList.toggle('warn', s.warn);
       this.status.style.setProperty('--ult', s.color);
@@ -121,14 +125,14 @@ export class UltHud {
   }
 
   /** You popped your ult: a banner near the top of the screen for a moment. */
-  splash(name: string, icon: string, color: string, tagline: string, by: string, face: string | null = null): void {
+  splash(name: string, icon: IconName, color: string, tagline: string, by: string, face: string | null = null): void {
     this.splashEl.textContent = '';
     this.splashEl.style.setProperty('--ult', color);
     add(
       this.splashEl,
       el('div', { class: 'rays' }),
       // The person you turn into, when they've lent their face; else the ult's icon.
-      face ? el('div', { class: 'who' }, el('img', { attrs: { src: face, alt: '' } }), el('span', { class: 'ico-badge', text: icon })) : el('div', { class: 'ico', text: icon }),
+      face ? el('div', { class: 'who' }, el('img', { attrs: { src: face, alt: '' } }), el('span', { class: 'ico-badge' }, iconEl(icon))) : el('div', { class: 'ico' }, iconEl(icon)),
       el('div', { class: 'nm', text: `${name.toUpperCase()}!` }),
       el('div', { class: 'tag', text: tagline }),
       by ? el('div', { class: 'by', text: by }) : null,

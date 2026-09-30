@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { BALANCE } from '../../shared/balance';
-import { utilityIcon } from '../../shared/loadout';
 import { clear, el, formatTime } from './dom';
+import { utilIconByName } from './gameIcons';
+import { type IconName, icon as iconEl, iconHtml, setRich } from './icons';
 import { UltHud } from './ultHud';
 import type { PopupWords } from '../settings';
 
@@ -220,13 +221,14 @@ export class Hud {
     const utils = el('div', { class: 'utils' });
     for (const k of ['C', 'G']) {
       const cool = el('div', { class: 'cool' });
-      const icon = el('div', { text: '?' });
-      const key = el('div', { class: 'k', text: k });
-      const box = el('div', { class: 'util' }, key, icon, cool);
-      utils.append(box);
+      const icon = el('div', { class: 'util-ico' });
+      // The key sits under the slot as a keycap (inside, it was squeezed into the rounded corner).
+      const key = el('div', { class: 'k kc', text: k });
+      const box = el('div', { class: 'util' }, icon, cool);
+      utils.append(el('div', { class: 'util-slot' }, box, key));
       this.utilEls.push({ box, cool, icon, k: key });
     }
-    this.pinBadge = el('div', { class: 'pin-badge hidden', text: '📌 PIN' });
+    this.pinBadge = el('div', { class: 'pin-badge hidden' }, iconEl('pin'), el('span', { text: 'PIN' }));
     this.powerBadge = el('div', { class: 'power-badge hidden' });
     this.eventBanner = el('div', { class: 'event-banner hidden' });
 
@@ -285,7 +287,7 @@ export class Hud {
   /** Current key (or controller button) for each ability, shown next to it. */
   setKeys(keys: Record<'dash' | 'brace' | 'grab' | 'grapple' | 'reload' | 'camera' | 'util1' | 'util2', string>, thirdPerson: boolean): void {
     this.setIf('keys', `${Object.values(keys).join('|')}|${thirdPerson}`, () => {
-      for (const id of ['dash', 'brace', 'grab', 'grapple', 'reload', 'camera'] as const) this.keyChips[id].textContent = keys[id];
+      for (const id of ['dash', 'brace', 'grab', 'grapple', 'reload', 'camera'] as const) setRich(this.keyChips[id], keys[id]);
       this.keyChips.cameraLabel.textContent = thirdPerson ? '1ST PERSON' : '3RD PERSON';
       this.utilEls[0].k.textContent = keys.util1;
       this.utilEls[1].k.textContent = keys.util2;
@@ -300,8 +302,10 @@ export class Hud {
       this.tipEl.classList.toggle('done', done);
       if (!tip) return;
       clear(this.tipEl);
+      const keyEl = el('span', { class: 'key' });
+      setRich(keyEl, tip.key);
       this.tipEl.append(
-        el('span', { class: 'key', text: tip.key }),
+        keyEl,
         el('div', {}, el('div', { class: 't', text: done ? `${tip.title} ✓` : tip.title }), el('div', { class: 'd', text: done ? 'Nice!' : tip.text })),
       );
     });
@@ -378,21 +382,22 @@ export class Hud {
     }
     this.utilEls[0].cool.style.height = `${Math.round((1 - s.u1Ready) * 100)}%`;
     this.utilEls[1].cool.style.height = `${Math.round((1 - s.u2Ready) * 100)}%`;
-    const power = [
-      s.turbo > 0 ? `⚡ TURBO ${Math.ceil(s.turbo)}s` : '',
-      s.mega > 0 ? `💥 MEGA ×${Math.ceil(s.mega)}` : '',
-      (s.feather ?? 0) > 0 ? `🪶 FEATHER ${Math.ceil(s.feather!)}s` : '',
-      (s.spring ?? 0) > 0 ? `👟 SPRING ×${s.spring}` : '',
-      (s.helium ?? 0) > 0 ? `🎈 FLOATING ${Math.ceil(s.helium!)}s` : '',
-    ]
-      .filter(Boolean)
-      .join('  ');
-    this.setIf('power', power, () => {
-      this.powerBadge.textContent = power;
-      this.powerBadge.classList.toggle('hidden', !power);
+    const power = (
+      [
+        s.turbo > 0 ? ['bolt', `TURBO ${Math.ceil(s.turbo)}s`] : null,
+        s.mega > 0 ? ['boom', `MEGA ×${Math.ceil(s.mega)}`] : null,
+        (s.feather ?? 0) > 0 ? ['feather', `FEATHER ${Math.ceil(s.feather!)}s`] : null,
+        (s.spring ?? 0) > 0 ? ['spring', `SPRING ×${s.spring}`] : null,
+        (s.helium ?? 0) > 0 ? ['heliumBalloon', `FLOATING ${Math.ceil(s.helium!)}s`] : null,
+      ] as ([IconName, string] | null)[]
+    ).filter((x) => x !== null);
+    this.setIf('power', power.map((x) => x[1]).join('|'), () => {
+      // Only numbers and fixed words go in, so the markup is safe.
+      this.powerBadge.innerHTML = power.map(([i, t]) => `<span class="pw">${iconHtml(i)}${t}</span>`).join('');
+      this.powerBadge.classList.toggle('hidden', !power.length);
     });
     this.pinBadge.classList.toggle('hidden', s.pin <= 0);
-    if (s.pin > 0) this.setIf('pin', Math.ceil(s.pin), () => (this.pinBadge.textContent = `📌 PIN ${Math.ceil(s.pin)}s`));
+    if (s.pin > 0) this.setIf('pin', Math.ceil(s.pin), () => (this.pinBadge.lastElementChild!.textContent = `PIN ${Math.ceil(s.pin)}s`));
     this.reloadBar.classList.toggle('hidden', s.reloadFrac <= 0);
     if (s.reloadFrac > 0) this.reloadFill.style.width = `${Math.round(s.reloadFrac * 100)}%`;
     this.setIf('weapon', s.weaponName, () => (this.weaponName.textContent = s.weaponName));
@@ -409,7 +414,7 @@ export class Hud {
     this.grabFill.style.height = `${Math.round(s.grabReady * 100)}%`;
     this.grappleFill.style.height = `${Math.round(s.grappleReady * 100)}%`;
     this.setIf('hint', s.hint, () => {
-      this.hintEl.textContent = s.hint;
+      setRich(this.hintEl, s.hint);
       this.hintEl.classList.toggle('hidden', !s.hint);
     });
     this.escapeBox.classList.toggle('hidden', s.heldTime < 0);
@@ -570,7 +575,10 @@ export class Hud {
     names.forEach((n, i) => {
       const u = this.utilEls[i];
       if (!u) return;
-      u.icon.textContent = utilityIcon(n);
+      clear(u.icon);
+      const ico = utilIconByName(n);
+      if (ico) u.icon.append(iconEl(ico));
+      else u.icon.textContent = '?';
       u.box.title = n;
     });
   }
@@ -632,7 +640,11 @@ export class Hud {
     const m = el('div', { class: 'main', text: main });
     if (color) m.style.color = color;
     this.calloutBox.append(m);
-    if (sub) this.calloutBox.append(el('div', { class: 'sub', text: sub }));
+    if (sub) {
+      const subEl = el('div', { class: 'sub' });
+      setRich(subEl, sub);
+      this.calloutBox.append(subEl);
+    }
     this.calloutBox.classList.toggle('small', prio <= CALLOUT.info);
     this.calloutBox.classList.toggle('big', prio >= CALLOUT.match);
     this.calloutTimer = seconds;
@@ -646,7 +658,9 @@ export class Hud {
       const key = `${big}|${small}`;
       this.setIf('respawn', key, () => {
         clear(this.respawnBox);
-        this.respawnBox.append(el('div', { class: 'big', text: big }), el('div', { class: 'small', text: small }));
+        const smallEl = el('div', { class: 'small' });
+        setRich(smallEl, small);
+        this.respawnBox.append(el('div', { class: 'big', text: big }), smallEl);
       });
     }
   }
@@ -665,8 +679,8 @@ export class Hud {
     arc.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 900, easing: 'ease-out' }).onfinish = () => arc.remove();
   }
 
-  toast(text: string, ms = 2500): void {
-    const t = el('div', { class: 'toast', text });
+  toast(text: string, ms = 2500, ico?: IconName): void {
+    const t = el('div', { class: 'toast' }, ico ? iconEl(ico) : null, text);
     this.root.append(t);
     window.setTimeout(() => t.remove(), ms);
   }
@@ -679,7 +693,7 @@ export class Hud {
    * same word already showing close by isn't repeated. When the screen holds too many, the oldest
    * minor one goes first, then the oldest of the rest (your damage numbers go last).
    */
-  popup(pos: THREE.Vector3, text: string, color = '#ffffff', scale = 1, life = 1, minor = false, cls = ''): void {
+  popup(pos: THREE.Vector3, text: string, color = '#ffffff', scale = 1, life = 1, minor = false, cls = '', ico?: IconName): void {
     const mode = this.popupWords;
     const live = (p: WorldPopup) => p.life > p.max * 0.3;
     if (minor) {
@@ -688,7 +702,7 @@ export class Hud {
     }
     const gain = cls === 'gain';
     if (!gain && this.worldPopups.some((p) => p.el.textContent === text && p.life > p.max * 0.4 && p.pos.distanceTo(pos) < 5)) return;
-    const e = el('div', { class: `popup${cls ? ` ${cls}` : ''}${minor ? ' minor' : ''}`, text });
+    const e = el('div', { class: `popup${cls ? ` ${cls}` : ''}${minor ? ' minor' : ''}` }, ico ? iconEl(ico) : null, text);
     e.style.color = color;
     this.popups.append(e);
     this.worldPopups.push({ el: e, pos: pos.clone(), life, max: life, vy: gain ? 2.4 : 1.4, scale, minor, gain });

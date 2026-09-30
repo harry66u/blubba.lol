@@ -1313,6 +1313,18 @@ export class TubeMan {
     this.group.visible = v;
   }
 
+  /**
+   * The box around one part (for framing the locker's item pictures): the head with its face and
+   * hat, the base, or the whole body without the flailing arms.
+   */
+  partBox(part: 'head' | 'base' | 'body', out = new THREE.Box3()): THREE.Box3 {
+    this.group.updateMatrixWorld(true);
+    out.makeEmpty();
+    const parts = part === 'head' ? [this.face, this.hair] : part === 'base' ? [this.base] : [this.base, this.body.mesh, this.face, this.hair];
+    for (const o of parts) out.expandByObject(o, true);
+    return out;
+  }
+
   dispose(): void {
     this.body.dispose();
     for (const a of this.arms) a.dispose();

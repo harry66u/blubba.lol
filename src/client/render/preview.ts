@@ -4,6 +4,14 @@ import type { WeaponId } from '../../shared/loadout';
 import { Effects, newTrailState } from './effects';
 import { type Look, TubeMan, defaultPose } from './tubeMan';
 
+/** Which part of the tube man an item thumbnail shows. */
+export type ThumbFrame = 'body' | 'head' | 'hat' | 'base';
+
+/** Thumbnails already drawn (item, color): kept for the whole visit, so reopening the locker is instant. */
+const thumbCache = new Map<string, string>();
+/** Thumbnail size in device pixels (drawn at about 48 px on a 2x screen). */
+const THUMB_PX = 112;
+
 /** How long a showcase hop lasts, and how often the preview hops while you browse trails. */
 const HOP_TIME = 1.1;
 const HOP_EVERY = 1.9;
@@ -35,6 +43,11 @@ export class TubePreview {
   private hopWait = 0;
   /** Keep hopping (the Trails tab is open). */
   private showTrail = false;
+  /** Item thumbnails waiting to be drawn (a few per frame, before the preview itself). */
+  private thumbQueue: { key: string; color: number; look: Look; frame: ThumbFrame; done: (url: string) => void }[] = [];
+  private thumbScene: THREE.Scene | null = null;
+  private thumbMan: TubeMan | null = null;
+  private readonly thumbCam = new THREE.PerspectiveCamera(30, 1, 0.1, 50);
 
   constructor(color: number, look: Look, weapon: WeaponId) {
     this.color = color;
@@ -106,6 +119,77 @@ export class TubePreview {
     this.man.setDecal(tex);
   }
 
+  /**
+   * A picture of an item on a tube man in your color (the real 3D item, the same as in a match),
+   * for the locker's item cards. Cached; the ones not drawn yet are drawn a few per frame.
+   */
+  thumb(key: string, color: number, look: Look, frame: ThumbFrame, done: (url: string) => void): void {
+    const id = `${key}|${color}`;
+    const hit = thumbCache.get(id);
+    if (hit) return done(hit);
+    this.thumbQueue.push({ key: id, color, look, frame, done });
+  }
+
+  /** Draws one queued thumbnail into the corner of the canvas and copies it out (the preview is drawn over it right after). */
+  private drawThumb(): void {
+    const job = this.thumbQueue.shift();
+    if (!job) return;
+    const hit = thumbCache.get(job.key);
+    if (hit) return job.done(hit);
+    if (!this.thumbScene || !this.thumbMan) {
+      this.thumbScene = new THREE.Scene();
+      this.thumbScene.environment = this.scene.environment;
+      const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+      sun.position.set(3, 6, 4);
+      this.thumbScene.add(sun, new THREE.HemisphereLight(0xdff2ff, 0xffe0f0, 1.1));
+      this.thumbMan = new TubeMan(job.color, { seed: 4.2, look: job.look });
+      this.thumbScene.add(this.thumbMan.group);
+    }
+    const man = this.thumbMan;
+    man.setColor(job.color);
+    man.setLook(job.look);
+    // Stand still facing the camera; a few steps let the tube settle into its idle shape.
+    const pose = defaultPose();
+    pose.yaw = Math.PI;
+    for (let i = 0; i < 8; i++) {
+      pose.time = 0.4 + i / 30;
+      pose.dt = 1 / 30;
+      man.update(pose);
+    }
+    // Frame the part the item is on (arms left out: they flail and would zoom it out).
+    const box = man.partBox(job.frame === 'hat' ? 'head' : job.frame);
+    const size3 = box.getSize(new THREE.Vector3());
+    const mid = box.getCenter(new THREE.Vector3());
+    const pad = job.frame === 'body' ? 1.06 : job.frame === 'base' ? 1.25 : 1.3;
+    const half = (Math.max(size3.y, size3.x * 0.9) / 2) * pad;
+    const cam = this.thumbCam;
+    const dist = half / Math.tan((cam.fov * Math.PI) / 360);
+    // Bases are seen a little from above; everything else straight on.
+    const tilt = job.frame === 'base' ? 0.45 : 0.06;
+    cam.position.set(mid.x, mid.y + dist * tilt, mid.z + size3.z / 2 + dist);
+    cam.lookAt(mid.x, mid.y, mid.z);
+    cam.aspect = 1;
+    cam.updateProjectionMatrix();
+    // Drawn in the bottom-left corner, copied out, then the preview frame covers it.
+    const r = this.renderer;
+    const pr = r.getPixelRatio();
+    const size = Math.min(THUMB_PX, this.canvas.width, this.canvas.height);
+    r.setScissorTest(true);
+    r.setViewport(0, 0, size / pr, size / pr);
+    r.setScissor(0, 0, size / pr, size / pr);
+    r.setClearColor(0x000000, 0);
+    r.clear();
+    r.render(this.thumbScene, cam);
+    const out = document.createElement('canvas');
+    out.width = out.height = size;
+    out.getContext('2d')?.drawImage(this.canvas, 0, this.canvas.height - size, size, size, 0, 0, size, size);
+    r.setScissorTest(false);
+    r.setViewport(0, 0, this.canvas.width / pr, this.canvas.height / pr);
+    const url = out.toDataURL('image/png');
+    thumbCache.set(job.key, url);
+    job.done(url);
+  }
+
   /** Plays a taunt so you can see what you're buying. */
   taunt(style: string): void {
     this.man.taunt(style);
@@ -159,6 +243,8 @@ export class TubePreview {
       this.man.update(this.pose);
       this.effects.trail(this.trailState, this.man.trail, x, y + 0.95, 0, flying);
       this.effects.update(dt);
+      // Two thumbnails a frame at most, so opening a category never stalls the preview.
+      for (let i = 0; i < 2 && this.thumbQueue.length; i++) this.drawThumb();
       this.renderer.render(this.scene, this.camera);
       this.raf = requestAnimationFrame(loop);
     };
@@ -170,6 +256,8 @@ export class TubePreview {
     window.removeEventListener('pointerup', this.stopDrag);
     window.removeEventListener('pointercancel', this.stopDrag);
     this.man.dispose();
+    this.thumbMan?.dispose();
+    this.thumbQueue = [];
     this.renderer.dispose();
     this.renderer.forceContextLoss();
   }

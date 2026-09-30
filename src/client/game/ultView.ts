@@ -19,6 +19,8 @@ import type { Effects } from '../render/effects';
 import type { TubeManPose } from '../render/tubeMan';
 import { CALLOUT, type Hud } from '../ui/hud';
 import { esc, hexColor } from '../ui/dom';
+import { ULT_ICON } from '../ui/gameIcons';
+import { type IconName, iconHtml } from '../ui/icons';
 
 /** One player as the ult visuals see them (you included). */
 export interface UltPlayerView {
@@ -301,7 +303,7 @@ export class UltView {
       // Already shown when you pressed it (predicted); otherwise show it now.
       if (this.time - this.predictedAt > 1) this.selfPop(e.kind);
     } else {
-      g.hud.addKill(`${this.nameHtml(e.id)} turned into <b style="color:${info.color}">${info.icon} ${esc(info.name.toUpperCase())}</b>`, e.targets.includes(you));
+      g.hud.addKill(`${this.nameHtml(e.id)} turned into <b style="color:${info.color}">${iconHtml(ULT_ICON[e.kind])} ${esc(info.name.toUpperCase())}</b>`, e.targets.includes(you));
       const head = this.headOf(e.id);
       if (head) g.hud.popup(head.clone().setY(head.y + 1), `${info.name.toUpperCase()}!`, info.color, 1.3, 1.6);
       g.audio.ultGo(e.kind, at);
@@ -397,7 +399,7 @@ export class UltView {
   private selfPop(kind: UltId): void {
     const g = this.g;
     const info = ULT_INFO[kind];
-    g.hud.ult.splash(info.name, info.icon, info.color, info.tagline, info.by, g.charFace(kind));
+    g.hud.ult.splash(info.name, ULT_ICON[kind], info.color, info.tagline, info.by, g.charFace(kind));
     g.hud.flash(`${info.color}30`, 300);
     g.audio.ultGo(kind, null);
     g.shake(0.3, 6);
@@ -427,7 +429,7 @@ export class UltView {
     if (e.id !== you && this.g.alive() && Math.hypot(p.px - e.x, p.pz - e.z) < e.r + 1) {
       this.g.hud.callout('CROP DUSTED!', `${this.g.nameOf(e.id)} let one rip right next to you`, 1.6, '#8ee000');
       this.g.hud.flash('rgba(140, 224, 0, 0.55)', 700);
-      this.g.hud.addKill(`${this.nameHtml(e.id)} <b style="color:#8ee000">💨 CROP DUSTED</b> you`, true);
+      this.g.hud.addKill(`${this.nameHtml(e.id)} <b style="color:#8ee000">${iconHtml('gasCloud')} CROP DUSTED</b> you`, true);
     }
   }
 
@@ -476,7 +478,7 @@ export class UltView {
     g.audio.gotcha(id === you || target === you ? null : this.at(target));
     if (target === you) g.hud.callout('BAGGED!', 'ABAG got you! Dash when the marker hits green to wriggle free!', 1.8, ULT_INFO.chase.color);
     else if (id === you) g.hud.callout('BAGGED!', 'Now throw them off the map (extra hard)!', 1.6, ULT_INFO.chase.color);
-    g.hud.addKill(`${this.nameHtml(id)} <b style="color:${ULT_INFO.chase.color}">👜 BAGGED</b> ${this.nameHtml(target)}`, id === you || target === you);
+    g.hud.addKill(`${this.nameHtml(id)} <b style="color:${ULT_INFO.chase.color}">${iconHtml('bag')} BAGGED</b> ${this.nameHtml(target)}`, id === you || target === you);
     const p = this.headOf(target);
     if (p) g.effects.confettiBurst(p.x, p.y, p.z, 30, [0xff5fd2, 0xffffff]);
   }
@@ -782,30 +784,38 @@ export class UltView {
     const you = g.youId();
     const chaser = players.find((q) => q.id !== you && publicUltKind(q.ult) === 'chase' && q.ultTarget === you);
     let status = '';
+    let statusIcon: IconName | null = null;
     let warn = false;
     if (alive) {
       switch (activeUlt(p)) {
         case 'bigBlow':
-          status = `${info.icon} BIG BLOW LOADED: FIRE!`;
+          statusIcon = 'bigBlow';
+          status = 'BIG BLOW LOADED: FIRE!';
           break;
         case 'juice':
-          status = `💪 JUICED ${Math.ceil(p.juiceTimer)}s`;
+          statusIcon = 'syringe';
+          status = `JUICED ${Math.ceil(p.juiceTimer)}s`;
           break;
         case 'chase':
-          status = p.chaseTarget >= 0 ? `👃 HUNTING ${g.nameOf(p.chaseTarget).toUpperCase()} ${Math.ceil(p.chaseTimer)}s` : '👃 SNIFFING...';
+          statusIcon = 'nose';
+          status = p.chaseTarget >= 0 ? `HUNTING ${g.nameOf(p.chaseTarget).toUpperCase()} ${Math.ceil(p.chaseTimer)}s` : 'SNIFFING...';
           break;
         case 'cropDuster':
-          status = '💨 ...';
+          statusIcon = 'gasCloud';
+          status = '...';
           break;
         case 'robot':
-          status = this.time < this.robotScanUntil ? '🤖 TARGET ACQUIRED' : '🤖 EXECUTING';
+          statusIcon = 'robot';
+          status = this.time < this.robotScanUntil ? 'TARGET ACQUIRED' : 'EXECUTING';
           break;
         case 'pride':
-          status = `🌈 PRIDE PARADE ${Math.ceil(p.prideTimer)}s`;
+          statusIcon = 'rainbow';
+          status = `PRIDE PARADE ${Math.ceil(p.prideTimer)}s`;
           break;
         default:
           if (chaser) {
-            status = `👃 ${g.nameOf(chaser.id).toUpperCase()} IS ON YOUR SCENT!`;
+            statusIcon = 'nose';
+            status = `${g.nameOf(chaser.id).toUpperCase()} IS ON YOUR SCENT!`;
             warn = true;
           }
       }
@@ -814,12 +824,13 @@ export class UltView {
       alive,
       frac: Math.min(1, p.ult),
       ready,
-      icon: info.icon,
+      icon: ULT_ICON[ultOf(p)],
       name: info.name,
       face: g.charFace(ultOf(p)),
       color: info.color,
       key: g.keyOf(),
       status,
+      statusIcon,
       warn,
       gassed: alive && p.gasTimer > 0,
       scanning: alive && this.time < this.robotScanUntil,
@@ -837,9 +848,9 @@ export class UltView {
     pose.robot = kind === 'robot';
   }
 
-  /** Suffix for name tags: a bolt when their ult is ready. */
+  /** Suffix for name tags (markup): a bolt when their ult is ready. */
   tagSuffix(bits: number): string {
-    return bits & ULT_BIT_READY ? ' ⚡' : '';
+    return bits & ULT_BIT_READY ? ` ${iconHtml('bolt')}` : '';
   }
 }
 

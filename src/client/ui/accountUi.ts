@@ -7,6 +7,7 @@ import { ULT_INFO, type UltId } from '../../shared/game/ults';
 import { checkName } from '../../shared/names';
 import type { AccountClient, LeaderboardRow } from '../net/account';
 import { add, clear, el, hexColor } from './dom';
+import { type IconName, icon } from './icons';
 import { tubeMan } from './mascot';
 
 export type AccountTab = 'signup' | 'login' | 'reset';
@@ -116,7 +117,7 @@ export function buildAccountPanel(account: AccountClient, tab: AccountTab, onClo
       },
     });
     panel.append(
-      el('div', { class: 'account-head' }, tubeMan('#5ee05e', { className: 'flail' }), el('h2', { text: `Welcome, ${account.account?.name ?? ''}! 🎉` })),
+      el('div', { class: 'account-head' }, tubeMan('#5ee05e', { className: 'flail' }), el('h2', {}, `Welcome, ${account.account?.name ?? ''}! `, icon('party'))),
       el('div', { class: 'recovery-note', text: 'Save this recovery code somewhere safe. It is the only way to reset your password (we never ask for your email).' }),
       el('div', { class: 'recovery-row' }, el('div', { class: 'recovery-code', text: recovery }), copy),
       el('button', { class: 'btn big green', text: 'I SAVED IT', on: { click: onDone } }),
@@ -145,7 +146,7 @@ export function buildAccountChip(account: AccountClient, onAccount: () => void, 
           el('div', { class: 'nm', text: account.account?.name ?? 'Guest' }),
           el('div', { class: 'xp', attrs: { title: `${p.xpInto} / ${p.xpNext} XP` } }, el('div', { style: { width: `${pct}%` } })),
         ),
-        el('div', { class: 'coins' }, el('span', { class: 'coin', text: '🪙', attrs: { 'aria-hidden': 'true' } }), el('span', { text: p.coins.toLocaleString('en-US') })),
+        el('div', { class: 'coins' }, el('span', { class: 'coin', attrs: { 'aria-hidden': 'true' } }, icon('coin')), el('span', { text: p.coins.toLocaleString('en-US') })),
       ),
       account.account ? null : el('button', { class: 'btn small blue', text: 'Sign up / Log in', on: { click: onAccount } }),
     );
@@ -171,12 +172,15 @@ function untilText(sec: number): string {
   return h ? `${h}h ${mins % 60}m` : `${mins}m`;
 }
 
-/** What the streak line says: a nudge to play today, or a pat on the back. */
-function streakHint(d: DailyView): string {
-  if (d.playedToday) return d.streak > 1 ? `${d.streak} days in a row! See you tomorrow.` : 'Streak started! See you tomorrow.';
+/** What the streak line says: a nudge to play today (and the coins it's worth), or a pat on the back. */
+function streakHint(d: DailyView): (string | HTMLElement)[] {
+  if (d.playedToday) return [d.streak > 1 ? `${d.streak} days in a row! See you tomorrow.` : 'Streak started! See you tomorrow.'];
   const bonus = DAILY.streakCoins * Math.min(d.streak + 1, DAILY.streakCap);
-  return d.streak ? `Play today for streak day ${d.streak + 1}: +${bonus} 🪙` : `Start a streak today: +${bonus} 🪙`;
+  return [d.streak ? `Play today for streak day ${d.streak + 1}: +${bonus} ` : `Start a streak today: +${bonus} `, icon('coin')];
 }
+
+/** "+12" and a coin. */
+const coinsText = (n: number) => [`+${n} `, icon('coin')];
 
 /**
  * Today's three challenges and the play streak, for the main menu. Beside the main card on wide
@@ -190,7 +194,7 @@ export function buildDailyCard(account: AccountClient): HTMLElement {
   const tick = () => {
     const d = account.profile.daily;
     const left = d.resetsIn - (Date.now() - account.profileAt) / 1000;
-    countdown.textContent = `⏱ New challenges in ${untilText(Math.max(0, left))}`;
+    countdown.replaceChildren(icon('clock'), ` New challenges in ${untilText(Math.max(0, left))}`);
     // Midnight (UTC) passed while the menu was open: fetch the new day's challenges.
     if (left <= 0 && d.challenges.length && !refreshing) {
       refreshing = true;
@@ -210,9 +214,9 @@ export function buildDailyCard(account: AccountClient): HTMLElement {
     const head = el(
       'button',
       { class: 'daily-head', attrs: { 'aria-expanded': String(open) }, on: { click: () => ((open = !open), draw()) } },
-      el('span', { class: 'ttl', text: '🎯 Daily challenges' }),
+      el('span', { class: 'ttl' }, icon('target'), ' Daily challenges'),
       el('span', { class: 'count', text: `${done}/${d.challenges.length}` }),
-      el('span', { class: `streak${d.streak ? '' : ' off'}`, text: `🔥 ${d.streak}`, attrs: { title: `Daily streak: ${d.streak} day${d.streak === 1 ? '' : 's'} in a row` } }),
+      el('span', { class: `streak${d.streak ? '' : ' off'}`, attrs: { title: `Daily streak: ${d.streak} day${d.streak === 1 ? '' : 's'} in a row` } }, icon('fire'), ` ${d.streak}`),
       el('span', { class: 'caret', text: '▾' }),
     );
     const rows = el('div', { class: 'daily-rows' });
@@ -221,12 +225,12 @@ export function buildDailyCard(account: AccountClient): HTMLElement {
         el(
           'div',
           { class: `daily-row${c.done ? ' done' : ''}` },
-          el('div', { class: 'top' }, el('span', { class: 'lbl', text: c.label }), el('span', { class: 'rw', text: c.done ? '✓' : `+${c.coins} 🪙` })),
+          el('div', { class: 'top' }, el('span', { class: 'lbl', text: c.label }), el('span', { class: 'rw' }, ...(c.done ? ['✓'] : coinsText(c.coins)))),
           el('div', { class: 'bottom' }, dailyBar(c), el('span', { class: 'n', text: c.done ? 'Done!' : dailyCount(c) })),
         ),
       );
     }
-    add(card, head, rows, el('div', { class: 'daily-foot' }, el('div', { class: `streak-hint${d.playedToday ? '' : ' nudge'}`, text: streakHint(d) }), countdown));
+    add(card, head, rows, el('div', { class: 'daily-foot' }, el('div', { class: `streak-hint${d.playedToday ? '' : ' nudge'}` }, ...streakHint(d)), countdown));
     tick();
   };
   // Menus are rebuilt often; stop listening once this card is gone.
@@ -246,7 +250,7 @@ function buildDailyMini(d: DailyView): HTMLElement | null {
   return el(
     'div',
     { class: 'daily-mini' },
-    el('div', { class: 'label' }, '🎯 Daily challenges', el('span', { class: 'streak', text: d.streak ? ` · 🔥 ${d.streak}-day streak` : '' })),
+    el('div', { class: 'label' }, icon('target'), ' Daily challenges', d.streak ? el('span', { class: 'streak' }, ' · ', icon('fire'), ` ${d.streak}-day streak`) : null),
     el(
       'div',
       { class: 'cells' },
@@ -258,30 +262,30 @@ function buildDailyMini(d: DailyView): HTMLElement | null {
 }
 
 const MODE_ORDER: ModeId[] = ['knockout', 'suddenDeath', 'teamKnockout', 'ball', 'pump', 'duel'];
-const MEDALS = ['🥇', '🥈', '🥉'];
+const MEDALS: IconName[] = ['medalGold', 'medalSilver', 'medalBronze'];
 
 /** Profile: level, coins, rank, lifetime stats, and the ranked leaderboard. */
 export function buildProfile(account: AccountClient, onClose: () => void, onAccount: () => void, onLogout: () => void, onFaceScan?: () => void): HTMLElement {
   const p = account.profile;
   const s = p.stats;
-  const stat = (icon: string, k: string, v: string) => el('div', { class: 'stat' }, el('div', { class: 'ico', text: icon, attrs: { 'aria-hidden': 'true' } }), el('div', {}, el('div', { class: 'v', text: v }), el('div', { class: 'k', text: k })));
+  const stat = (ico: IconName, k: string, v: string) => el('div', { class: 'stat' }, el('div', { class: 'ico', attrs: { 'aria-hidden': 'true' } }, icon(ico)), el('div', {}, el('div', { class: 'v', text: v }), el('div', { class: 'k', text: k })));
   const hours = Math.floor(s.playSeconds / 3600);
   const mins = Math.round((s.playSeconds % 3600) / 60);
   const grid = el(
     'div',
     { class: 'stat-grid four' },
-    stat('🎮', 'Matches', String(s.matches)),
-    stat('🏆', 'Wins', String(s.wins)),
-    stat('💥', 'Knockouts', String(s.kos)),
-    stat('🎈', 'Times popped', String(s.popped)),
-    stat('🚀', 'Longest launch', `${s.longestLaunch.toFixed(1)} m`),
-    stat('⛓️', 'Chain knockouts', String(s.chainKos)),
-    stat('🎯', 'Best air combo', String(s.bestCombo)),
-    stat('🏐', 'Goals', String(s.goals)),
-    stat('👊', 'Hits landed', String(s.hits)),
-    stat('🌊', 'Fell off', String(s.falls)),
-    stat('⏱️', 'Time played', hours ? `${hours}h ${mins}m` : `${mins}m`),
-    stat('🪙', 'Coins', p.coins.toLocaleString('en-US')),
+    stat('gamepad', 'Matches', String(s.matches)),
+    stat('trophy', 'Wins', String(s.wins)),
+    stat('boom', 'Knockouts', String(s.kos)),
+    stat('heliumBalloon', 'Times popped', String(s.popped)),
+    stat('rocket', 'Longest launch', `${s.longestLaunch.toFixed(1)} m`),
+    stat('link', 'Chain knockouts', String(s.chainKos)),
+    stat('target', 'Best air combo', String(s.bestCombo)),
+    stat('ball', 'Goals', String(s.goals)),
+    stat('fist', 'Hits landed', String(s.hits)),
+    stat('wave', 'Fell off', String(s.falls)),
+    stat('clock', 'Time played', hours ? `${hours}h ${mins}m` : `${mins}m`),
+    stat('coin', 'Coins', p.coins.toLocaleString('en-US')),
   );
   const modes = el('div', { class: 'mode-stats' });
   for (const m of MODE_ORDER) {
@@ -299,12 +303,12 @@ export function buildProfile(account: AccountClient, onClose: () => void, onAcco
   } else {
     rank.append(el('div', { class: 'rating', text: 'Make a free account to play ranked.' }), el('button', { class: 'btn small blue', text: 'Sign up / Log in', on: { click: onAccount } }));
   }
-  const board = el('div', { class: 'leaderboard' }, el('div', { class: 'label', text: '🏆 Top ranked players' }), el('div', { class: 'lb-empty', text: 'Loading...' }));
+  const board = el('div', { class: 'leaderboard' }, el('div', { class: 'label' }, icon('trophy'), ' Top ranked players'), el('div', { class: 'lb-empty', text: 'Loading...' }));
   account
     .leaderboard()
     .then((rows: LeaderboardRow[]) => {
       clear(board);
-      board.append(el('div', { class: 'label', text: '🏆 Top ranked players' }));
+      board.append(el('div', { class: 'label' }, icon('trophy'), ' Top ranked players'));
       if (!rows.length) board.append(el('div', { class: 'lb-empty', text: 'Nobody yet. Be the first!' }));
       rows.forEach((r, i) => {
         const tier = tierFor(r.rating);
@@ -313,7 +317,7 @@ export function buildProfile(account: AccountClient, onClose: () => void, onAcco
           el(
             'div',
             { class: `lb-row${me ? ' me' : ''}${i < 3 ? ` top${i + 1}` : ''}` },
-            el('span', { class: 'n', text: i < 3 ? MEDALS[i] : String(i + 1) }),
+            el('span', { class: 'n' }, i < 3 ? icon(MEDALS[i]) : String(i + 1)),
             el('span', { class: 'nm' }, r.name, me ? el('span', { class: 'you-tag', text: 'YOU' }) : null),
             tierPill(tier.name, tier.color),
             el('span', { class: 'r', text: String(r.rating) }),
@@ -351,7 +355,7 @@ export function buildProfile(account: AccountClient, onClose: () => void, onAcco
         'div',
         { class: 'panel-foot row' },
         el('button', { class: 'btn', text: 'DONE', on: { click: onClose } }),
-        onFaceScan ? el('button', { class: 'btn small blue', text: account.face?.version ? '📸 Change face scan' : '📸 Face scan', on: { click: account.account ? onFaceScan : onAccount } }) : null,
+        onFaceScan ? el('button', { class: 'btn small blue', on: { click: account.account ? onFaceScan : onAccount } }, icon('camera'), account.face?.version ? 'Change face scan' : 'Face scan') : null,
         account.account ? el('button', { class: 'btn small ghost', text: 'Log out', on: { click: onLogout } }) : null,
       ),
     ),
@@ -363,7 +367,7 @@ function unlockName(id: string): string {
   const item = ITEM_BY_ID.get(id);
   if (item) return `${item.name} (${SLOT_INFO[item.slot].name.toLowerCase()}, in your locker)`;
   const ult = ULT_INFO[id as UltId];
-  return PART_INFO[id as SpecialPartId]?.name ?? UTILITY_INFO[id as UtilityId]?.name ?? (ult ? `${ult.icon} ${ult.name} (ult)` : id);
+  return PART_INFO[id as SpecialPartId]?.name ?? UTILITY_INFO[id as UtilityId]?.name ?? (ult ? `${ult.name} (ult)` : id);
 }
 
 /**
@@ -388,13 +392,13 @@ export function buildProgressBox(r: ProgressReport, isGuest: boolean, onSignup: 
       'div',
       { class: 'totals' },
       el('span', { class: 'xp', text: `+${r.reward.xp} XP` }),
-      el('span', { class: 'cn', text: `+${r.reward.coins} 🪙` }),
+      el('span', { class: 'cn' }, ...coinsText(r.reward.coins)),
       el('div', { class: `lv-badge${levelled ? ' up' : ''}`, text: String(p.level) }),
       el('div', { class: 'xp-bar grow fill-in' }, fill),
     ),
   );
   if (levelled) box.append(el('div', { class: 'levelup', text: `LEVEL UP! You're level ${r.levelAfter}.` }));
-  for (const id of r.unlocked) box.append(el('div', { class: 'unlock', text: `🔓 Unlocked: ${unlockName(id)}` }));
+  for (const id of r.unlocked) box.append(el('div', { class: 'unlock' }, icon('unlock'), ` Unlocked: ${unlockName(id)}`));
   if (r.rating) {
     const d = r.rating.after - r.rating.before;
     const tier = tierFor(r.rating.after);
@@ -403,7 +407,16 @@ export function buildProgressBox(r: ProgressReport, isGuest: boolean, onSignup: 
   const details = el('details', { class: 'reward-details' }, el('summary', { text: 'Details' }));
   const lines = el('div', { class: 'lines' });
   for (const l of r.reward.lines) {
-    lines.append(el('div', { class: 'line' }, el('span', { text: l.label }), el('span', { class: 'amt', text: [l.xp ? `+${l.xp} XP` : '', l.coins ? `+${l.coins} 🪙` : ''].filter(Boolean).join('  ') })));
+    // The server marks the streak bonus with a fire emoji: drawn as the fire icon here.
+    const streak = l.label.startsWith('🔥');
+    lines.append(
+      el(
+        'div',
+        { class: 'line' },
+        el('span', {}, streak ? icon('fire') : null, streak ? l.label.replace(/^🔥\s*/u, ' ') : l.label),
+        el('span', { class: 'amt' }, l.xp ? `+${l.xp} XP` : '', l.xp && l.coins ? '  ' : '', ...(l.coins ? coinsText(l.coins) : [])),
+      ),
+    );
   }
   details.append(lines);
   const next = UNLOCKS.find((u) => u.level > p.level);

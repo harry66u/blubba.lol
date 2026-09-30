@@ -3237,12 +3237,20 @@ select.field:disabled {
   background: rgba(29, 27, 58, 0.55);
 }
 
-.util .k {
+.util-slot {
+  position: relative;
+}
+/* The gadget's key: a keycap hanging off the bottom edge, centered. */
+.util-slot .k {
   position: absolute;
-  top: -2px;
-  left: 3px;
+  left: 50%;
+  bottom: -9px;
+  transform: translateX(-50%);
+  margin: 0;
+  min-width: 18px;
+  text-align: center;
   font-size: 11px;
-  z-index: 1;
+  line-height: 14px;
 }
 
 /* Key labels next to abilities (spec: every control is discoverable on screen). */
@@ -3710,8 +3718,12 @@ select.field:disabled {
   .tagline {
     font-size: 19px;
   }
+  /* The main menu needs the room for its card. */
+  .main-menu .menu-head .tagline {
+    display: none;
+  }
   .menu {
-    gap: 12px;
+    gap: 10px;
   }
   .menu-card {
     gap: 10px;
@@ -5676,13 +5688,10 @@ body.touch .inflation .self-gain {
   display: none;
 }
 
-/* "Any mode" (the default) gets the whole first row; a lone last tile (Ranked) spans its row
-   instead of sitting in a corner. */
+/* The Public Queue (the default) takes two tiles of the first row, Sudden Death the third; the
+   other six fill two even rows under them. */
 .mode-picker button[data-mode='any'] {
-  grid-column: 1 / -1;
-}
-.mode-picker button:last-child:nth-child(3n + 2) {
-  grid-column: 1 / -1;
+  grid-column: span 2;
 }
 
 /* Narrow and short screens: PLAY first. The side menu becomes a row of small pills under the
@@ -6565,20 +6574,23 @@ body.mouse-play .touch-controls {
 .bots-switch::after {
   content: '';
   position: absolute;
-  top: 2px;
+  top: 50%;
   left: 2px;
+  box-sizing: border-box;
   width: 18px;
   height: 18px;
   border-radius: 50%;
   background: white;
   border: 2px solid var(--ink);
+  /* Centered in the track, whatever the track's box model. */
+  transform: translateY(-50%);
   transition: transform 0.15s var(--ease-pop);
 }
 .bots-switch.on {
   background: var(--green);
 }
 .bots-switch.on::after {
-  transform: translateX(22px);
+  transform: translate(22px, -50%);
 }
 .bots-switch:focus-visible {
   box-shadow: var(--focus);
@@ -7140,9 +7152,18 @@ body.touch .tl-keys {
   .main-menu .mode-picker {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
-  .main-menu .mode-picker button[data-mode='any'],
-  .main-menu .mode-picker button:last-child {
+  .main-menu .mode-picker button[data-mode='any'] {
     grid-column: auto;
+  }
+  .main-menu .mode-picker button.public-queue .pq-sub {
+    display: none;
+  }
+  .main-menu .mode-picker button.public-queue {
+    font-size: 13px;
+  }
+  .main-menu .mode-picker button.public-queue .nm {
+    white-space: normal;
+    text-align: center;
   }
   /* A mode with its map decided has nothing to pick: the blurb gets the row to itself. */
   .main-menu .menu-card > .map-picker.fixed {
@@ -7204,4 +7225,540 @@ body.touch .tl-keys {
 .click-to-play .device-ask .label {
   margin: 0 4px 0 0;
   color: var(--ink);
+}
+
+/* --- Blubba icons (ui/icons.ts) ---------------------------------------------------------------
+   Drawn in SVG so they look the same everywhere; sized by the text around them. */
+.bl-ico {
+  display: inline-flex;
+  flex: none;
+  width: 1.25em;
+  height: 1.25em;
+  vertical-align: -0.28em;
+  line-height: 0;
+}
+svg.bl-icon {
+  display: inline-block;
+  width: 1.25em;
+  height: 1.25em;
+  vertical-align: -0.28em;
+  overflow: visible;
+}
+.bl-ico > svg.bl-icon {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* An icon and then its word (iconText in menus.ts). */
+.bl-ico + span {
+  margin-left: 0.3em;
+}
+/* Buttons that start with an icon: a gap before the words (and none twice, or for icon-only buttons). */
+.btn > .bl-ico:first-child {
+  margin-right: 0.3em;
+}
+.btn > .bl-ico + span {
+  margin-left: 0;
+}
+.btn.dice .bl-ico,
+.btn.icon-btn .bl-ico {
+  width: 1.3em;
+  height: 1.3em;
+  margin: 0;
+}
+.btn.randomize .bl-ico {
+  margin: 0;
+}
+/* Text lines with an icon in them (feeds, toasts, badges): no extra line height. */
+.killfeed svg.bl-icon,
+.toast .bl-ico,
+.popup .bl-ico {
+  margin-right: 0.2em;
+}
+.toast .bl-ico {
+  margin-right: 0.35em;
+}
+.nametag .pct svg.bl-icon {
+  width: 0.85em;
+  height: 0.85em;
+  vertical-align: -0.1em;
+}
+.power-badge .pw {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+}
+.power-badge .pw + .pw {
+  margin-left: 0.9em;
+}
+.pin-badge .bl-ico + span {
+  margin-left: 0.25em;
+}
+.util .util-ico .bl-ico {
+  width: 38px;
+  height: 38px;
+}
+.queue-spinner {
+  font-size: 46px;
+  line-height: 1;
+  margin: 6px 0;
+  animation: bob 1.4s ease-in-out infinite;
+}
+.notice-icon .bl-ico {
+  width: 1.3em;
+  height: 1.3em;
+}
+.ult-icon > .bl-ico {
+  width: 60%;
+  height: 60%;
+}
+.ult-status .bl-ico {
+  margin-right: 0.3em;
+}
+.rotate-hint .rotate-ico {
+  display: block;
+  margin: 0 auto 8px;
+  width: 56px;
+  height: 56px;
+}
+.invite-card-mini > .inv-ico {
+  width: 34px;
+  height: 34px;
+}
+.howto-panel .key.ico-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+}
+.howto-panel .key.ico-key .bl-ico {
+  width: 22px;
+  height: 22px;
+}
+.results .step .block > .bl-ico {
+  width: 44px;
+  height: 44px;
+}
+.results .crown .bl-ico {
+  width: 1.1em;
+  height: 1.1em;
+}
+.scoreboard-panel td.rank .bl-ico {
+  width: 22px;
+  height: 22px;
+}
+.my-line .bl-ico {
+  margin-right: 0.25em;
+}
+/* Locker items: the icon fills the old emoji's spot; the 3D pictures are drawn a little bigger. */
+.item-grid .item .icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 44px;
+}
+.item-grid .item .icon .bl-ico {
+  width: 40px;
+  height: 40px;
+}
+.item-grid .item .icon.thumb {
+  width: 62px;
+  height: 62px;
+  margin: -8px 0 -2px;
+}
+.item-grid .item .icon.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  animation: pop-in 0.3s var(--ease-pop);
+}
+.item-grid .item .icon.thumb.loading .bl-ico {
+  width: 30px;
+  height: 30px;
+  opacity: 0.35;
+}
+@media (max-width: 560px) {
+  .item-grid .item .icon {
+    height: 32px;
+  }
+  .item-grid .item .icon .bl-ico {
+    width: 30px;
+    height: 30px;
+  }
+  .item-grid .item .icon.thumb {
+    width: 42px;
+    height: 42px;
+    margin: -4px 0 0;
+  }
+}
+.preview-canvas.no-3d {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 96px;
+}
+.touch-controls .tbtn .bl-ico {
+  width: 1.35em;
+  height: 1.35em;
+}
+
+/* --- Public Queue ------------------------------------------------------------------------------
+   The default way in, so it looks like one: a candy gradient with a slow shine, the globe, and a
+   line under its name. Picked, it keeps its colors and gets the yellow ring. */
+.mode-picker button.public-queue {
+  --pq: linear-gradient(135deg, #3ad0ff 0%, #4a8dff 45%, #8a4dff 100%);
+  gap: 8px;
+  color: #fff;
+  font-size: 17px;
+  letter-spacing: 0.3px;
+  text-shadow: 0 2px 0 rgba(29, 27, 58, 0.35);
+  border-color: var(--ink);
+  /* A shine that sweeps across now and then (a background layer, so nothing gets clipped). */
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0) 42%, rgba(255, 255, 255, 0.55) 50%, rgba(255, 255, 255, 0) 58%) no-repeat, var(--pq);
+  background-size: 250% 100%, auto;
+  background-position: 180% 0, 0 0;
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.45), 0 3px 0 var(--ink);
+  animation: pq-shine 5s ease-in-out 0.6s infinite;
+}
+.mode-picker button.public-queue .ico {
+  font-size: 24px;
+  filter: drop-shadow(0 2px 0 rgba(29, 27, 58, 0.35));
+}
+.mode-picker button.public-queue .ico .bl-ico {
+  animation: pq-spin 9s linear infinite;
+}
+.mode-picker button.public-queue .nm {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  white-space: nowrap;
+}
+.mode-picker button.public-queue .pq-sub {
+  display: block;
+  margin-top: 1px;
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+  opacity: 0.92;
+  text-shadow: none;
+}
+.mode-picker button.public-queue:hover {
+  --pq: linear-gradient(135deg, #5cdcff 0%, #5e9bff 45%, #9a63ff 100%);
+  border-color: var(--ink);
+}
+.mode-picker button.public-queue.on {
+  color: #fff;
+  box-shadow: 0 0 0 3px var(--yellow), inset 0 2px 0 rgba(255, 255, 255, 0.45), 0 3px 0 var(--ink);
+}
+@keyframes pq-shine {
+  0% {
+    background-position: 180% 0, 0 0;
+  }
+  30%,
+  100% {
+    background-position: -80% 0, 0 0;
+  }
+}
+@keyframes pq-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mode-picker button.public-queue,
+  .mode-picker button.public-queue .ico .bl-ico {
+    animation: none;
+  }
+}
+/* The live line under the picked mode: a green dot when people are on. */
+.mode-live.on::before {
+  content: '';
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: #2bd46a;
+  border: 2px solid var(--ink);
+  vertical-align: -1px;
+}
+
+/* --- Short windows (a laptop with a small browser window) ------------------------------------------
+   Two columns so the whole card fits without scrolling: your name, the modes and the map on the
+   left; bots, PLAY and the room buttons on the right. A smaller header, and the side menu as a row
+   of pills under the card. (Phones held sideways have their own, tighter version above.) */
+@media (max-height: 760px) and (min-height: 501px) and (min-width: 760px) {
+  .main-menu {
+    gap: 8px;
+    padding-top: 10px;
+    padding-bottom: 8px;
+    justify-content: safe center;
+  }
+  /* Logo and live count on one line at the top left (the account chip holds the top right). */
+  .main-menu .menu-head {
+    align-self: flex-start;
+    margin-left: 12px;
+    flex-direction: row;
+    align-items: center;
+    gap: 14px;
+  }
+  .main-menu .menu-head .tagline {
+    display: none;
+  }
+  .main-menu .menu-head .logo,
+  .main-menu .menu-head .logo-wrap .logo-mascot {
+    font-size: min(9vh, 64px);
+  }
+  .main-menu .menu-head .logo {
+    -webkit-text-stroke: 3px var(--ink);
+    text-shadow: 0 3px 0 var(--ink), 0 10px 14px rgba(29, 27, 58, 0.3);
+    letter-spacing: 4px;
+  }
+  .main-menu .menu-head .active-pill {
+    margin: 0 0 0 44px;
+  }
+  .main-menu .menu-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+  .main-menu .menu-body > .menu-card {
+    order: 0;
+  }
+  .main-menu .menu-body > .menu-nav {
+    order: 1;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    width: min(860px, 94vw);
+    gap: 6px;
+  }
+  .main-menu .menu-body > .daily-card {
+    order: 2;
+    justify-self: auto;
+  }
+  .main-menu .menu-nav .btn.nav-btn {
+    font-size: 14px;
+    padding: 6px 10px;
+    gap: 6px;
+  }
+  .main-menu .menu-nav .nav-btn .ico {
+    width: auto;
+    font-size: 16px;
+  }
+  .main-menu .menu-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    column-gap: 18px;
+    row-gap: 8px;
+    align-items: start;
+    width: min(860px, 94vw);
+    padding: 14px 18px;
+  }
+  .main-menu .menu-card > * {
+    grid-column: 1;
+    margin: 0;
+  }
+  .main-menu .menu-card > .notice,
+  .main-menu .menu-card > .error-text {
+    grid-column: 1 / -1;
+  }
+  .main-menu .menu-card > .name-row {
+    grid-row: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .main-menu .menu-card > .name-row .row {
+    flex: 1;
+  }
+  .main-menu .menu-card > .mode-picker {
+    grid-row: 2;
+    gap: 6px;
+  }
+  .main-menu .menu-card > .mode-blurb {
+    grid-row: 3;
+    font-size: 13px;
+    margin: 0;
+  }
+  .main-menu .menu-card > .mode-live {
+    grid-row: 4;
+    margin: 0;
+  }
+  .main-menu .menu-card > .map-picker {
+    grid-row: 5;
+  }
+  .main-menu .menu-card > .bots-row {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .main-menu .menu-card > .btn.play {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: stretch;
+    font-size: 40px;
+    padding: 10px 20px;
+  }
+  .main-menu .menu-card > .row.split {
+    grid-column: 2;
+    grid-row: 3 / span 2;
+    align-self: start;
+  }
+  .main-menu .menu-card > .row.code-row {
+    grid-column: 2;
+    grid-row: 5;
+    align-self: end;
+  }
+  .main-menu .name-row .field {
+    font-size: 17px;
+    padding: 6px 12px;
+  }
+  .main-menu .mode-picker button {
+    min-height: 38px;
+    font-size: 14px;
+  }
+  .main-menu .mode-picker button.public-queue {
+    font-size: 16px;
+  }
+  .main-menu .code-row .field.code,
+  .main-menu .code-row .btn,
+  .main-menu .row.split .btn {
+    font-size: 16px;
+    padding: 8px 10px;
+  }
+  .main-menu .map-tile {
+    min-height: 30px;
+  }
+  /* The daily challenges fold to one line under the menu (tap to open), as on narrow screens. */
+  .main-menu .daily-card {
+    width: min(460px, 92vw);
+    padding: 6px 14px;
+  }
+  .main-menu .daily-card.open {
+    padding-bottom: 12px;
+  }
+  .main-menu .daily-head {
+    cursor: pointer;
+    min-height: 28px;
+  }
+  .main-menu .daily-head .count,
+  .main-menu .daily-head .caret {
+    display: inline;
+  }
+  .main-menu .daily-card.open .daily-head .caret {
+    transform: rotate(180deg);
+  }
+  .main-menu .daily-card:not(.open) .daily-rows,
+  .main-menu .daily-card:not(.open) .daily-foot {
+    display: none;
+  }
+}
+
+/* --- Motion -------------------------------------------------------------------------------------
+   Loops and one-shot effects the stylesheet names (PLAY breathing and its shine, the connecting
+   dots, the tap ring, the winner's crown and confetti, an error's shake, the dice roll) had no
+   keyframes anywhere, so they never played. Built on the separate scale / translate / rotate
+   properties, so they add to an element's own transform (a hover lift) instead of replacing it.
+   (The entrance animations some screens name, like fade-in and pop-in, stay undefined on purpose:
+   screens such as the team lobby are rebuilt on every update and would replay them over and
+   over.) */
+@keyframes breathe {
+  0%,
+  100% {
+    scale: 1;
+  }
+  50% {
+    scale: 1.035;
+  }
+}
+@keyframes shine {
+  0% {
+    left: -45%;
+  }
+  30%,
+  100% {
+    left: 130%;
+  }
+}
+@keyframes crown-bob {
+  0%,
+  100% {
+    translate: 0 0;
+    rotate: -6deg;
+  }
+  50% {
+    translate: 0 -4px;
+    rotate: 6deg;
+  }
+}
+@keyframes dot-blink {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes radar {
+  0% {
+    opacity: 0.8;
+    scale: 0.5;
+  }
+  100% {
+    opacity: 0;
+    scale: 1.6;
+  }
+}
+@keyframes confetti-fall {
+  0% {
+    opacity: 1;
+    translate: 0 0;
+    rotate: 0deg;
+  }
+  100% {
+    opacity: 1;
+    translate: var(--dx, 0) 105vh;
+    rotate: calc(var(--r, 90deg) * 4);
+  }
+}
+@keyframes shake {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  25% {
+    translate: -6px 0;
+  }
+  75% {
+    translate: 6px 0;
+  }
+}
+@keyframes dice-roll {
+  50% {
+    rotate: 200deg;
+    scale: 1.2;
+  }
+  100% {
+    rotate: 360deg;
+  }
+}
+@keyframes thumb-in {
+  from {
+    opacity: 0;
+    scale: 0.7;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn.play,
+  .btn.play::after,
+  .click-to-play .big-text,
+  .results .step .crown,
+  .confetti i {
+    animation: none;
+  }
 }

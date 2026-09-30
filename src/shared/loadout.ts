@@ -116,12 +116,6 @@ export const UTILITY_INFO: Record<UtilityId, { name: string; blurb: string; icon
   tornado: { name: 'Tornado', blurb: 'Sends a spinning wind column rolling forward that swirls up anyone it catches.', icon: '🌪️' },
 };
 
-/** Utility icon by display name (the HUD and touch buttons know utilities by name). */
-export function utilityIcon(name: string): string {
-  for (const id of UTILITY_IDS) if (UTILITY_INFO[id].name === name) return UTILITY_INFO[id].icon;
-  return '?';
-}
-
 /** Effective weapon stats after parts. Used by the server and by client prediction. */
 export interface WeaponStats {
   id: WeaponId;

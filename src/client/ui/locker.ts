@@ -5,131 +5,68 @@ import type { Audio } from '../audio/audio';
 import type { AccountClient } from '../net/account';
 import { decalTexture, faceTexture } from '../render/facePhoto';
 import { FACES_COVERING_EYES } from '../render/looks';
-import { TubePreview } from '../render/preview';
+import { type ThumbFrame, TubePreview } from '../render/preview';
 import { lookFromCosmetics, patternMask } from '../render/tubeMan';
 import { clear, el, hexColor } from './dom';
+import { type IconName, icon } from './icons';
 
-const SLOT_ICONS: Record<CosmeticSlot, string> = {
-  body: '🧍',
-  color: '🎨',
-  accent: '🖌️',
-  pattern: '🦓',
-  face: '🙂',
-  eyes: '👀',
-  hat: '🎩',
-  base: '🛢️',
-  trail: '✨',
-  finish: '🎯',
-  taunt: '💃',
-  koFx: '💥',
-  sound: '🔊',
+const SLOT_ICONS: Record<CosmeticSlot, IconName> = {
+  body: 'body',
+  color: 'palette',
+  accent: 'brush',
+  pattern: 'stripes',
+  face: 'smile',
+  eyes: 'eyes',
+  hat: 'hat',
+  base: 'pedestal',
+  trail: 'sparkles',
+  finish: 'gloss',
+  taunt: 'taunt',
+  koFx: 'boom',
+  sound: 'music',
 };
 
-const ICONS: Record<string, string> = {
-  'body.classic': '🎈',
-  'body.chonk': '🍩',
-  'body.noodle': '🍝',
-  'body.bighead': '🧠',
-  'body.blocky': '📦',
-  'body.snowman': '⛄',
-  'body.pear': '🍐',
-  'body.hourglass': '⌛',
-  'body.star': '⭐',
-  'body.beads': '🫧',
-  'body.ghost': '👻',
-  'body.bor': '💪',
-  'body.abag': '👃',
-  'body.sol': '💨',
-  'body.kesty': '🤖',
-  'face.smile': '🙂',
-  'face.blush': '☺️',
-  'face.tongue': '😛',
-  'face.grin': '😁',
-  'face.sleepy': '😴',
-  'face.surprised': '😮',
-  'face.winky': '😉',
-  'face.angry': '😠',
-  'face.derp': '🤪',
-  'face.cyclops': '👁️',
-  'face.mustache': '🥸',
-  'face.fangs': '🧛',
-  'face.shades': '😎',
-  'face.visor': '🤖',
-  'eyes.classic': '⚪',
-  'eyes.dot': '⚫',
-  'eyes.lashes': '👁️',
-  'eyes.cat': '🐱',
-  'eyes.star': '🤩',
-  'eyes.heart': '😍',
-  'eyes.googly': '👀',
-  'eyes.spiral': '🌀',
-  'eyes.sparkle': '🥺',
-  'hat.none': '🚫',
-  'hat.spikes': '🌱',
-  'hat.flower': '🌼',
-  'hat.bucket': '👒',
-  'hat.party': '🥳',
-  'hat.cap': '🧢',
-  'hat.beanie': '🧶',
-  'hat.papercrown': '👑',
-  'hat.antenna': '📡',
-  'hat.cone': '🚧',
-  'hat.chef': '🍳',
-  'hat.bunny': '🐰',
-  'hat.propeller': '🚁',
-  'hat.tophat': '🎩',
-  'hat.cowboy': '🤠',
-  'hat.headphones': '🎧',
-  'hat.viking': '🪖',
-  'hat.pirate': '🏴‍☠️',
-  'hat.halo': '😇',
-  'hat.wizard': '🧙',
-  'hat.unicorn': '🦄',
-  'hat.laurel': '🌿',
-  'base.classic': '💨',
-  'base.tire': '🛞',
-  'base.pot': '🪴',
-  'base.trash': '🗑️',
-  'base.duck': '🦆',
-  'base.cloud': '☁️',
-  'base.cake': '🎂',
-  'base.rocket': '🚀',
-  'base.gold': '🏆',
-  'trail.none': '🚫',
-  'trail.bubbles': '🫧',
-  'trail.smoke': '💨',
-  'trail.confetti': '🎊',
-  'trail.sparkles': '✨',
-  'trail.hearts': '💕',
-  'trail.notes': '🎶',
-  'trail.fire': '🔥',
-  'trail.rainbow': '🌈',
-  'trail.comet': '☄️',
-  'taunt.burp': '🫧',
-  'taunt.wave': '👋',
-  'taunt.spin': '🌀',
-  'taunt.noodle': '🍜',
-  'taunt.bow': '🙇',
-  'taunt.flex': '💪',
-  'taunt.dance': '🕺',
-  'taunt.deflate': '🎈',
-  'taunt.backflip': '🤸',
-  'koFx.confetti': '🎊',
-  'koFx.bubbles': '🫧',
-  'koFx.stars': '⭐',
-  'koFx.popcorn': '🍿',
-  'koFx.balloons': '🎈',
-  'koFx.hearts': '💖',
-  'koFx.fireworks': '🎆',
-  'koFx.splash': '🎨',
-  'koFx.rainbow': '🌈',
-  'koFx.supernova': '💥',
-  'sound.classic': '🔊',
-  'sound.boing': '🟣',
-  'sound.kazoo': '🎶',
-  'sound.duck': '🦆',
-  'sound.slide': '🎵',
-  'sound.trumpet': '🎺',
+/** Items you can see on the tube man get a real 3D picture of it, framed on that part. */
+const THUMB_FRAME: Partial<Record<CosmeticSlot, ThumbFrame>> = { body: 'body', face: 'head', eyes: 'head', hat: 'hat', base: 'base' };
+
+/** Items you can't see standing still (trails, taunts, effects, sounds) get an icon instead. */
+const ITEM_ICONS: Record<string, IconName> = {
+  'hat.none': 'none',
+  'trail.none': 'none',
+  'trail.bubbles': 'bubbles',
+  'trail.smoke': 'dash',
+  'trail.confetti': 'party',
+  'trail.sparkles': 'sparkles',
+  'trail.hearts': 'heart',
+  'trail.notes': 'music',
+  'trail.fire': 'fire',
+  'trail.rainbow': 'rainbow',
+  'trail.comet': 'comet',
+  'taunt.burp': 'bubbles',
+  'taunt.wave': 'hand',
+  'taunt.spin': 'swirl',
+  'taunt.noodle': 'noodle',
+  'taunt.bow': 'bow',
+  'taunt.flex': 'muscle',
+  'taunt.dance': 'music',
+  'taunt.deflate': 'heliumBalloon',
+  'taunt.backflip': 'reload',
+  'koFx.confetti': 'party',
+  'koFx.bubbles': 'bubbles',
+  'koFx.stars': 'star',
+  'koFx.popcorn': 'popcorn',
+  'koFx.balloons': 'heliumBalloon',
+  'koFx.hearts': 'heart',
+  'koFx.fireworks': 'sparkles',
+  'koFx.splash': 'palette',
+  'koFx.rainbow': 'rainbow',
+  'koFx.supernova': 'boom',
+  'sound.classic': 'sound',
+  'sound.boing': 'spring',
+  'sound.kazoo': 'party',
+  'sound.duck': 'duck',
+  'sound.slide': 'music',
+  'sound.trumpet': 'airBlaster',
 };
 
 const FINISH_CSS: Record<string, string> = {
@@ -298,7 +235,18 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
     }
     if (item.slot === 'pattern') return el('div', { class: 'swatch-big', style: { background: patternSwatch(item.key, colorOf(), accentOf()) } });
     if (item.slot === 'finish') return el('div', { class: 'swatch-big', style: { background: item.key === 'team' ? hexColor(colorOf()) : FINISH_CSS[item.key] } });
-    return el('div', { class: 'icon', text: ICONS[item.id] ?? '✨' });
+    // Nothing to show (hat or trail off): the "none" sign.
+    const ico = ITEM_ICONS[item.id];
+    const frame = THUMB_FRAME[item.slot];
+    if (ico || !frame || !preview) return el('div', { class: 'icon' }, icon(ico ?? SLOT_ICONS[item.slot]));
+    // The item itself on a tube man in your color, everything else plain (the category's icon until it's drawn).
+    const box = el('div', { class: 'icon thumb loading' }, icon(SLOT_ICONS[item.slot]));
+    const look = lookFromCosmetics({ color: wearing().color, [item.slot]: item.id }, colorIndex(wearing()));
+    preview.thumb(item.id, colorOf(), look, frame, (url) => {
+      box.classList.remove('loading');
+      box.replaceChildren(el('img', { attrs: { src: url, alt: '', draggable: 'false' } }));
+    });
+    return box;
   };
 
   /** Shows an item off in the preview (taunts play, trails hop, sounds play). */
@@ -375,7 +323,7 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
             },
           },
         },
-        el('span', { class: 'cat-icon', text: SLOT_ICONS[s], attrs: { 'aria-hidden': 'true' } }),
+        el('span', { class: 'cat-icon', attrs: { 'aria-hidden': 'true' } }, icon(SLOT_ICONS[s])),
         el('span', { class: 'cat-name', text: categoryName(s) }),
         dot,
       );
@@ -400,7 +348,7 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
         },
       },
     },
-    el('span', { class: 'cat-icon', text: '🖼️', attrs: { 'aria-hidden': 'true' } }),
+    el('span', { class: 'cat-icon', attrs: { 'aria-hidden': 'true' } }, icon('picture')),
     el('span', { class: 'cat-name', text: 'Decal' }),
   );
   cats.append(el('div', { class: 'cat-sep', attrs: { 'aria-hidden': 'true' } }), decalBtn);
@@ -501,7 +449,7 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
 
   const draw = () => {
     const p = account.profile;
-    coins.textContent = `🪙 ${p.coins.toLocaleString('en-US')}`;
+    coins.replaceChildren(icon('coin'), ` ${p.coins.toLocaleString('en-US')}`);
     // Everything in this category has now been seen (the badges stay up until the locker closes).
     if (!viewed.has(slot)) {
       viewed.add(slot);
@@ -531,10 +479,10 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
       // One short status line, only when it matters (nothing for things you own).
       let status: HTMLElement | null = null;
       if (equipped) status = el('div', { class: 'status on', text: takeOff(item.slot) === item.id ? '✓ Wearing' : '✓ Wearing · tap to remove' });
-      else if (levelLocked) status = el('div', { class: 'status level', text: `🔒 Lv ${item.levelReq}` });
+      else if (levelLocked) status = el('div', { class: 'status level' }, icon('lock'), ` Lv ${item.levelReq}`);
       else if (owned) status = null;
-      else if (pending === item.id) status = el('div', { class: 'status buy', text: `Tap again to buy · 🪙 ${item.price}` });
-      else status = el('div', { class: `status price${p.coins < item.price ? ' short' : ''}`, text: `🪙 ${item.price}` });
+      else if (pending === item.id) status = el('div', { class: 'status buy' }, 'Tap again to buy · ', icon('coin'), ` ${item.price}`);
+      else status = el('div', { class: `status price${p.coins < item.price ? ' short' : ''}` }, icon('coin'), ` ${item.price}`);
       const card = el(
         'button',
         {
@@ -604,7 +552,7 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
     el(
       'button',
       { class: 'btn small ghost randomize', attrs: { title: 'Wear a random mix of things you own', 'aria-label': 'Randomize' }, on: { click: randomize } },
-      '🎲',
+      icon('dice'),
       el('span', { class: 'randomize-word', text: ' Randomize' }),
     ),
     el('button', { class: 'btn done-top', text: 'DONE', on: { click: opts.onClose } }),
@@ -612,7 +560,7 @@ export function buildLocker(opts: LockerOptions): { root: HTMLElement; dispose: 
   const left = el(
     'div',
     { class: 'locker-left' },
-    preview ? preview.canvas : el('div', { class: 'preview-canvas no-3d', text: '🎈' }),
+    preview ? preview.canvas : el('div', { class: 'preview-canvas no-3d' }, icon('body')),
     el('div', { class: 'looks-note', text: 'Everything here is just for looks. Nothing changes how you play.' }),
   );
   const root = el(

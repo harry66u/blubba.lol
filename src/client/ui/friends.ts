@@ -1,6 +1,7 @@
 import { MODE_INFO, type ModeId } from '../../shared/game/modes';
 import type { AccountClient, Friend } from '../net/account';
 import { clear, el } from './dom';
+import { icon } from './icons';
 
 export interface FriendsOptions {
   account: AccountClient;
@@ -130,7 +131,7 @@ export function buildFriends(opts: FriendsOptions): { root: HTMLElement; dispose
       );
     });
     section('Sent', fs.filter((f) => f.status === 'outgoing'), (f) => row(f, el('button', { class: 'btn small ghost', text: 'Cancel', on: { click: () => void run(() => account.removeFriend(f.id)) } })));
-    if (!fs.length) list.append(el('div', { class: 'small-note', text: "No friends yet. Add someone by their account name, or tap 👥 next to a player on the scoreboard (Tab) in a match." }));
+    if (!fs.length) list.append(el('div', { class: 'small-note' }, 'No friends yet. Add someone by their account name, or tap ', icon('invite'), ' next to a player on the scoreboard (Tab) in a match.'));
   };
 
   const refresh = () => void account.loadFriends().then(draw, () => undefined);
@@ -144,7 +145,7 @@ export function buildFriends(opts: FriendsOptions): { root: HTMLElement; dispose
     el(
       'div',
       { class: 'panel friends-panel' },
-      el('h2', { text: '👥 Friends' }),
+      el('h2', {}, icon('friends'), ' Friends'),
       el('div', { class: 'row friends-add' }, nameInput, addBtn),
       note,
       list,
@@ -166,7 +167,8 @@ export function buildInvites(invites: Friend[], onJoin: (friendId: number) => vo
       el(
         'div',
         { class: 'invite-card-mini' },
-        el('div', { class: 'grow' }, el('div', { class: 'nm', text: `🎮 ${f.name} invited you!` }), el('div', { class: 'what', text: `Join them in ${mode}` })),
+        icon('invite', 'inv-ico'),
+        el('div', { class: 'grow' }, el('div', { class: 'nm', text: `${f.name} invited you!` }), el('div', { class: 'what', text: `Join them in ${mode}` })),
         el('button', { class: 'btn small green', text: 'JOIN', on: { click: () => onJoin(f.id) } }),
         el('button', { class: 'btn small ghost icon-btn', text: '✕', attrs: { title: 'Dismiss', 'aria-label': 'Dismiss invite' }, on: { click: () => onDismiss(f) } }),
       ),

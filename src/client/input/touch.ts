@@ -1,4 +1,5 @@
 import type { Action, InputManager } from './input';
+import { type IconName, icon, isIconName, setRich } from '../ui/icons';
 
 /** True on phones and tablets (a touch screen with no fine pointer like a mouse). */
 export function isTouchDevice(): boolean {
@@ -29,11 +30,11 @@ export interface TouchState {
   u2: number;
   reloading: boolean;
   features: { brace: boolean; grab: boolean; grapple: boolean };
-  utilIcons: [string, string];
+  utilIcons: [IconName, IconName];
   /** Ult meter 0..1, whether it's ready, and your ult's icon. */
   ult: number;
   ultReady: boolean;
-  ultIcon: string;
+  ultIcon: IconName;
   /** Whose ult it is (the button says their name) and their photo (shown when it's ready). */
   ultName: string;
   ultFace: string | null;
@@ -41,6 +42,7 @@ export interface TouchState {
 
 interface ButtonDef {
   act: Action | 'pause' | 'score' | 'talk';
+  /** A word, or an icon name. */
   label: string;
   cls: string;
 }
@@ -48,19 +50,19 @@ interface ButtonDef {
 const BUTTONS: ButtonDef[] = [
   { act: 'fire', label: 'FIRE', cls: 'fire big' },
   { act: 'jump', label: 'JUMP', cls: 'jump mid' },
-  { act: 'dash', label: '💨', cls: 'dash mid' },
-  { act: 'grapple', label: '🪝', cls: 'grapple small' },
-  { act: 'brace', label: '🛡️', cls: 'brace small' },
-  { act: 'grab', label: '✊', cls: 'grab small' },
-  { act: 'reload', label: '↻', cls: 'reload small' },
+  { act: 'dash', label: 'dash', cls: 'dash mid' },
+  { act: 'grapple', label: 'hook', cls: 'grapple small' },
+  { act: 'brace', label: 'shield', cls: 'brace small' },
+  { act: 'grab', label: 'fist', cls: 'grab small' },
+  { act: 'reload', label: 'reload', cls: 'reload small' },
   { act: 'util1', label: '?', cls: 'util1 small' },
   { act: 'util2', label: '?', cls: 'util2 small' },
   { act: 'ult', label: 'ULT', cls: 'ult mid' },
-  { act: 'camera', label: '🎥', cls: 'camera tiny' },
-  { act: 'taunt', label: '😜', cls: 'taunt tiny' },
-  { act: 'score', label: '🏆', cls: 'score tiny' },
-  { act: 'talk', label: '💬', cls: 'talk tiny' },
-  { act: 'pause', label: '❚❚', cls: 'pause tiny' },
+  { act: 'camera', label: 'video', cls: 'camera tiny' },
+  { act: 'taunt', label: 'taunt', cls: 'taunt tiny' },
+  { act: 'score', label: 'trophy', cls: 'score tiny' },
+  { act: 'talk', label: 'chat', cls: 'talk tiny' },
+  { act: 'pause', label: 'pause', cls: 'pause tiny' },
 ];
 
 /** Radius (px) the move stick can travel from where your thumb landed. */
@@ -99,7 +101,7 @@ export class TouchControls {
     this.stickBase.append(this.stickKnob);
     const rotate = document.createElement('div');
     rotate.className = 'rotate-hint';
-    rotate.textContent = 'Turn your phone sideways to play 📱↻';
+    rotate.append(icon('rotate', 'rotate-ico'), 'Turn your phone sideways to play');
     this.root.append(this.stickBase, rotate);
     for (const b of BUTTONS) {
       const el = document.createElement('div');
@@ -108,7 +110,8 @@ export class TouchControls {
       const fill = document.createElement('div');
       fill.className = 'cd';
       const label = document.createElement('span');
-      label.textContent = b.label;
+      if (isIconName(b.label)) label.append(icon(b.label));
+      else label.textContent = b.label;
       el.append(fill, label);
       this.root.append(el);
       this.buttons.set(b.act, { el, fill });
@@ -287,15 +290,24 @@ export class TouchControls {
     this.buttons.get('grapple')!.el.classList.toggle('hidden', !s.features.grapple);
     const u1 = this.buttons.get('util1')!.el.lastElementChild!;
     const u2 = this.buttons.get('util2')!.el.lastElementChild!;
-    if (u1.textContent !== s.utilIcons[0]) u1.textContent = s.utilIcons[0];
-    if (u2.textContent !== s.utilIcons[1]) u2.textContent = s.utilIcons[1];
+    for (const [e, ico] of [
+      [u1, s.utilIcons[0]],
+      [u2, s.utilIcons[1]],
+    ] as const) {
+      if ((e as HTMLElement).dataset.ico === ico) continue;
+      (e as HTMLElement).dataset.ico = ico;
+      e.replaceChildren(icon(ico));
+    }
     // The ULT button fills up with the meter and glows when it's ready.
     const ult = this.buttons.get('ult')!;
     ult.el.style.setProperty('--ult', s.ult.toFixed(2));
     ult.el.classList.toggle('ready', s.ultReady);
     const ul = ult.el.lastElementChild!;
-    const text = s.ultName ? s.ultName.toUpperCase() : s.ultReady ? s.ultIcon : 'ULT';
-    if (ul.textContent !== text) ul.textContent = text;
+    const text = s.ultName ? s.ultName.toUpperCase() : s.ultReady ? `{${s.ultIcon}}` : 'ULT';
+    if ((ul as HTMLElement).dataset.text !== text) {
+      (ul as HTMLElement).dataset.text = text;
+      setRich(ul as HTMLElement, text);
+    }
     const face = s.ultReady && s.ultFace ? `url("${s.ultFace}")` : 'none';
     if (ult.el.dataset.face !== face) {
       ult.el.dataset.face = face;
@@ -304,19 +316,19 @@ export class TouchControls {
   }
 }
 
-/** Button names shown in hints when playing by touch. */
+/** Button names shown in hints when playing by touch ({name}: that button's icon). */
 export const TOUCH_LABELS: Partial<Record<Action, string>> = {
   fire: 'FIRE',
   jump: 'JUMP',
-  dash: '💨',
-  brace: '🛡️',
-  grab: '✊',
-  grapple: '🪝',
-  reload: '↻',
+  dash: '{dash}',
+  brace: '{shield}',
+  grab: '{fist}',
+  grapple: '{hook}',
+  reload: '{reload}',
   util1: 'left gadget',
   util2: 'right gadget',
   ult: 'ULT',
-  camera: '🎥',
+  camera: '{video}',
   forward: 'stick',
   back: 'stick',
   left: 'stick',

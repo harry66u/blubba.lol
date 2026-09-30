@@ -1,5 +1,6 @@
 import type { AccountClient } from '../net/account';
 import { el } from './dom';
+import { icon } from './icons';
 
 /** Saved face scans are this many pixels square (small enough to load instantly for everyone). */
 const OUT = 384;
@@ -18,9 +19,9 @@ export function buildFaceScan(account: AccountClient, onClose: () => void): { ro
   const zoom = el('input', { attrs: { type: 'range', min: '1', max: '3', step: '0.01', value: '1.3', 'aria-label': 'Zoom' } }) as HTMLInputElement;
   const mine = el('input', { attrs: { type: 'checkbox' } }) as HTMLInputElement;
   const file = el('input', { attrs: { type: 'file', accept: 'image/*' }, style: 'display:none' }) as HTMLInputElement;
-  const snapBtn = el('button', { class: 'btn small blue hidden', text: '📸 Snap' });
-  const camBtn = el('button', { class: 'btn small', text: '🎥 Use camera' });
-  const upBtn = el('button', { class: 'btn small', text: '🖼️ Pick a photo' });
+  const snapBtn = el('button', { class: 'btn small blue hidden' }, icon('camera'), 'Snap');
+  const camBtn = el('button', { class: 'btn small' }, icon('video'), 'Use camera');
+  const upBtn = el('button', { class: 'btn small' }, icon('palette'), 'Pick a photo');
   const saveBtn = el('button', { class: 'btn big green', text: 'SAVE FACE' }) as HTMLButtonElement;
   const removeBtn = el('button', { class: 'btn small ghost', text: 'Remove my face scan' });
 
@@ -212,7 +213,7 @@ export function buildFaceScan(account: AccountClient, onClose: () => void): { ro
     el(
       'div',
       { class: 'panel face-scan' },
-      el('h2', { text: '📸 Face scan' }),
+      el('h2', {}, icon('camera'), ' Face scan'),
       el('div', { class: 'small-note', text: 'Put your own face on your tube man.' }),
       canvas,
       el('div', { class: 'row face-row' }, camBtn, snapBtn, upBtn, file),

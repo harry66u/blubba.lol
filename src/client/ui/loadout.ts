@@ -23,6 +23,8 @@ import { type Cosmetics, ITEMS, cosmeticKey, ownsItem, unlockLevel } from '../..
 import { PLAYER_COLORS } from '../../shared/colors';
 import { GunPreview } from '../render/gunPreview';
 import { clear, el } from './dom';
+import { SLOT_ICON, UTIL_ICON, WEAPON_ICON } from './gameIcons';
+import { icon } from './icons';
 
 const KEY = 'bubba.loadout.v1';
 const BUILDS_KEY = 'bubba.builds.v1';
@@ -82,20 +84,6 @@ export function saveBuilds(builds: (SavedBuild | null)[]): void {
   }
 }
 
-export const WEAPON_ICON: Record<WeaponId, string> = {
-  airCannon: '💨',
-  leafBlower: '🍃',
-  airHorn: '📯',
-  pumpRifle: '🎯',
-  bubbleShotgun: '🫧',
-  balloonMortar: '🎈',
-  popGun: '🍾',
-  skyRocket: '🚀',
-  gustRepeater: '🌀',
-  windLance: '🔱',
-};
-const UTIL_ICON: Partial<Record<string, string>> = Object.fromEntries(UTILITY_IDS.map((u) => [u, UTILITY_INFO[u].icon]));
-const SLOT_ICON: Record<PartSlot, string> = { barrel: '🔭', tank: '🛢️', valve: '🔧', nozzle: '🌬️', grip: '✊' };
 
 /** Same swatches as the locker. */
 const FINISH_CSS: Record<string, string> = {
@@ -301,10 +289,10 @@ export function buildLoadout(opts: BuilderOptions): { root: HTMLElement; dispose
 
   const drawTabs = () => {
     const changed = PART_SLOTS.filter((s) => l.parts[s] !== 'standard').length;
-    tabs.weapon.icon.textContent = WEAPON_ICON[l.weapon];
+    tabs.weapon.icon.replaceChildren(icon(WEAPON_ICON[l.weapon]));
     tabs.weapon.sub.textContent = WEAPON_INFO[l.weapon].name;
     tabs.parts.sub.textContent = changed ? `${changed} changed` : 'Standard';
-    tabs.gadgets.sub.textContent = l.utils.map((u) => UTIL_ICON[u] ?? '✨').join(' ');
+    tabs.gadgets.sub.replaceChildren(...l.utils.map((u) => icon(UTIL_ICON[u])));
     tabs.gadgets.sub.title = l.utils.map((u) => UTILITY_INFO[u].name).join(' + ');
     for (const t of TAB_IDS) {
       const on = t === tab;
@@ -329,7 +317,7 @@ export function buildLoadout(opts: BuilderOptions): { root: HTMLElement; dispose
   };
 
   for (const t of TAB_IDS) {
-    const icon = el('span', { class: 'bt-icon', text: t === 'parts' ? '🔧' : t === 'gadgets' ? '🧰' : '', attrs: { 'aria-hidden': 'true' } });
+    const tabIcon = el('span', { class: 'bt-icon', attrs: { 'aria-hidden': 'true' } }, t === 'parts' ? icon('wrench') : t === 'gadgets' ? icon('toolbox') : null);
     const sub = el('span', { class: 'bt-sub' });
     const btn = el(
       'button',
@@ -346,10 +334,10 @@ export function buildLoadout(opts: BuilderOptions): { root: HTMLElement; dispose
           },
         },
       },
-      icon,
+      tabIcon,
       el('span', { class: 'bt-text' }, el('span', { class: 'bt-label', text: TAB_LABEL[t] }), sub),
     );
-    tabs[t] = { btn, icon, sub };
+    tabs[t] = { btn, icon: tabIcon, sub };
     tabBar.append(btn);
   }
 
@@ -411,7 +399,7 @@ export function buildLoadout(opts: BuilderOptions): { root: HTMLElement; dispose
           },
           el('span', { class: 'build-num', text: String(i + 1) }),
           name,
-          el('span', { class: 'build-gun', text: b ? WEAPON_ICON[b.loadout.weapon] : '', attrs: { 'aria-hidden': 'true' } }),
+          el('span', { class: 'build-gun', attrs: { 'aria-hidden': 'true' } }, b ? icon(WEAPON_ICON[b.loadout.weapon]) : null),
           save,
         ),
       );
@@ -435,7 +423,7 @@ export function buildLoadout(opts: BuilderOptions): { root: HTMLElement; dispose
               mouseleave: () => setHover(null),
             },
           },
-          el('span', { class: 'w-icon', text: WEAPON_ICON[id] }),
+          el('span', { class: 'w-icon' }, icon(WEAPON_ICON[id])),
           el('span', { class: 'w-name', text: WEAPON_INFO[id].name }),
           el('span', { class: 'w-role', text: WEAPON_INFO[id].role }),
         ),
@@ -444,7 +432,7 @@ export function buildLoadout(opts: BuilderOptions): { root: HTMLElement; dispose
     const info = WEAPON_INFO[l.weapon];
     clear(weaponBlurb);
     weaponBlurb.append(
-      el('span', { class: 'wb-icon', text: WEAPON_ICON[l.weapon], attrs: { 'aria-hidden': 'true' } }),
+      el('span', { class: 'wb-icon', attrs: { 'aria-hidden': 'true' } }, icon(WEAPON_ICON[l.weapon])),
       el('div', {}, el('div', { class: 'wb-title' }, el('b', { text: info.name }), el('span', { class: 'wb-role', text: info.role })), el('div', { class: 'wb-text', text: info.blurb })),
     );
   };
@@ -476,7 +464,7 @@ export function buildLoadout(opts: BuilderOptions): { root: HTMLElement; dispose
           mouseleave: () => setHover(null),
         },
       },
-      isLocked ? el('span', { class: 'p-lock-icon', text: '🔒', attrs: { 'aria-hidden': 'true' } }) : null,
+      isLocked ? el('span', { class: 'p-lock-icon', attrs: { 'aria-hidden': 'true' } }, icon('lock')) : null,
       el('span', { class: 'p-name', text: partName(id) }),
       isLocked ? el('span', { class: 'p-lock', text: `Lv ${unlockLevel(id)}` }) : null,
     );
@@ -500,7 +488,7 @@ export function buildLoadout(opts: BuilderOptions): { root: HTMLElement; dispose
           el(
             'div',
             { class: 'slot-label' },
-            el('span', { class: 'slot-icon', text: SLOT_ICON[slot], attrs: { 'aria-hidden': 'true' } }),
+            el('span', { class: 'slot-icon', attrs: { 'aria-hidden': 'true' } }, icon(SLOT_ICON[slot])),
             el('div', { class: 'slot-text' }, el('b', { text: PART_SLOT_INFO[slot].name }), el('small', { text: PART_SLOT_INFO[slot].blurb })),
           ),
           el('div', { class: 'part-main' }, optsEl, desc),
@@ -534,11 +522,11 @@ export function buildLoadout(opts: BuilderOptions): { root: HTMLElement; dispose
               },
             },
           },
-          el('span', { class: 'g-icon', text: UTIL_ICON[id] ?? '✨', attrs: { 'aria-hidden': 'true' } }),
+          el('span', { class: 'g-icon', attrs: { 'aria-hidden': 'true' } }, icon(UTIL_ICON[id])),
           el('span', { class: 'g-name', text: info.name }),
           el('span', { class: 'g-blurb', text: info.blurb }),
           slot >= 0 ? el('span', { class: 'g-badge', text: String(slot + 1), attrs: { title: `Gadget ${slot + 1}` } }) : null,
-          isLocked ? el('span', { class: 'g-lock', text: `🔒 Lv ${unlockLevel(id)}` }) : null,
+          isLocked ? el('span', { class: 'g-lock' }, icon('lock'), ` Lv ${unlockLevel(id)}`) : null,
         ),
       );
     }
@@ -572,9 +560,9 @@ export function buildLoadout(opts: BuilderOptions): { root: HTMLElement; dispose
 
   const drawGun = () => {
     const info = WEAPON_INFO[l.weapon];
-    gunName.textContent = `${WEAPON_ICON[l.weapon]} ${info.name}`;
+    gunName.replaceChildren(icon(WEAPON_ICON[l.weapon]), ` ${info.name}`);
     gunRole.textContent = info.role;
-    if (noGl) noGl.textContent = WEAPON_ICON[l.weapon];
+    if (noGl) noGl.replaceChildren(icon(WEAPON_ICON[l.weapon]));
     preview?.setGun(l.weapon, l.parts, gunColor(), gunFinish());
   };
 

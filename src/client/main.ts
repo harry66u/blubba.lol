@@ -140,7 +140,7 @@ window.setInterval(() => {
   if (!aloneSince) aloneSince = Date.now();
   if (aloneHinted || Date.now() - aloneSince < 20_000) return;
   aloneHinted = true;
-  const key = touchMode ? 'Tap ❚❚' : padPlay ? 'Press Menu' : 'Press Esc';
+  const key = touchMode ? 'Tap {pause}' : padPlay ? 'Press Menu' : 'Press Esc';
   hud.callout('NOBODY ELSE YET', `${key}: copy an invite link for friends, or vote for bots to play now`, 6, '#ffd60a');
 }, 1000);
 let scoreboardOpen = false;
@@ -168,9 +168,32 @@ function loadMode(): PlayMode {
   return 'any';
 }
 let lastMode = loadMode();
+let previewTimer = 0;
+/** The map behind the menu before a hover preview began (where it goes back to when no map is picked). */
+let previewFrom: string | null = null;
 /** The menu's background shows the map you'd play: the mode's own arena, or the one you picked. */
 function showPickedMap(): void {
+  clearTimeout(previewTimer);
+  previewFrom = null;
   game.showMenuMap(homeMapFor(lastMode) ?? lastMap);
+}
+
+/**
+ * Pointing at a map tile (or a mode with its own arena) swaps the background to it, after a
+ * moment so sweeping the mouse across the row doesn't rebuild every map on the way; null goes
+ * back to the picked one (or to what was showing, with "any map" picked).
+ */
+function previewMenuMap(id: string | null): void {
+  clearTimeout(previewTimer);
+  if (id && previewFrom === null) previewFrom = game.menuMapId();
+  previewTimer = window.setTimeout(
+    () => {
+      if (id) return game.showMenuMap(id);
+      game.showMenuMap(homeMapFor(lastMode) ?? lastMap ?? previewFrom);
+      previewFrom = null;
+    },
+    id ? 120 : 220,
+  );
 }
 
 function rememberMode(m: PlayMode): void {
@@ -280,7 +303,7 @@ function showInvites(): void {
     for (const f of fresh) {
       if (invitesSeen.has(inviteKey(f))) continue;
       invitesSeen.add(inviteKey(f));
-      if (f.playing?.code !== game.room?.code) hud.toast(`🎮 ${f.name} invited you to ${MODE_INFO[f.invite!.mode as ModeId]?.name ?? 'a match'}! Esc → 👥 Invite to join them.`, 6000);
+      if (f.playing?.code !== game.room?.code) hud.toast(`${f.name} invited you to ${MODE_INFO[f.invite!.mode as ModeId]?.name ?? 'a match'}! Esc → Invite to join them.`, 6000, 'invite');
     }
     return;
   }
@@ -345,6 +368,7 @@ function renderMenu(notice?: MenuNotice | string): void {
       onChallenge: (name) => startJoin(name, { kind: 'challenge' }),
       onModeChange: rememberMode,
       onMapChange: rememberMap,
+      onMapPreview: previewMenuMap,
       onCreate: (name) => startJoin(name, { kind: 'create' }),
       onBotsChange: rememberBots,
       onJoinCode: (name, code) => startJoin(name, { kind: 'code', code }),

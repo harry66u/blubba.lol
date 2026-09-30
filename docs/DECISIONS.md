@@ -423,8 +423,8 @@ and had no way to start otherwise. So:
   the next in the rotation when nobody picked one.
 - **Bots are a vote.** In a public room bots fill the empty spots only while every player there
   has Bots on (the menu switch, and the same switch in the pause menu and the team lobby's
-  "🤖 Fill with bots"). Switching them off never pulls bots out of a fight: they leave when the
-  match ends (or right away in a lobby). "Any mode" always votes no. Joining by code or through a
+  "Fill with bots"). Switching them off never pulls bots out of a fight: they leave when the
+  match ends (or right away in a lobby). The Public Queue always votes no. Joining by code or through a
   friend goes along with the room.
 - **Quiet rooms merge.** Once a second, a public room with 3 or fewer players that's between
   matches (waiting for players, or the last moment of its results) moves everyone into a busier
@@ -581,3 +581,54 @@ The dancing inflatable tube men placed around every map (decor, 1.6× a player's
 right on the deck) read as extra players and got in the way of seeing the real ones. They're
 gone from every map (Face-Off's team-colored ones too). Pump Station's giant tube men are the
 objective and stay.
+
+## Public Queue, short windows, and Blubba icons
+
+- **"Any mode" is now the Public Queue.** Same queue as before (everyone online together in one
+  Sudden Death match, real players only), with a name that says what it is. The globe stays; the
+  button is a blue-to-purple candy gradient with a shine sweeping across it, a line under its name
+  ("Everyone online, one match"), and it keeps its colors with a yellow ring when picked. It takes
+  two tiles of the first row, Sudden Death the third, so the other six modes fill two even rows
+  (it was a full row plus a lone Ranked tile at the bottom).
+- **The menu fits short windows.** At 760 px tall or less (a laptop with a small browser window,
+  wider than 760 px) the main card goes to two columns: name, modes and map on the left; bots,
+  PLAY and the room buttons on the right. The logo shrinks and shares a line with the live count,
+  the tagline goes, the side menu becomes a row of pills under the card, and the daily challenges
+  fold to one line (tap to open), as on narrow screens. Checked to fit without scrolling at
+  1000×570, 1366×657, 1280×720; 1440×789 and 1280×800 fit with the tagline hidden. Phones keep
+  their own layouts.
+- **The map behind the menu changes on hover.** Pointing at a map tile (or a mode with its own
+  arena: Team Knockout, Ball, Pump) shows that map behind the menu after 0.12 s, so sweeping the
+  mouse across the row doesn't rebuild every map on the way; moving off goes back to the picked
+  map (or to what was showing, with "any map" picked). Mice only: on touch a tap is a pick.
+- **Bots switch knob** is centered in its track (it sat low and to one side).
+- **Gadget keys on the HUD** hang under each gadget slot as a centered keycap instead of being
+  squeezed into the slot's rounded corner.
+- **Custom icons instead of emojis.** Emojis look different on every phone and computer (and some
+  don't have them at all), and none of them look like Blubba. `src/client/ui/icons.ts` draws about
+  115 icons in the mascot's style: thick ink outlines, candy colors, a white shine, all on a 48×48
+  grid, as inline SVG sized by the text around them. `gameIcons.ts` says which icon stands for
+  each mode, map, gun, gadget, part, ult and pickup. They're used everywhere the UI showed emojis:
+  the menu and mode picker, map tiles, nav buttons, notices, pause, scoreboard (medals, crown,
+  mute, add friend, report), results, how-to, settings tabs, loadout, profile stats, daily
+  challenges, coins, friends, face scan, team lobby, the HUD (gadgets, power-ups, pin), the ult
+  meter and its banner, kill feed lines, toasts, world popups, name tags and the touch buttons.
+  Hints that name a touch button write `{dash}` and draw its icon.
+- **Locker items show the real thing.** Bodies, faces, eyes, hats and bases get a picture of the
+  item on a tube man in your color, drawn by the locker preview's own renderer (no extra WebGL
+  context): two per frame in the corner of its canvas, copied out, then covered by the preview's
+  own frame. They're framed on the part the item is on (the head and hat, the base, the whole
+  body) and kept for the visit, so reopening the locker is instant. Trails, taunts, knockout
+  effects and sounds can't be seen standing still, so they get icons. Without WebGL the locker
+  falls back to each category's icon.
+- What stayed as text: plain marks like ✓, ✕ and arrows, and controller button names. The shared
+  game data still carries its old emoji fields (unused by the client now); the server's daily
+  streak line still starts with a fire emoji, which the results screen draws as the fire icon.
+- **Some animations work again.** A number of animations the stylesheet names had no keyframes
+  anywhere, so they never played. The loops and one-shot effects are defined now: PLAY breathing
+  and its shine, the connecting dots, the tap ring, the winner's crown and confetti, an error's
+  shake, the dice roll. They use the separate scale / translate / rotate properties, so they add
+  to an element's own transform (a hover lift) instead of replacing it, and the loops stay still
+  with reduced motion on. The entrance animations (fade-in, pop-in, panel-in and friends) stay
+  undefined on purpose: the team lobby, invite cards and other screens are rebuilt on every
+  update and would replay them over and over (tried: the team lobby turned see-through).

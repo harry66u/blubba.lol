@@ -16,7 +16,7 @@ npm run build        # builds the client (Vite) and the server (esbuild)
 npm start            # serves everything on http://localhost:8080
 ```
 
-Open http://localhost:8080 and click **PLAY**. The menu starts on **Any mode**: everyone who just
+Open http://localhost:8080 and click **PLAY**. The menu starts on the **Public Queue**: everyone who just
 presses PLAY lands in the same **Sudden Death** rooms with real players only (the main mode: one
 life, get knocked out and you're out, last one standing wins the round). You can also pick a mode yourself (Sudden Death,
 Knockout, Team Knockout, Ball, Pump, 1v1, Ranked). Everyone who picks the same mode plays

@@ -2,6 +2,10 @@ import { BALANCE } from '../../shared/balance';
 import { MAX_PER_SIDE, checkTeamLobby } from '../../shared/game/teamLobby';
 import type { RosterEntry, TeamLobbyState } from '../../shared/protocol';
 import { clear, el } from './dom';
+import { type IconName, icon } from './icons';
+
+/** An icon and a label as a button's contents. */
+const withIcon = (b: HTMLElement, name: IconName, text: string) => b.replaceChildren(icon(name), text);
 
 /** Everything the team lobby shows, read fresh on every update. */
 export interface TeamLobbyData {
@@ -67,18 +71,18 @@ export function buildTeamLobby(data: () => TeamLobbyData, act: TeamLobbyActions)
   const status = el('div', { class: 'tl-status', attrs: { 'aria-live': 'polite' } });
   const big = el('div', { class: 'tl-countdown hidden', attrs: { 'aria-hidden': 'true' } });
   const ready = el('button', { class: 'btn big tl-ready', on: { click: () => act.onReady(!isReady()) } }) as HTMLButtonElement;
-  const shuffle = el('button', { class: 'btn small', text: '🔀 Shuffle', on: { click: act.onShuffle }, attrs: { title: 'Deal everyone onto new even teams' } });
+  const shuffle = el('button', { class: 'btn small', on: { click: act.onShuffle }, attrs: { title: 'Deal everyone onto new even teams' } }, icon('shuffle'), 'Shuffle');
   const lock = el('button', { class: 'btn small', on: { click: () => act.onLock(!data().lobby?.locked) } }) as HTMLButtonElement;
   // Bots: a vote in public rooms (they fill in once everyone agrees), the host's switch in private ones.
   const botsBtn = el('button', { class: 'btn small tl-bots', on: { click: () => act.onBots(!botsMine()) } }) as HTMLButtonElement;
   const botsNote = el('span', { class: 'tl-bots-note' });
-  const invite = act.onFriends ? el('button', { class: 'btn small ghost', text: '👥 Invite friends', on: { click: act.onFriends } }) : null;
+  const invite = act.onFriends ? el('button', { class: 'btn small ghost', on: { click: act.onFriends } }, icon('invite'), 'Invite friends') : null;
   const botsRow = el('div', { class: 'tl-botsrow' }, botsBtn, botsNote, invite);
-  const hostRow = el('div', { class: 'tl-host' }, el('span', { class: 'label', text: '👑 Host' }), shuffle, lock);
+  const hostRow = el('div', { class: 'tl-host' }, el('span', { class: 'label' }, icon('crown'), ' Host'), shuffle, lock);
   const foot = el(
     'div',
     { class: 'tl-foot' },
-    el('button', { class: 'btn small ghost', text: '⚙️ Menu', on: { click: act.onMenu }, attrs: { title: 'Loadout, locker, settings (and room settings for the host)' } }),
+    el('button', { class: 'btn small ghost', on: { click: act.onMenu }, attrs: { title: 'Loadout, locker, settings (and room settings for the host)' } }, icon('settings'), 'Menu'),
     el('span', { class: 'tl-keys', text: 'R ready · 1 / 2 pick a team' }),
     el('button', { class: 'btn small ghost', text: 'Leave', on: { click: act.onLeave } }),
   );
@@ -137,7 +141,7 @@ export function buildTeamLobby(data: () => TeamLobbyData, act: TeamLobbyActions)
               { class: `tl-player${m.id === d.youId ? ' you' : ''}${on ? ' ready' : ''}` },
               el('span', { class: 'tl-check', text: on ? '✓' : '…', attrs: { 'aria-label': on ? 'Ready' : 'Not ready' } }),
               el('span', { class: 'tl-pname', text: m.name }),
-              m.id === d.hostId && d.isPrivate ? el('span', { class: 'tl-tag', text: '👑' }) : null,
+              m.id === d.hostId && d.isPrivate ? el('span', { class: 'tl-tag', attrs: { title: 'Host' } }, icon('crown')) : null,
               m.bot ? el('span', { class: 'tl-tag bot', text: 'BOT' }) : null,
               m.id === d.youId ? el('span', { class: 'tl-tag you', text: 'YOU' }) : null,
             ),
@@ -150,7 +154,8 @@ export function buildTeamLobby(data: () => TeamLobbyData, act: TeamLobbyActions)
       const humans = members.filter((m) => !m.bot).length;
       const full = humans >= MAX_PER_SIDE;
       c.join.disabled = here || !!L?.locked || full;
-      c.join.textContent = here ? "YOU'RE HERE" : L?.locked ? '🔒 LOCKED' : full ? 'FULL' : `JOIN ${d.names[t] ?? ''}`;
+      if (L?.locked && !here) withIcon(c.join, 'lock', 'LOCKED');
+      else c.join.textContent = here ? "YOU'RE HERE" : full ? 'FULL' : `JOIN ${d.names[t] ?? ''}`;
     }
     // What it's waiting for: the server's word, or our own read of the roster before it arrives.
     const check = checkTeamLobby(
@@ -171,7 +176,7 @@ export function buildTeamLobby(data: () => TeamLobbyData, act: TeamLobbyActions)
     const wantBots = botsMine();
     const canSwitch = !!d.botVotes || d.isHost;
     botsBtn.classList.toggle('hidden', !canSwitch);
-    botsBtn.textContent = d.botsOn ? (wantBots ? '🤖 Bots on ✓' : '🤖 Turn bots back on') : wantBots ? '🤖 Want bots ✓' : '🤖 Fill with bots';
+    withIcon(botsBtn, 'robot', d.botsOn ? (wantBots ? 'Bots on ✓' : 'Turn bots back on') : wantBots ? 'Want bots ✓' : 'Fill with bots');
     botsBtn.classList.toggle('green', wantBots);
     botsBtn.title = d.botVotes ? 'Bots fill the empty seats once everyone here wants them, and step aside as players join.' : 'Bots fill the empty seats.';
     const votes = d.botVotes?.length ?? 0;
@@ -190,7 +195,7 @@ export function buildTeamLobby(data: () => TeamLobbyData, act: TeamLobbyActions)
     ready.classList.toggle('on', mine);
     ready.title = mine ? 'Click to take it back' : 'Tell everyone you are good to go';
     hostRow.classList.toggle('hidden', !d.isHost);
-    lock.textContent = L?.locked ? '🔓 Unlock teams' : '🔒 Lock teams';
+    withIcon(lock, L?.locked ? 'unlock' : 'lock', L?.locked ? 'Unlock teams' : 'Lock teams');
     // The countdown: a big number over everything, ticking once a second.
     const n = counting ? Math.max(1, Math.ceil(d.startsIn!)) : -1;
     big.classList.toggle('hidden', !counting);
