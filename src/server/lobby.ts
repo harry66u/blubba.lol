@@ -64,6 +64,8 @@ export class Lobby {
   /** Codes of rooms that were merged into another one, so their invite links still work. */
   private readonly aliases = new Map<string, { code: string; until: number }>();
   private countsCache: { at: number; counts: QueueCounts } | null = null;
+  /** Guests on the menu right now (their menu asks for the counts every few seconds): id -> last seen. */
+  private readonly browsing = new Map<string, number>();
   private timers: NodeJS.Timeout[] = [];
   private lastTime = 0;
   private acc = 0;
@@ -420,19 +422,41 @@ export class Lobby {
     return out;
   }
 
-  /** How many people are playing each mode right now (the menu's counts), cached for a moment. */
+  /** Someone on the menu asked for the counts (so they're online too, just not in a match). */
+  seeBrowsing(id: string, now = Date.now()): void {
+    // Someone new: their own count should include them straight away.
+    if (!this.browsing.has(id)) this.countsCache = null;
+    this.browsing.delete(id);
+    this.browsing.set(id, now);
+    if (this.browsing.size > 20000) this.browsing.delete(this.browsing.keys().next().value!);
+  }
+
+  /**
+   * How many people are on right now (in a match, in the ranked queue, or on the menu) and playing
+   * each mode (the menu's counts), cached for a moment.
+   */
   counts(now = Date.now()): QueueCounts {
-    if (this.countsCache && now - this.countsCache.at < 2000) return this.countsCache.counts;
+    const age = this.countsCache ? now - this.countsCache.at : Infinity;
+    if (age >= 0 && age < 2000) return this.countsCache!.counts;
     const modes: QueueCounts['modes'] = {};
     let online = this.queue.length;
+    const inGame = new Set<string>(this.queue.map((q) => q.guestId));
+    // Menus poll every 8 s: anyone seen in the last 20 s is still there.
+    for (const [id, at] of this.browsing) {
+      if (now - at > 20_000) this.browsing.delete(id);
+      else break;
+    }
     for (const r of this.rooms.values()) {
       if (r.closed || r.humanCount === 0) continue;
       online += r.humanCount;
+      for (const c of r.conns.values()) if (c.guestId) inGame.add(c.guestId);
       if (r.isPrivate) continue;
       const m = (modes[r.mode] ??= { playing: 0, waiting: 0 });
       if (r.sim.phase === 'waiting') m.waiting += r.humanCount;
       else m.playing += r.humanCount;
     }
+    // On the menu and not also in a match (another tab).
+    for (const id of this.browsing.keys()) if (!inGame.has(id)) online++;
     const counts: QueueCounts = { online, modes, ranked: this.queue.length };
     this.countsCache = { at: now, counts };
     return counts;

@@ -142,6 +142,17 @@ describe('queue', () => {
     for (const x of [a, b, c, o1, o2]) x.close();
   });
 
+  it('counts people on the menu as online, once each, and not twice when they are also in a match', () => {
+    const t = Date.now() + 60_000;
+    const base = lobby.counts(t).online;
+    lobby.seeBrowsing('menu-viewer-aaaa', t + 1);
+    lobby.seeBrowsing('menu-viewer-aaaa', t + 2);
+    lobby.seeBrowsing('menu-viewer-bbbb', t + 3);
+    expect(lobby.counts(t + 5000).online).toBe(base + 2);
+    // Gone quiet for a while: not on anymore.
+    expect(lobby.counts(t + 60_000).online).toBe(base);
+  });
+
   it('counts players by mode for the menu', async () => {
     const a = new Client();
     await a.hello({ kind: 'quick', mode: 'teamKnockout', open: true });

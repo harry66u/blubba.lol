@@ -215,7 +215,7 @@ function activePill(n: number | null): HTMLElement {
 let pillToday: number | null = null;
 let pillOnline: number | null = null;
 
-/** "🟢 3 online · 37 today": right now first, then today. Hidden until either count arrives. */
+/** "🟢 3 active now · 37 today": right now (menus included) first, then today. Hidden until either count arrives. */
 function drawPill(pill: Element | null = document.querySelector('.active-pill')): void {
   if (!pill) return;
   const online = pillOnline ?? 0;
@@ -226,8 +226,8 @@ function drawPill(pill: Element | null = document.querySelector('.active-pill'))
   if (!num || !word) return;
   if (online) {
     num.textContent = online.toLocaleString();
-    word.textContent = today ? ` online · ${today.toLocaleString()} today` : ' online';
-    pill.setAttribute('title', 'Playing right now, and players today');
+    word.textContent = today ? ` active now · ${today.toLocaleString()} today` : ' active now';
+    pill.setAttribute('title', 'On right now (in a match or on the menu), and players today');
   } else if (today) {
     num.textContent = today.toLocaleString();
     word.textContent = ' active today';

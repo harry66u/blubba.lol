@@ -541,4 +541,6 @@ Only work nobody can see was cut; nothing changes on screen and nothing gets slo
 - **Menu music pauses in a hidden tab** (and picks up when you come back). In a match or a lobby the
   sound keeps going, so you still hear a match start from another tab.
 
-The menu pill shows both counts now: "3 online · 37 today".
+The menu pill shows both counts now: "3 active now · 37 today". "Now" counts everyone on the
+site: in a match, in the ranked queue, or on the menu (the menu's counts poll carries the guest id;
+anyone seen in the last 20 s counts, once, even with the game open in two tabs).

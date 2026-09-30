@@ -7,7 +7,7 @@ import { WebSocketServer } from 'ws';
 import { ADMIN_HTML } from './adminPage';
 import { Api } from './api';
 import { Lobby } from './lobby';
-import { Store } from './store';
+import { Store, validGuestId } from './store';
 
 const PORT = Number(process.env.PORT ?? 8080);
 const DEV = process.env.BUBBA_DEV === '1';
@@ -102,7 +102,10 @@ function serveStatic(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
   if (path === '/api/counts') {
-    // Who's playing what right now, for the menu's mode buttons (polled every few seconds).
+    // Who's on and playing what right now, for the menu (polled every few seconds; the guest id
+    // counts the asker as online).
+    const id = url.searchParams.get('id');
+    if (validGuestId(id)) lobby.seeBrowsing(id);
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(lobby.counts()));
     return;

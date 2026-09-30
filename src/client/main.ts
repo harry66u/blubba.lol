@@ -304,7 +304,7 @@ let countsAt = 0;
 function pollCounts(force = false): void {
   if (screen !== 'menu' || document.hidden || (!force && Date.now() - countsAt < 8000)) return;
   countsAt = Date.now();
-  fetch('/api/counts', { cache: 'no-store' })
+  fetch(`/api/counts?id=${encodeURIComponent(identity.guestId)}`, { cache: 'no-store' })
     .then((r) => (r.ok ? r.json() : null))
     .then((c: QueueCounts | null) => {
       if (c && screen === 'menu') setModeCounts(c);

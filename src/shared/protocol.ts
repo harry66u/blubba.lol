@@ -129,7 +129,7 @@ export interface RoomInfo {
 
 /** How many people are playing each mode right now (GET /api/counts, for the menu). */
 export interface QueueCounts {
-  /** Everyone in a match or the ranked queue. */
+  /** Everyone on right now: in a match, in the ranked queue, or on the menu. */
   online: number;
   /** Public rooms by mode: humans in a match, and humans waiting for more players (or in a team lobby). */
   modes: Partial<Record<ModeId, { playing: number; waiting: number }>>;
