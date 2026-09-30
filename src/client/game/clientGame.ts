@@ -18,6 +18,7 @@ import {
   createPlayerState,
   copyPlayerState,
   eyeHeight,
+  grappleLocked,
   inflationScale,
   lookDir,
   playerHeight,
@@ -822,6 +823,7 @@ export class ClientGame {
         return e.id === you;
       case 'sniff':
       case 'gotcha':
+      case 'bag':
         return e.id === you || e.target === you;
       default:
         return false;
@@ -1629,6 +1631,7 @@ export class ClientGame {
       case 'fart':
       case 'sniff':
       case 'gotcha':
+      case 'bag':
         this.ultView.onEvent(e);
         break;
       case 'charge':
@@ -3049,7 +3052,7 @@ export class ClientGame {
         dashRechargeFrac: p.dashCharges < BALANCE.dash.charges ? 1 - p.dashRecharge / BALANCE.dash.rechargeTime : 1,
         braceReady: 1 - p.braceCool / BALANCE.brace.cooldown,
         grabReady: 1 - Math.min(1, p.grabCool / BALANCE.grab.cooldown),
-        grappleReady: 1 - Math.min(1, p.grappleCool / BALANCE.grapple.cooldown),
+        grappleReady: grappleLocked(p) ? 0 : 1 - Math.min(1, p.grappleCool / BALANCE.grapple.cooldown),
         heldTime: alive && p.mode === MODE_HELD ? p.holdTimer : -1,
         escapeUsed: p.escapeUsed === 1,
         hint: alive ? this.contextHint() : '',
@@ -3098,7 +3101,7 @@ export class ClientGame {
       dash: p.dashCharges > 0 ? 1 : p.dashCharges < BALANCE.dash.charges ? 1 - p.dashRecharge / BALANCE.dash.rechargeTime : 1,
       brace: 1 - p.braceCool / BALANCE.brace.cooldown,
       grab: 1 - Math.min(1, p.grabCool / BALANCE.grab.cooldown),
-      grapple: 1 - Math.min(1, p.grappleCool / BALANCE.grapple.cooldown),
+      grapple: grappleLocked(p) ? 0 : 1 - Math.min(1, p.grappleCool / BALANCE.grapple.cooldown),
       u1: 1 - Math.min(1, p.u1Cool / BALANCE.utilities[this.equippedUtils[0]].cooldown),
       u2: 1 - Math.min(1, p.u2Cool / BALANCE.utilities[this.equippedUtils[1]].cooldown),
       reloading: p.reloadTimer > 0,
@@ -3222,7 +3225,7 @@ export class ClientGame {
         const tips: string[] = [];
         if (p.dashCharges > 0) tips.push(`${this.key('dash')} dash`);
         if (p.jumpsUsed < 2) tips.push(`${this.key('jump')} jump`);
-        if (f.grapple && p.grappleCool <= 0) tips.push(`${this.key('grapple')} grapple`);
+        if (f.grapple && p.grappleCool <= 0 && !grappleLocked(p)) tips.push(`${this.key('grapple')} grapple`);
         if (f.ledge) tips.push(`hold ${this.key('grab')} to catch a ledge`);
         return tips.length ? `Falling! ${tips.join(' · ')}` : 'Falling!';
       }

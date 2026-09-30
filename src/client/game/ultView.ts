@@ -274,6 +274,9 @@ export class UltView {
       case 'gotcha':
         this.onGotcha(e.id, e.target);
         break;
+      case 'bag':
+        this.onBag(e.id, e.target);
+        break;
       default:
         break;
     }
@@ -321,10 +324,12 @@ export class UltView {
       case 'chase': {
         this.popAt(e.id, 0, 'SNIFF SNIFF', info.color, 1.1);
         const target = e.targets[0] ?? -1;
+        // Everyone gets warned; whoever he picked hears it loudest.
         if (target === you) this.warnChased(e.id);
+        else if (!mine) g.hud.callout('WARNING: ABAG IS TRYING TO BAG YOU!', "Don't let him grab you!", 2.4, info.color);
         if (mine && target < 0) g.hud.toast('Nobody to sniff out... yet. Keep moving!', 2200);
         // After your splash has gone.
-        else if (mine) this.later.push({ at: this.time + 1.5, fn: () => g.hud.callout('SNIFF SNIFF...', `Got the scent of ${g.nameOf(target)}!`, 1.6, info.color, CALLOUT.info) });
+        else if (mine) this.later.push({ at: this.time + 1.5, fn: () => g.hud.callout('SNIFF SNIFF...', `Go bag ${g.nameOf(target)}! Touch them to hug them.`, 1.8, info.color, CALLOUT.info) });
         break;
       }
       case 'cropDuster':
@@ -453,14 +458,27 @@ export class UltView {
     this.popAt(id, 0, 'SNIFF SNIFF', ULT_INFO.chase.color, 1);
     this.g.audio.sniff(id === this.g.youId() ? null : this.at(id));
     if (target === this.g.youId()) this.warnChased(id);
-    if (id === this.g.youId()) this.g.hud.callout('NEW SCENT!', `Now hunting ${this.g.nameOf(target)}`, 1.3, ULT_INFO.chase.color, CALLOUT.info);
+    if (id === this.g.youId()) this.g.hud.callout('NEW SCENT!', `Now go bag ${this.g.nameOf(target)}`, 1.3, ULT_INFO.chase.color, CALLOUT.info);
   }
 
   private warnChased(by: number): void {
     const g = this.g;
-    g.hud.callout('THE CHASE!', `${g.nameOf(by).toUpperCase()} IS CHASING YOU! RUN!`, 2.2, ULT_INFO.chase.color);
+    g.hud.callout('WARNING: ABAG IS TRYING TO BAG YOU!', `He picked YOU (${g.nameOf(by)}). Don't let him grab you! RUN!`, 2.6, ULT_INFO.chase.color);
     g.hud.flash('rgba(255, 95, 210, 0.5)', 500);
     g.audio.sniff(null);
+  }
+
+  /** ABAG caught his target: a big hug. */
+  private onBag(id: number, target: number): void {
+    const g = this.g;
+    const you = g.youId();
+    this.popAt(target, 0, 'BAGGED!', ULT_INFO.chase.color, 1.9);
+    g.audio.gotcha(id === you || target === you ? null : this.at(target));
+    if (target === you) g.hud.callout('BAGGED!', 'ABAG got you! Dash when the marker hits green to wriggle free!', 1.8, ULT_INFO.chase.color);
+    else if (id === you) g.hud.callout('BAGGED!', 'Now throw them off the map (extra hard)!', 1.6, ULT_INFO.chase.color);
+    g.hud.addKill(`${this.nameHtml(id)} <b style="color:${ULT_INFO.chase.color}">👜 BAGGED</b> ${this.nameHtml(target)}`, id === you || target === you);
+    const p = this.headOf(target);
+    if (p) g.effects.confettiBurst(p.x, p.y, p.z, 30, [0xff5fd2, 0xffffff]);
   }
 
   private onGotcha(id: number, target: number): void {

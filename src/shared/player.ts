@@ -82,6 +82,20 @@ export function playerHeight(p: PlayerState): number {
   return BALANCE.player.height * inflationScale(p.inflation);
 }
 
+/**
+ * After a hit, grapple is locked while you're in the air for a moment, longer the more inflated
+ * you are (a full balloon hit hard can't zip straight back). See BALANCE.grapple.
+ */
+export function grappleLocked(p: PlayerState): boolean {
+  const G = BALANCE.grapple;
+  return !p.onGround && p.sinceHit < G.hitLock + G.hitLockPerInflation * p.inflation * p.inflation;
+}
+
+/** Grapple range and zip speed shrink as you inflate. */
+export function grappleScale(p: PlayerState, atMax: number): number {
+  return 1 - (1 - atMax) * Math.min(1, p.inflation);
+}
+
 export function eyeHeight(p: PlayerState): number {
   return BALANCE.player.eyeHeight * inflationScale(p.inflation);
 }
@@ -453,9 +467,10 @@ function stepMove(
       p.vz *= 0.6;
       p.jumpsUsed = Math.min(p.jumpsUsed, 1);
     } else {
-      p.vx = (dx / d) * G.zipSpeed;
-      p.vy = (dy / d) * G.zipSpeed;
-      p.vz = (dz / d) * G.zipSpeed;
+      const zip = G.zipSpeed * grappleScale(p, G.zipAtMax);
+      p.vx = (dx / d) * zip;
+      p.vy = (dy / d) * zip;
+      p.vz = (dz / d) * zip;
       p.launchTimer = 0;
       p.dashTimer = 0;
       p.slideTimer = 0;

@@ -181,6 +181,63 @@ describe('skill layer', () => {
     expect(p.state.mode).not.toBe(MODE_DEAD);
   });
 
+  it("a full balloon can't grapple right after a hit, and its rope is shorter", () => {
+    const G = BALANCE.grapple;
+    const tryZip = (inflation: number, sinceHit: number, x: number) => {
+      const { sim, ps, ds } = setup();
+      const p = ps[0];
+      place(p, x, -3, 0, Math.PI / 2);
+      Object.assign(p.state, { onGround: 0, vy: -5, inflation, sinceHit });
+      ds[0].frame.yaw = Math.PI / 2;
+      ds[0].frame.pitch = -0.05;
+      ds[0].press('grapple');
+      run(sim, ds, 1);
+      return p.state.zipTimer > 0;
+    };
+    // Just hit at 100%: locked for hitLock + hitLockPerInflation seconds.
+    expect(tryZip(1, 0.2, 34)).toBe(false);
+    expect(tryZip(1, G.hitLock + G.hitLockPerInflation + 0.1, 34)).toBe(true);
+    // Half inflated: a much shorter lock.
+    expect(tryZip(0.5, G.hitLock + G.hitLockPerInflation * 0.25 + 0.1, 34)).toBe(true);
+    // Range: the lot's edge ~24 m away is in reach empty, out of reach at 100%.
+    expect(tryZip(0, 5, 49)).toBe(true);
+    expect(tryZip(1, 5, 49)).toBe(false);
+  });
+
+  it('hits that leave someone at 100% launch harder', () => {
+    const K = BALANCE.knockback;
+    const bonus = K.maxedMult;
+    const speedAt = (inflation: number) => {
+      const { sim, ps, ds } = setup();
+      const [a, b] = ps;
+      place(a, -8, 0, 0, -Math.PI / 2);
+      place(b, 0, 0, 0);
+      b.state.inflation = inflation;
+      ds[0].aimAt(0, 1.5, 0);
+      ds[0].setFire(true);
+      run(sim, ds, 40);
+      ds[0].setFire(false);
+      b.state.inflation = inflation;
+      run(sim, ds, 20);
+      return hitSpeed(sim, b.id);
+    };
+    const boosted = speedAt(1);
+    try {
+      K.maxedMult = 1;
+      expect(boosted / speedAt(1)).toBeCloseTo(bonus, 2);
+    } finally {
+      K.maxedMult = bonus;
+    }
+    // Below 100% nothing changes.
+    const low = speedAt(0.3);
+    try {
+      K.maxedMult = 1;
+      expect(low / speedAt(0.3)).toBeCloseTo(1, 5);
+    } finally {
+      K.maxedMult = bonus;
+    }
+  });
+
   it('grapple pulls an enemy toward you', () => {
     const { sim, ps, ds } = setup();
     const [a, b] = ps;

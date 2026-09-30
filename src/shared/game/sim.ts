@@ -16,6 +16,8 @@ import {
   copyPlayerState,
   depenetrate,
   eyeHeight,
+  grappleLocked,
+  grappleScale,
   inflationMass,
   lookDir,
   playerHeight,
@@ -1190,7 +1192,8 @@ export class GameSim {
     const mass = inflationMass(s.inflation) * ultMassMult(s);
     // Floating in helium, you have nothing to brace your feet against.
     const floaty = s.heliumTimer > 0 ? BALANCE.utilities.heliumBomb.knockbackMult : 1;
-    const speed = (power * (K.base + K.growth * Math.pow(s.inflation, K.growthExp))) / mass * (braced ? Br.knockbackMult : 1) * floaty;
+    const maxed = s.inflation >= BALANCE.inflation.max - 1e-6 ? K.maxedMult : 1;
+    const speed = ((power * (K.base + K.growth * Math.pow(s.inflation, K.growthExp))) / mass) * (braced ? Br.knockbackMult : 1) * floaty * maxed;
 
     // Normalize and guarantee some lift so targets leave the ground.
     let l = Math.hypot(dx, dy, dz) || 1;
@@ -2378,6 +2381,12 @@ export class GameSim {
     this.startGrab(p, best);
   }
 
+  /** ABAG's hug: grabs his chase target on contact (see UltSim.stepChases). */
+  hug(p: SimPlayer, target: SimPlayer): void {
+    this.startGrab(p, target);
+    this.events.push({ t: 'bag', tick: this.tick, id: p.id, target: target.id });
+  }
+
   private startGrab(p: SimPlayer, target: SimPlayer): void {
     const s = p.state;
     const t = target.state;
@@ -2560,13 +2569,14 @@ export class GameSim {
   private tryGrapple(p: SimPlayer): void {
     const s = p.state;
     const G = BALANCE.grapple;
-    if (!this.features.grapple || s.grappleCool > 0 || s.mode !== MODE_NORMAL || s.holding >= 0) return;
+    if (!this.features.grapple || s.grappleCool > 0 || s.mode !== MODE_NORMAL || s.holding >= 0 || grappleLocked(s)) return;
     const d = lookDir(s.yaw, s.pitch, { x: 0, y: 0, z: 0 });
     const ex = s.px;
     const ey = s.py + eyeHeight(s);
     const ez = s.pz;
+    const range = G.range * grappleScale(s, G.rangeAtMax);
     let target: SimPlayer | null = null;
-    let bestT = G.range;
+    let bestT = range;
     for (const o of this.players.values()) {
       if (o === p || !this.isEnemy(p.id, o.id)) continue;
       const t = o.state;
@@ -2577,7 +2587,7 @@ export class GameSim {
         target = o;
       }
     }
-    const wh = this.world.raycast(ex, ey, ez, d.x, d.y, d.z, G.range);
+    const wh = this.world.raycast(ex, ey, ez, d.x, d.y, d.z, range);
     if (target && (!wh || bestT < wh.dist)) {
       const t = target.state;
       if (t.mode === MODE_HANG || t.mode === MODE_CLIMB) releaseLedge(t, 0);

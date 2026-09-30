@@ -124,7 +124,9 @@ export type GameEvent =
   /** The Chase locked on to someone new (the last target got away or popped). */
   | { t: 'sniff'; tick: number; id: number; target: number }
   /** The Chase caught its target: the extra-strong throw. */
-  | { t: 'gotcha'; tick: number; id: number; target: number };
+  | { t: 'gotcha'; tick: number; id: number; target: number }
+  /** ABAG caught his chase target and hugged them (a grab). */
+  | { t: 'bag'; tick: number; id: number; target: number };
 
 /** What a supply crate can hold. */
 export type LootKind = 'deflate' | 'mega' | 'turbo' | 'gadgets' | 'feather' | 'spring';

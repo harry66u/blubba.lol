@@ -87,6 +87,8 @@ export const BALANCE = {
     growth: 16,
     /** >1 keeps early hits modest and makes high inflation ramp up sharply (tuned with scripts/knockback-sweep.ts). */
     growthExp: 3,
+    /** Hits that leave someone at 100% inflation launch this much harder (maxed out means in danger). */
+    maxedMult: 1.2,
     /** Near misses (splash) launch this much weaker than direct hits. */
     splashMult: 0.65,
     /** Splash power at the very edge of the blast radius relative to the center. */
@@ -472,7 +474,17 @@ export const BALANCE = {
 
   grapple: {
     range: 34,
-    cooldown: 3,
+    cooldown: 3.5,
+    /**
+     * No grappling in the air right after a hit: `hitLock` seconds, plus `hitLockPerInflation`
+     * times inflation squared (0.6 s at 50%, 1.6 s at 100%): a full balloon hit hard can't zip
+     * straight back.
+     */
+    hitLock: 0.3,
+    hitLockPerInflation: 1.3,
+    /** A full balloon is heavy on the rope: range and zip speed at 100% inflation, as fractions. */
+    rangeAtMax: 0.5,
+    zipAtMax: 0.7,
     missCooldown: 0.7,
     /** Extra radius around bodies so trackpad players can land grapples. */
     aimForgiveness: 0.7,
@@ -578,7 +590,12 @@ export const BALANCE = {
     chase: {
       duration: 6,
       speedMult: 1.4,
+      /** Picks someone at random within this range (anyone on the map if nobody's this close). */
       range: 45,
+      /** Touching the target hugs them (a grab) automatically: extra reach beyond a normal grab. */
+      hugReach: 0.6,
+      /** Seconds before he can hug again after they wriggle free. */
+      hugRetry: 1.2,
       /** Half-angle (radians) counted as "in front" when picking who to sniff out. */
       frontCone: 0.8,
       /** How fast shots turn toward the target (radians per second). */

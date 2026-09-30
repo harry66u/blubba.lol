@@ -351,24 +351,37 @@ describe('turning into the character', () => {
 });
 
 describe('The Chase', () => {
-  it('sniffs out the nearest enemy in front, even past a closer one behind', () => {
-    const { sim, ps, ds } = setup([{ ult: 'chase' }, {}, {}]);
-    const [a, b, c] = ps;
+  it('picks who to bag at random: anyone within range, or anyone at all if nobody is close', () => {
+    const picked = new Set<number>();
+    let ids: number[] = [];
+    for (let i = 0; i < 30; i++) {
+      const { sim, ps, ds } = setup([{ ult: 'chase' }, {}, {}]);
+      ids = [ps[1].id, ps[2].id];
+      place(ds[0], 0, 0);
+      place(ds[1], 0, 8);
+      place(ds[2], 0, -12);
+      const ult = popUlt(sim, ds, ds[0]).find((e) => e.t === 'ult') as Extract<GameEvent, { t: 'ult' }>;
+      expect(ids).toContain(ult.targets[0]);
+      picked.add(ult.targets[0]);
+    }
+    expect(picked.size).toBe(2);
+    // Nobody within range: he still goes after someone.
+    const { sim, ps, ds } = setup([{ ult: 'chase' }, {}]);
     place(ds[0], 0, 0);
-    place(ds[1], 0, 3); // behind, closer
-    place(ds[2], 0, -9); // in front
-    const ev = popUlt(sim, ds, ds[0]);
-    expect(ev.find((e) => e.t === 'ult')).toMatchObject({ kind: 'chase', targets: [c.id] });
-    expect(a.state.chaseTarget).toBe(c.id);
-    void b;
+    place(ds[1], 0, 0);
+    ps[1].state.py = BALANCE.ults.chase.range + 10;
+    ps[1].state.onGround = 0;
+    popUlt(sim, ds, ds[0]);
+    expect(ps[0].state.chaseTarget).toBe(ps[1].id);
   });
 
   it('is faster, recharges dashes instantly, and re-sniffs when the target pops', () => {
     const { sim, ps, ds } = setup([{ ult: 'chase' }, {}, {}]);
     const [a, b, c] = ps;
+    // The others stand well off to the side, so walking doesn't bump into (and hug) either.
     place(ds[0], 0, 6);
-    place(ds[1], 0, -4);
-    place(ds[2], 3, 8);
+    place(ds[1], 15, 6);
+    place(ds[2], -15, 6);
     const normal = walkSpeed(sim, ds, ds[0]);
     place(ds[0], 0, 6);
     popUlt(sim, ds, ds[0]);
@@ -378,11 +391,30 @@ describe('The Chase', () => {
     ds[0].press('dash');
     run(sim, ds, 2);
     expect(a.state.dashCharges).toBe(BALANCE.dash.charges);
-    expect(a.state.chaseTarget).toBe(b.id);
-    sim.knockout(b);
+    const first = a.state.chaseTarget;
+    expect([b.id, c.id]).toContain(first);
+    const other = first === b.id ? c : b;
+    sim.knockout(first === b.id ? b : c);
     const ev = runCollect(sim, ds, 40);
-    expect(ev.find((e) => e.t === 'sniff')).toMatchObject({ id: a.id, target: c.id });
-    expect(a.state.chaseTarget).toBe(c.id);
+    expect(ev.find((e) => e.t === 'sniff')).toMatchObject({ id: a.id, target: other.id });
+    expect(a.state.chaseTarget).toBe(other.id);
+  });
+
+  it('touching the target hugs them (BAGGED), and the throw after is extra hard', () => {
+    const { sim, ps, ds } = setup([{ ult: 'chase' }, {}]);
+    const [a, b] = ps;
+    place(ds[0], 0, 0);
+    place(ds[1], 0, -5);
+    popUlt(sim, ds, ds[0]);
+    expect(a.state.chaseTarget).toBe(b.id);
+    ds[0].frame.moveZ = 1;
+    const ev = runCollect(sim, ds, 60, () => {
+      if (b.state.mode === MODE_HELD) ds[0].frame.moveZ = 0;
+    });
+    expect(ev.find((e) => e.t === 'bag')).toMatchObject({ id: a.id, target: b.id });
+    expect(ev.find((e) => e.t === 'grab')).toMatchObject({ id: a.id, target: b.id });
+    const after = runCollect(sim, ds, Math.ceil(BALANCE.grab.maxHold * 60) + 5);
+    expect(after.find((e) => e.t === 'gotcha')).toMatchObject({ id: a.id, target: b.id });
   });
 
   it('curves shots toward the target', () => {

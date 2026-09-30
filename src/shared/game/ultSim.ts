@@ -1,5 +1,5 @@
 import { BALANCE } from '../balance';
-import { MODE_DEAD, type ShotSpec, type StepResult, eyeHeight, lookDir, playerHeight, playerRadius } from '../player';
+import { MODE_DEAD, MODE_HANG, MODE_NORMAL, type ShotSpec, type StepResult, eyeHeight, lookDir, playerHeight, playerRadius } from '../player';
 import type { GameSim, Projectile, SimPlayer } from './sim';
 import { PROJ_BIG_BLOW, PROJ_ROCKET, ULT_CHARACTER, chargeUlt, steerToward, ultOf, ultPowerMult } from './ults';
 
@@ -46,6 +46,8 @@ export class UltSystem {
   private readonly bounceAt = new Map<string, number>();
   private readonly barrages = new Map<number, Barrage>();
   private readonly resniffAt = new Map<number, number>();
+  /** ABAG: when he can try to hug his target again (after they wriggle free). */
+  private readonly hugAt = new Map<number, number>();
   private readonly dir = { x: 0, y: 0, z: 0 };
 
   constructor(private readonly sim: GameSim) {}
@@ -58,6 +60,7 @@ export class UltSystem {
     this.bounceAt.clear();
     this.barrages.clear();
     this.resniffAt.clear();
+    this.hugAt.clear();
   }
 
   /** Called with every player step: did they pop their ult, or did a Crop Duster just go off? */
@@ -175,14 +178,20 @@ export class UltSystem {
     this.stepRoad();
   }
 
-  /** Lost your target (popped or gone)? Sniff out the next one. */
+  /**
+   * ABAG hunting: touch your target and you hug them (an automatic grab; they can still wriggle
+   * free with a dash in the green). Lost your target (popped or gone)? Sniff out the next one.
+   */
   private stepChases(): void {
     const C = BALANCE.ults.chase;
     for (const p of this.sim.players.values()) {
       const s = p.state;
       if (s.chaseTimer <= 0 || s.mode === MODE_DEAD) continue;
       const t = this.sim.players.get(s.chaseTarget);
-      if (t && t.state.mode !== MODE_DEAD) continue;
+      if (t && t.state.mode !== MODE_DEAD) {
+        this.tryHug(p, t);
+        continue;
+      }
       if (this.sim.time < (this.resniffAt.get(p.id) ?? 0)) continue;
       this.resniffAt.set(p.id, this.sim.time + C.resniff);
       const next = this.sniff(p);
@@ -265,33 +274,39 @@ export class UltSystem {
     this.sim.events.push({ t: 'shot', tick: this.sim.tick, id: pr.id, owner: p.id, w: PROJ_BIG_BLOW, x: f.ox, y: f.oy, z: f.oz, vx: pr.vx, vy: pr.vy, vz: pr.vz, r: pr.radius, power: 1, cs: clientSeq });
   }
 
-  // --- The Chase -----------------------------------------------------------------------------
+  // --- The Chase (ABAG) -----------------------------------------------------------------------
 
-  /** The nose picks the nearest enemy in front of you, or failing that the nearest one anywhere. */
+  /** ABAG picks who to bag at random: anyone within range, or anyone on the map if nobody's close. */
   private sniff(p: SimPlayer): number {
     const C = BALANCE.ults.chase;
     const s = p.state;
-    const fx = -Math.sin(s.yaw);
-    const fz = -Math.cos(s.yaw);
-    let best = -1;
-    let bestScore = Infinity;
+    const near: number[] = [];
+    const all: number[] = [];
     for (const o of this.sim.players.values()) {
       if (o === p || !this.sim.isEnemy(p.id, o.id)) continue;
       const t = o.state;
       if (t.mode === MODE_DEAD) continue;
-      const dx = t.px - s.px;
-      const dz = t.pz - s.pz;
-      const d = Math.hypot(dx, t.py - s.py, dz);
-      if (d > C.range) continue;
-      const h = Math.hypot(dx, dz);
-      const inFront = h < 1 || (dx * fx + dz * fz) / h > Math.cos(C.frontCone);
-      const score = d + (inFront ? 0 : 1000);
-      if (score < bestScore) {
-        bestScore = score;
-        best = o.id;
-      }
+      all.push(o.id);
+      if (Math.hypot(t.px - s.px, t.py - s.py, t.pz - s.pz) <= C.range) near.push(o.id);
     }
-    return best;
+    const pool = near.length ? near : all;
+    return pool.length ? pool[Math.floor(Math.random() * pool.length)] : -1;
+  }
+
+  /** Close enough to your chase target? Hug them. */
+  private tryHug(p: SimPlayer, target: SimPlayer): void {
+    const C = BALANCE.ults.chase;
+    const s = p.state;
+    const t = target.state;
+    if (s.mode !== MODE_NORMAL || s.holding >= 0 || s.doubledTimer > 0 || !this.sim.features.grab) return;
+    if (t.mode !== MODE_NORMAL && t.mode !== MODE_HANG) return;
+    if (t.spawnProt > 0 || t.heldBy >= 0 || this.sim.time < (this.hugAt.get(p.id) ?? 0)) return;
+    const horiz = Math.hypot(t.px - s.px, t.pz - s.pz);
+    if (horiz > playerRadius(s) + playerRadius(t) + BALANCE.grab.range + C.hugReach) return;
+    const dy = t.py + playerHeight(t) * 0.5 - (s.py + playerHeight(s) * 0.5);
+    if (Math.abs(dy) > playerHeight(s) * 0.8 + 0.5) return;
+    this.hugAt.set(p.id, this.sim.time + C.hugRetry);
+    this.sim.hug(p, target);
   }
 
   /** Shots fired during The Chase home in on the target. */

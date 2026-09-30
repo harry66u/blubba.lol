@@ -378,3 +378,18 @@ against where they really were. The Pump Rifle and Bubble Shotgun already checke
 where you saw people; projectiles (Air Cannon, Pop Gun, Balloon Mortar) now do too: each shot
 remembers how far behind your screen was (up to 0.4 s) and its hit checks use players' positions
 from that long ago; a hit lands on the target's body where it is now. Bots' shots aren't rewound.
+
+## Grapple at 100%, and ABAG's hug
+
+- **Full balloons are easier to knock out.** A hit that leaves someone at 100% launches 20% harder
+  (`knockback.maxedMult`). The grapple no longer saves them every time: right after a hit you can't
+  grapple in the air for `0.3 s + 1.3 s × inflation²` (0.6 s at 50%, 1.6 s at 100%), the rope's
+  range and zip speed shrink as you inflate (half the range and 70% of the speed at 100%), and
+  the cooldown is 3.5 s (was 3). In a scripted test (one charged Air Cannon hit toward the edge,
+  a target that steers back and grapples the deck the moment it can), a player at 100% used to
+  survive every hit with the grapple (0/24 knocked out); now 14/24 are knocked out (17/24
+  without grappling). The grapple icon greys out while it's locked.
+- **ABAG (The Chase) bags someone at random.** He picks a random enemy within 45 m (anyone on the
+  map if nobody's close), everyone gets a "WARNING: ABAG IS TRYING TO BAG YOU!" callout (the
+  target is told it's them), and touching the target hugs them automatically (a grab they can
+  still wriggle out of with a dash in the green). The throw after is 1.7× as hard, as before.

@@ -66,8 +66,8 @@ export const ULT_INFO: Record<UltId, UltInfo> = {
     name: 'ABAG',
     icon: '👃',
     by: 'The Chase',
-    blurb: 'Sniff out the nearest enemy in front of you and hunt them down: faster, endless dashes, shots curve toward them, grabs throw extra hard.',
-    tagline: 'Sniff them out. Run them down.',
+    blurb: "ABAG picks someone at random and hunts them down to BAG them: you're faster, your shots curve toward them, touch them and you hug them automatically, and the throw after is extra hard. Everyone gets warned.",
+    tagline: "Who's getting BAGGED?",
     color: '#ff5fd2',
   },
   cropDuster: {
