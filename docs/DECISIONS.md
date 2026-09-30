@@ -394,3 +394,15 @@ from that long ago; a hit lands on the target's body where it is now. Bots' shot
   map if nobody's close), everyone gets a "WARNING: ABAG IS TRYING TO BAG YOU!" callout (the
   target is told it's them), and touching the target hugs them automatically (a grab they can
   still wriggle out of with a dash in the green). The throw after is 1.7× as hard, as before.
+
+## Burger drops, more billboards, fair ult dealing
+
+- **Supply drops are burgers.** Same loot and timing, drawn as a burger on a ketchup-and-mustard
+  parachute with Jo's face floating over it (his photo, used with his permission, drawn after the
+  landing beam so it isn't washed out). The drop is announced "🍔 BURGER READY!" (a toast, and a
+  word over where it's landing).
+- **Two more billboards:** JO'S BURGERS ("BURGER READY.") and a rainbow BÆN IS GAY ("LOVE WINS."),
+  with their photos. The ring of boards around each map went from 8 to 10.
+- **Ults are dealt fairly.** Every playable ult is equally likely each spawn, and you never get the
+  same one twice in a row (the other four stay equally likely, so over time each still comes up a
+  fifth of the time).

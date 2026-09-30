@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { BALANCE } from '../../shared/balance';
 import { type LootCrate, type Tornado, lostBelow, stepCrate, stepTornado } from '../../shared/game/loot';
 import type { MapDef } from '../../shared/maps/types';
@@ -53,25 +52,47 @@ interface TornadoView {
   soundIn: number;
 }
 
-function questionTexture(): THREE.CanvasTexture {
-  const c = document.createElement('canvas');
-  c.width = c.height = 128;
-  const g = c.getContext('2d')!;
-  g.fillStyle = '#ffffff';
-  g.beginPath();
-  g.arc(64, 64, 58, 0, Math.PI * 2);
-  g.fill();
-  g.lineWidth = 8;
-  g.strokeStyle = '#ff9f1c';
-  g.stroke();
-  g.fillStyle = '#ff5a1f';
-  g.font = '900 92px "Arial Rounded MT Bold", Arial, sans-serif';
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.fillText('?', 64, 70);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
+/** Jo's face, floating over every burger drop (his photo, soft oval edge, like the regulars'). */
+let joTex: THREE.Texture | null = null;
+function joTexture(): THREE.Texture {
+  if (!joTex) {
+    joTex = new THREE.TextureLoader().load('/characters/jo.webp');
+    joTex.colorSpace = THREE.SRGBColorSpace;
+  }
+  return joTex;
+}
+
+/** A cartoon burger about a meter across, sitting on y = 0 (the supply drop). */
+function makeBurger(mats: Record<'bun' | 'patty' | 'cheese' | 'lettuce' | 'tomato' | 'seed', THREE.Material>): THREE.Group {
+  const g = new THREE.Group();
+  const add = (geo: THREE.BufferGeometry, mat: THREE.Material, y: number, rotY = 0) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.y = y;
+    m.rotation.y = rotY;
+    m.castShadow = true;
+    g.add(m);
+    return m;
+  };
+  add(new THREE.CylinderGeometry(0.56, 0.5, 0.22, 24), mats.bun, 0.11);
+  add(new THREE.CylinderGeometry(0.62, 0.62, 0.2, 24), mats.patty, 0.32);
+  // A square cheese slice, corners hanging over the patty.
+  add(new THREE.BoxGeometry(1.02, 0.05, 1.02), mats.cheese, 0.44, Math.PI / 4);
+  add(new THREE.CylinderGeometry(0.66, 0.64, 0.06, 18), mats.lettuce, 0.49);
+  add(new THREE.CylinderGeometry(0.55, 0.55, 0.07, 20), mats.tomato, 0.55);
+  const top = add(new THREE.SphereGeometry(0.6, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), mats.bun, 0.58);
+  top.scale.y = 0.72;
+  // Sesame seeds.
+  for (let i = 0; i < 11; i++) {
+    const a = i * 2.4;
+    const r = 0.14 + (i % 3) * 0.13;
+    const seed = new THREE.Mesh(new THREE.SphereGeometry(0.035, 6, 4), mats.seed);
+    const h = Math.sqrt(Math.max(0, 0.36 - r * r)) * 0.72;
+    seed.position.set(Math.cos(a) * r, 0.58 + h, Math.sin(a) * r);
+    seed.scale.set(1, 0.5, 1.6);
+    seed.rotation.y = a;
+    g.add(seed);
+  }
+  return g;
 }
 
 function streakTexture(): THREE.CanvasTexture {
@@ -110,17 +131,24 @@ export class GadgetView {
   private time = 0;
   private lostY = -40;
 
-  private readonly crateMat = new THREE.MeshStandardMaterial({ color: 0xffa630, roughness: 0.45, emissive: 0xff7a00, emissiveIntensity: 0.28 });
-  private readonly ribbonMat = new THREE.MeshStandardMaterial({ color: 0x2ec5ff, roughness: 0.3, emissive: 0x2ec5ff, emissiveIntensity: 0.35 });
+  // Ketchup and mustard.
   private readonly chuteMats = [
-    new THREE.MeshStandardMaterial({ color: 0xff3b5c, roughness: 0.5, side: THREE.DoubleSide, emissive: 0xff3b5c, emissiveIntensity: 0.2 }),
-    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5, side: THREE.DoubleSide, emissive: 0xffffff, emissiveIntensity: 0.15 }),
+    new THREE.MeshStandardMaterial({ color: 0xe8262b, roughness: 0.5, side: THREE.DoubleSide, emissive: 0xe8262b, emissiveIntensity: 0.2 }),
+    new THREE.MeshStandardMaterial({ color: 0xffcc14, roughness: 0.5, side: THREE.DoubleSide, emissive: 0xffcc14, emissiveIntensity: 0.15 }),
   ];
   private readonly stringMat = new THREE.MeshBasicMaterial({ color: 0xf4f1ea });
   private readonly beamMat = new THREE.MeshBasicMaterial({ color: 0xfff1a0, transparent: true, opacity: 0.22, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
   private readonly markerMat = new THREE.MeshBasicMaterial({ color: 0xffd60a, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2 });
-  private readonly qMat = new THREE.SpriteMaterial({ map: questionTexture(), depthWrite: false });
-  private readonly crateGeo = new RoundedBoxGeometry(1, 1, 1, 2, 0.12);
+  /** Supply drops are burgers ("BURGER READY"), with Jo's face floating over them. */
+  private readonly burgerMats = {
+    bun: new THREE.MeshStandardMaterial({ color: 0xe8a24a, roughness: 0.55, emissive: 0x7a3a00, emissiveIntensity: 0.18 }),
+    patty: new THREE.MeshStandardMaterial({ color: 0x5a2e14, roughness: 0.8 }),
+    cheese: new THREE.MeshStandardMaterial({ color: 0xffc21a, roughness: 0.4, emissive: 0xff9a00, emissiveIntensity: 0.2 }),
+    lettuce: new THREE.MeshStandardMaterial({ color: 0x5ec94a, roughness: 0.6 }),
+    tomato: new THREE.MeshStandardMaterial({ color: 0xe8392f, roughness: 0.45 }),
+    seed: new THREE.MeshStandardMaterial({ color: 0xfff4d6, roughness: 0.5 }),
+  };
+  private readonly joMat = new THREE.SpriteMaterial({ map: joTexture(), depthWrite: false, transparent: true, toneMapped: false });
   private readonly beamGeo = new THREE.CylinderGeometry(0.28, 0.55, 60, 14, 1, true).translate(0, 30, 0);
   private readonly markerGeo = new THREE.RingGeometry(0.75, 1.05, 32).rotateX(-Math.PI / 2);
 
@@ -141,19 +169,15 @@ export class GadgetView {
     this.removeCrate(id);
     const group = new THREE.Group();
     const box = new THREE.Group();
-    const body = new THREE.Mesh(this.crateGeo, this.crateMat);
-    body.castShadow = true;
-    body.position.y = 0.5;
-    const r1 = new THREE.Mesh(new THREE.BoxGeometry(1.04, 1.04, 0.18), this.ribbonMat);
-    r1.position.y = 0.5;
-    const r2 = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.04, 1.04), this.ribbonMat);
-    r2.position.y = 0.5;
-    const bow = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.06, 8, 16), this.ribbonMat);
-    bow.position.y = 1.08;
-    const q = new THREE.Sprite(this.qMat);
-    q.scale.set(0.8, 0.8, 1);
+    // A burger (a meter across, a bit taller than it is thick) with Jo's face over it.
+    const burger = makeBurger(this.burgerMats);
+    burger.scale.setScalar(1.15);
+    const q = new THREE.Sprite(this.joMat);
+    q.scale.set(1.15, 1.25, 1);
     q.position.y = 1.75;
-    box.add(body, r1, r2, bow, q);
+    // Drawn after the landing beam, so the beam's glow doesn't wash his face out.
+    q.renderOrder = 3;
+    box.add(burger, q);
     box.userData.q = q;
     // Striped parachute on four strings.
     const chute = new THREE.Group();

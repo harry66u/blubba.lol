@@ -1170,10 +1170,12 @@ export class ClientGame {
       }
       case 'loot': {
         this.gadgets.addCrate(e.id, e.x, e.y, e.z, e.groundY, e.fall, true, e.tick);
+        // Where it's coming down.
+        this.hud.popup(tmpV.set(e.x, e.groundY + 2.5, e.z), '🍔 BURGER READY!', '#ffcc14', 1.2, 2);
         // One notice per wave of drops, so a burst of crates doesn't spam the screen.
         if (this.time - this.lastDropToast > 4) {
           this.lastDropToast = this.time;
-          this.hud.toast('📦 Supply drop incoming! Grab it before anyone else.', 2600);
+          this.hud.toast("🍔 BURGER READY! Jo's burger is dropping in. Grab it before anyone else.", 2800);
           a.supplyDrop();
         }
         break;

@@ -350,6 +350,25 @@ describe('turning into the character', () => {
   });
 });
 
+describe('dealing ults', () => {
+  it('every playable ult is equally likely, and never the same one twice in a row', () => {
+    const counts = new Map<string, number>();
+    const { sim, ps } = setup([{}, {}]);
+    const p = ps[0];
+    let last = ULT_IDS[p.state.ultKind];
+    const N = 3000;
+    for (let i = 0; i < N; i++) {
+      sim.respawn(p);
+      const now = ULT_IDS[p.state.ultKind];
+      expect(PLAYABLE_ULTS).toContain(now);
+      expect(now).not.toBe(last);
+      counts.set(now, (counts.get(now) ?? 0) + 1);
+      last = now;
+    }
+    for (const u of PLAYABLE_ULTS) expect(Math.abs((counts.get(u) ?? 0) / N - 1 / PLAYABLE_ULTS.length)).toBeLessThan(0.03);
+  });
+});
+
 describe('The Chase', () => {
   it('picks who to bag at random: anyone within range, or anyone at all if nobody is close', () => {
     const picked = new Set<number>();

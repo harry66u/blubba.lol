@@ -3009,6 +3009,7 @@ export class GameSim {
 
   respawn(p: SimPlayer): void {
     const s = p.state;
+    const lastUlt = ULT_IDS[s.ultKind];
     p.bigUntil = 0;
     // The ult meter carries over from life to life.
     const keep = { cJump: s.cJump, cDash: s.cDash, cBrace: s.cBrace, cGrab: s.cGrab, cGrapple: s.cGrapple, cReload: s.cReload, cU1: s.cU1, cU2: s.cU2, cTaunt: s.cTaunt, cUlt: s.cUlt, ult: s.ult, yaw: s.yaw };
@@ -3020,8 +3021,8 @@ export class GameSim {
       this.emitLoadout(p);
     }
     p.weapon = computeWeaponStats(p.loadout.weapon, p.loadout.parts);
-    // Ults are dealt at random each spawn (all four are free).
-    s.ultKind = ultIndex(randomUlt());
+    // Ults are dealt at random each spawn (all equally likely), never the same one twice in a row.
+    s.ultKind = ultIndex(randomUlt(lastUlt));
     s.hoverTimer = p.weapon.hoverTime;
     const sp = this.pickSpawn(p.id);
     s.px = sp[0];

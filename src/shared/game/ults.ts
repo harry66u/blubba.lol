@@ -30,8 +30,13 @@ export const ULT_CHARACTER: Partial<Record<UltId, { body: string; name: string; 
 /** The ults dealt out in matches, one at random each time you spawn. */
 export const PLAYABLE_ULTS: readonly UltId[] = ['juice', 'chase', 'cropDuster', 'robot', 'pride'];
 
-export function randomUlt(): UltId {
-  return PLAYABLE_ULTS[Math.floor(Math.random() * PLAYABLE_ULTS.length)];
+/**
+ * Deals an ult: every playable one equally likely, never the one you just had (`except`), so the
+ * same ult can't come up twice in a row.
+ */
+export function randomUlt(except?: UltId): UltId {
+  const pool = PLAYABLE_ULTS.filter((u) => u !== except);
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 export interface UltInfo {
