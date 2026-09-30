@@ -17,8 +17,8 @@ npm start            # serves everything on http://localhost:8080
 ```
 
 Open http://localhost:8080 and click **PLAY**. The menu starts on **Any mode**: everyone who just
-presses PLAY lands in the same **Sudden Death** rooms (the main mode: one life, get knocked out and
-you're out, last one standing wins the round). You can also pick a mode yourself (Sudden Death,
+presses PLAY lands in the same **Sudden Death** rooms with real players only (the main mode: one
+life, get knocked out and you're out, last one standing wins the round). You can also pick a mode yourself (Sudden Death,
 Knockout, Team Knockout, Ball, Pump, 1v1, Ranked). Bots only fill in if you switch **Bots** on. To play with friends, click
 **Private room**, press **Esc** in the match, and use **Copy invite link** (links look like
 `http://host/r/ABCDE`). **1v1 challenge** copies a `http://host/c/ABCDE` link: whoever opens it

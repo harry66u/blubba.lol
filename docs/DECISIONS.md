@@ -361,11 +361,20 @@ Nothing was removed; only how and where things show changed.
 
 ## Sudden Death is the main mode; PLAY is "Any mode"
 
-- **Everyone who just presses PLAY plays together.** The menu starts on "Any mode" (for everyone,
-  once: the remembered mode moved to a new storage key), which sends you to the busiest public
-  Sudden Death room with space, whether or not it has bots, so the open and bots-on pools don't
-  split the players online. If there's no room, a new one opens with your Bots setting. Picking a
-  mode yourself still works as before (and Sudden Death players land in the same rooms).
+- **Everyone who just presses PLAY plays together, real players only.** The menu starts on "Any
+  mode" (for everyone, once: the remembered mode moved to a new storage key), which sends you to
+  the busiest public Sudden Death room with space and no bots, on any map. There's no Bots switch
+  for it. Picking a mode yourself still works as before (Sudden Death with Bots off lands in the
+  same rooms).
 - **Sudden Death** is listed first after Any mode. It already worked as "knocked out means you're
   out" (one life per round, first to 3 rounds); its menu text and callouts no longer say everyone
   starts fully inflated, which stopped being true a while ago.
+
+## Projectiles are lag compensated
+
+Other players are drawn a little in the past (interpolation, about 0.1 s) and your shot reaches
+the server a little later still, so a projectile aimed dead on someone could miss by a meter
+against where they really were. The Pump Rifle and Bubble Shotgun already checked hits against
+where you saw people; projectiles (Air Cannon, Pop Gun, Balloon Mortar) now do too: each shot
+remembers how far behind your screen was (up to 0.4 s) and its hit checks use players' positions
+from that long ago; a hit lands on the target's body where it is now. Bots' shots aren't rewound.

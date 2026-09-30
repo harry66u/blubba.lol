@@ -134,6 +134,32 @@ describe('loadouts', () => {
     expect(b.state.inflation).toBeGreaterThan(0.1);
   });
 
+  it('Air Cannon shots are lag compensated too: they hit where the shooter saw the target', () => {
+    const shoot = (compensate: boolean) => {
+      const { sim, ps, ds } = setup([{ weapon: 'airCannon' }, {}]);
+      const [a, b] = ps;
+      place(a, -10, 0, 0, -Math.PI / 2);
+      place(b, 2, 0, 0);
+      run(sim, ds, 2);
+      ds[0].aimAt(2, 1.1, 0);
+      ds[0].setFire(true);
+      run(sim, ds, 40, () => place(b, 2, 0, 0));
+      // On the server the target steps aside as the shot leaves; the shooter's screen (drawn a
+      // few ticks behind) still shows it where it was.
+      const seen = sim.tick - 8;
+      ds[0].setFire(false);
+      if (compensate) ds[0].frame.viewTick = seen;
+      let hit = false;
+      run(sim, ds, 30, () => {
+        if (!hit) place(b, 2, 0, 2.5);
+        hit = hit || b.state.inflation > 0;
+      });
+      return b.state.inflation;
+    };
+    expect(shoot(false)).toBe(0);
+    expect(shoot(true)).toBeGreaterThan(0.05);
+  });
+
   it('Bounce Pad deploys where it lands and launches players', () => {
     const { sim, ps, ds } = setup([{ utils: ['bouncePad', 'airGrenade'] }]);
     const p = ps[0];

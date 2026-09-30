@@ -291,7 +291,7 @@ export function buildMainMenu(
     m === 'ranked'
       ? { name: 'Ranked', blurb: 'Rated 1v1 against someone near your skill. Needs a free account.' }
       : m === 'any'
-        ? { name: 'Any mode', blurb: "Play with everyone online right now. Everybody lands in Sudden Death: one life, get knocked out and you're out." }
+        ? { name: 'Any mode', blurb: "Real players only, everyone online together in Sudden Death: one life, get knocked out and you're out." }
         : MODE_INFO[m];
   const pick = (m: PlayMode) => {
     mode = m;
@@ -301,8 +301,8 @@ export function buildMainMenu(
     }
     blurb.textContent = info(m).blurb;
     maps.setMode(m);
-    // Ranked never has bots.
-    botsRow.classList.toggle('hidden', m === 'ranked');
+    // Ranked and the default queue (Any mode) never have bots.
+    botsRow.classList.toggle('hidden', m === 'ranked' || m === 'any');
     botsOn = botsFor(m);
     drawBots();
   };

@@ -468,7 +468,7 @@ describe('Team Knockout lobby', () => {
 });
 
 describe('Any mode (the default PLAY)', () => {
-  it('puts everyone who just presses PLAY in the same Sudden Death room, bots switch or not', async () => {
+  it('puts everyone who just presses PLAY in the same Sudden Death room, with no bots', async () => {
     const join = async (guestId: string, open: boolean) => {
       const c = new TestClient();
       await c.open();
@@ -482,6 +482,10 @@ describe('Any mode (the default PLAY)', () => {
     expect(a.w.room.isPrivate).toBe(false);
     expect(b.w.room.code).toBe(a.w.room.code);
     expect(c.w.room.code).toBe(a.w.room.code);
+    // Real players only, even for someone whose Bots switch is on.
+    expect(a.w.room.settings.bots).toBe(false);
+    const room = lobby.rooms.get(a.w.room.code)!;
+    expect(room.sim.bots.size).toBe(0);
     for (const x of [a, b, c]) x.c.ws.close();
   });
 });

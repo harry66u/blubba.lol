@@ -235,7 +235,16 @@ export interface Projectile {
   turn?: number;
   /** Fired by an ult (its hits don't refill the ult meter). */
   ult?: boolean;
+  /**
+   * Lag compensation: how many ticks behind the present the shooter saw everyone else when they
+   * fired. Hits are checked against where players were that long ago, so a shot that's on target
+   * on your screen hits (see stepProjectiles).
+   */
+  lag?: number;
 }
+
+/** Most a projectile's hit check looks back in time for the shooter's view (ticks, ~0.4 s). */
+export const PROJ_REWIND_MAX = 24;
 
 export interface SimOptions {
   map: MapDef;
@@ -785,7 +794,7 @@ export class GameSim {
           this.fireSpread(p, f.dx, f.dy, f.dz, hard, f.charge, input.viewTick);
           break;
         default:
-          this.spawnShot(p, f.ox, f.oy, f.oz, f.dx, f.dy, f.dz, f.power, f.charge, input.seq, f.mega, boost);
+          this.spawnShot(p, f.ox, f.oy, f.oz, f.dx, f.dy, f.dz, f.power, f.charge, input.seq, f.mega, boost, input.viewTick);
       }
     }
     p.streaming = out.stream > 0;
@@ -836,7 +845,7 @@ export class GameSim {
     return id;
   }
 
-  private spawnShot(p: SimPlayer, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, power: number, charge: number, clientSeq: number, mega = false, boost = 1): void {
+  private spawnShot(p: SimPlayer, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, power: number, charge: number, clientSeq: number, mega = false, boost = 1, viewTick = 0): void {
     const M = BALANCE.streaks;
     const w = p.weapon;
     const id = this.newProjectileId();
@@ -865,6 +874,7 @@ export class GameSim {
       knockback: w.knockback * (mega ? M.megaKnockback : 1) * boost,
       light: w.light > 0,
       wi: weaponIndex(w.id),
+      lag: viewTick > 0 ? Math.max(0, Math.min(PROJ_REWIND_MAX, this.tick - Math.round(viewTick))) : 0,
     };
     // The Chase: your shots curve toward whoever you're hunting.
     const homing = this.ults.homing(p);
@@ -922,11 +932,30 @@ export class GameSim {
         pr.x += pr.vx * sdt;
         pr.y += pr.vy * sdt;
         pr.z += pr.vz * sdt;
-        // Direct hits on players.
+        // Direct hits on players, where the shooter saw them (lag compensation, like the Pump
+        // Rifle's rewind): the shot flies in the shooter's view of the match, and a hit lands on
+        // the target's body where it is now.
         for (const p of this.players.values()) {
           if (p.id === pr.owner || p.state.mode === MODE_DEAD || !this.isEnemy(pr.owner, p.id)) continue;
-          const hit = capsuleSphere(p.state, pr.x, pr.y, pr.z, pr.radius, this.hitR(p), this.hitH(p));
+          let body = p.state;
+          if (pr.lag) {
+            const past = this.stateAt(p, this.tick - pr.lag);
+            if (past !== p.state) {
+              if (past.mode === MODE_DEAD) continue;
+              body = this.projScratch;
+              body.px = past.px;
+              body.py = past.py;
+              body.pz = past.pz;
+              body.inflation = past.inflation;
+            }
+          }
+          const hit = capsuleSphere(body, pr.x, pr.y, pr.z, pr.radius, this.hitR(p), this.hitH(p));
           if (hit) {
+            if (body !== p.state) {
+              hit.x += p.state.px - body.px;
+              hit.y += p.state.py - body.py;
+              hit.z += p.state.pz - body.pz;
+            }
             if (pr.light) this.tapHit(pr, p, hit);
             else this.directHit(pr, p, hit);
             done = true;
@@ -1419,6 +1448,8 @@ export class GameSim {
   }
 
   private readonly scratchState = createPlayerState();
+  /** Where a player was, for a lag-compensated projectile hit check (only position and size are read). */
+  private readonly projScratch = createPlayerState();
   private readonly pelletBuf: number[] = [];
   private readonly pelletScratch: PlayerState[] = [];
 

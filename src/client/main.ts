@@ -188,7 +188,7 @@ function rememberMap(m: string | null): void {
  * default) is Sudden Death with everyone else who just pressed PLAY, on whatever map they're on.
  */
 function quickJoin(mode: Exclude<PlayMode, 'ranked'>): Extract<JoinRequest, { kind: 'quick' }> {
-  if (mode === 'any') return { kind: 'quick', mode: 'suddenDeath', any: true, open: !botsFor(mode) };
+  if (mode === 'any') return { kind: 'quick', mode: 'suddenDeath', any: true, open: true };
   return { kind: 'quick', mode, ...(lastMap ? { map: lastMap } : {}), open: !botsFor(mode) };
 }
 
