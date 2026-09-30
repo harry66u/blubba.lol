@@ -43,7 +43,8 @@ function wrapAngle(a: number): number {
 
 /** Where a bot likes to stand for its weapon (r: 0..1 random). */
 function preferredDistance(w: WeaponStats, r: number): number {
-  if (w.kind === 'cone') return 2.5 + r * 2.5;
+  // Most of the cone's reach (the Air Blaster's 7 m: 2.5 to 5 m; the Wind Lance's 15 m: 5 to 10 m).
+  if (w.kind === 'cone') return w.range * (0.35 + r * 0.35);
   if (w.kind === 'stream') return 4 + r * 3;
   if (w.kind === 'hitscan') return 14 + r * 12;
   if (w.kind === 'spread') return 3 + r * 4;

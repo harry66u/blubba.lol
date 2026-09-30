@@ -26,8 +26,6 @@ box([26, 0, 3], [28, 1.6, 8], 'crate', { ledge: true });
 box([-1.5, 0.5, -6], [1.5, 2.3, -3], 'crate', { ledge: true });
 box([-1.5, 0.5, 3], [1.5, 2.3, 6], 'crate', { ledge: true });
 
-decor.push({ type: 'tubeMan', x: -39, y: 0, z: -11, color: 0xff3b5c });
-decor.push({ type: 'tubeMan', x: 39, y: 0, z: 11, color: 0x2ec5ff });
 decor.push({ type: 'balloons', x: 0, y: 0.8, z: -20, color: 0xffd60a });
 decor.push({ type: 'balloons', x: 0, y: 0.8, z: 20, color: 0x8ee000 });
 

@@ -59,6 +59,7 @@ import {
   computeWeaponStats,
   normalizeParts,
   sanitizeLoadout,
+  weaponIndex,
 } from '../../shared/loadout';
 import { pelletDirs, shotDir, spreadAt } from '../../shared/shots';
 import { EntityView } from '../render/entities';
@@ -1033,10 +1034,13 @@ export class ClientGame {
             if (style === 'cork') {
               a.popShot(pos);
               fx.muzzleFlash(e.x, e.y, e.z, e.vx / sp, e.vy / sp, e.vz / sp, 0.15);
-            } else if (style === 'balloon') {
+            } else if (style === 'balloon' || style === 'rocket') {
               a.mortarLaunch(e.power, pos);
               fx.muzzleFlash(e.x, e.y, e.z, e.vx / sp, e.vy / sp, e.vz / sp, e.power * 0.8);
               fx.airPuff(e.x, e.y, e.z, 8, 3, 0.3);
+            } else if (WEAPON_IDS[e.wi ?? 0] === 'gustRepeater') {
+              a.shoot(e.power * 0.55, pos);
+              fx.muzzleFlash(e.x, e.y, e.z, e.vx / sp, e.vy / sp, e.vz / sp, e.power * 0.4);
             } else {
               a.shoot(e.power, pos);
               fx.muzzleFlash(e.x, e.y, e.z, e.vx / sp, e.vy / sp, e.vz / sp, e.power);
@@ -2127,12 +2131,14 @@ export class ClientGame {
       return;
     }
     const M = BALANCE.streaks;
-    const style: ShotStyle = w.light ? 'cork' : w.projGravity > 0 ? 'balloon' : 'air';
-    const kick = (f.mega ? 1.6 : 1) * (style === 'cork' ? 0.25 : style === 'balloon' ? 1.4 : 1);
+    const style: ShotStyle = shotStyleFor(weaponIndex(w.id));
+    // Full-auto air shots (the Gust Repeater) kick and sound lighter, one after another.
+    const rapid = w.auto > 0 && style === 'air';
+    const kick = (f.mega ? 1.6 : 1) * (style === 'cork' ? 0.25 : style === 'balloon' ? 1.4 : style === 'rocket' ? 1.3 : rapid ? 0.4 : 1);
     this.viewModel.kick(f.power * kick);
     if (style === 'cork') this.audio.popShot(null);
-    else if (style === 'balloon') this.audio.mortarLaunch(f.power, null);
-    else this.audio.shoot(f.power, null);
+    else if (style === 'balloon' || style === 'rocket') this.audio.mortarLaunch(f.power, null);
+    else this.audio.shoot(rapid ? f.power * 0.55 : f.power, null);
     this.trauma = Math.min(1, this.trauma + (0.05 + f.power * 0.1) * kick);
     this.punchV += (0.5 + f.power * 1.3) * kick;
     this.fovKick += (1 + f.power * 3) * kick;

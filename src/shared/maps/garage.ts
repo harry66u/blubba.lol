@@ -53,9 +53,6 @@ decor.push({ type: 'cone', x: -2.5, y: 0, z: 4.5 });
 decor.push({ type: 'cone', x: -5.5, y: 0, z: 2.2 });
 
 decor.push({ type: 'sign', x: -6, y: 5.5, z: -5, data: { text: 'TOP FLOOR' } });
-decor.push({ type: 'tubeMan', x: -24.5, y: 0, z: 16.5, color: 0xff9500 });
-decor.push({ type: 'tubeMan', x: 24.5, y: 0, z: 16.5, color: 0x5ac8fa });
-decor.push({ type: 'tubeMan', x: 38.5, y: 0.5, z: 3.5, color: 0xff2d55 });
 decor.push({ type: 'cone', x: 6, y: 0, z: 15 });
 decor.push({ type: 'cone', x: -8, y: 0, z: 14 });
 decor.push({ type: 'cone', x: 10, y: 5.5, z: -8 });

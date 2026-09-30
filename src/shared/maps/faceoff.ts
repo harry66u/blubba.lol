@@ -65,13 +65,12 @@ for (const x of [1, -1]) ns([x > 0 ? 5 : -7, 0, 16.5], [x > 0 ? 7 : -5, 1.2, 18.
 // Little islands off the flanks (a soda can each); they sink at half time.
 ns([-3, -1.5, 24], [3, 0.4, 30], 'island', { ledge: true, collapse: 3, color: 0xf7e3a1 });
 
-// Team colors at a glance: flags at the bases' front corners, tube men at the back.
+// Team colors at a glance: flags at the bases' front corners.
 for (const [x, team] of [
   [-30.6, 0],
   [30.6, 1],
 ] as const) {
   for (const z of [-13.5, 13.5]) decor.push({ type: 'teamFlag', x, y: 0, z, rotY: x < 0 ? 0 : Math.PI, data: { team } });
-  for (const z of [-17.5, 17.5]) decor.push({ type: 'tubeMan', x: x < 0 ? -40 : 40, y: 0, z, data: { team } });
 }
 decor.push({ type: 'balloons', x: 2.2, y: 0.4, z: 28.6, color: 0xffd60a });
 decor.push({ type: 'balloons', x: -2.2, y: 0.4, z: -28.6, color: 0xffd60a });

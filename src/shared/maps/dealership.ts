@@ -46,12 +46,10 @@ car(7, 5.5, false, 0x8cb3d9);
 car(-14, 10, true, 0xc79ad9);
 car(0.5, -12.5, true, 0xd9a98c);
 
-// Not everything on the lot is a car: a hot dog truck (climb its cab to the roof), a stage of tube
-// men for sale, and a balloon arch.
+// Not everything on the lot is a car: a hot dog truck (climb its cab to the roof), a little $99
+// stage, and a balloon arch.
 foodTruck(solids, decor, -2, 0, 11.5, { alongX: true, color: 0xfff1d6, text: 'HOT DOGS', snack: 'hotdog' });
 box([10.5, 0, 4.2], [14.5, 0.4, 6.8], 'crate', { ledge: true, color: 0xf4e3c3 });
-decor.push({ type: 'tubeMan', x: 11.6, y: 0.4, z: 5.5, color: 0xff2d55, scale: 1 });
-decor.push({ type: 'tubeMan', x: 13.4, y: 0.4, z: 5.5, color: 0x5ac8fa, scale: 1 });
 decor.push({ type: 'banner', x: 14.9, y: 0, z: 7.2, data: { text: '$99' } });
 balloonArch(solids, decor, -7.5, 0, -5, 6, true);
 decor.push({ type: 'banner', x: 10.8, y: 0, z: -9, data: { text: 'SALE' } });
@@ -95,13 +93,6 @@ box([28.2, -0.4, -6.5], [31.2, 0, -3.5], 'platform', {
 });
 
 // --- Scenery --------------------------------------------------------------------------------
-// Flailing inflatable tube men at the corners (decor only).
-decor.push({ type: 'tubeMan', x: -23.5, y: 0, z: -18.5, color: 0xff3b30 });
-decor.push({ type: 'tubeMan', x: 23.5, y: 0, z: 18.5, color: 0x34c759 });
-decor.push({ type: 'tubeMan', x: -23.5, y: 0, z: 18.5, color: 0xffcc00 });
-decor.push({ type: 'tubeMan', x: 7, y: 0, z: -19, color: 0x5ac8fa });
-decor.push({ type: 'tubeMan', x: -39.5, y: -0.6, z: 4.5, color: 0xff9500 });
-decor.push({ type: 'tubeMan', x: 38.5, y: 1.0, z: 11.5, color: 0xaf52de });
 // Bunting poles along the lot edges.
 decor.push({ type: 'pole', x: -24.5, y: 0, z: -19.5 });
 decor.push({ type: 'pole', x: 24.5, y: 0, z: -9.5 });

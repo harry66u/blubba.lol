@@ -157,19 +157,19 @@ export const BALANCE = {
     leafBlower: {
       kind: 'stream',
       /** Seconds of blowing per tank. */
-      ammo: 3.5,
+      ammo: 4.5,
       reloadTime: 2,
       fireCooldown: 0.15,
       /** Spin-up time to full strength. */
       chargeTime: 0.8,
       tapPower: 0.35,
-      range: 9,
+      range: 13,
       /** Half-angle of the stream cone (radians). */
-      cone: 0.38,
+      cone: 0.42,
       /** Push acceleration at full strength on a fresh target (m/s²). */
-      knockback: 26,
+      knockback: 44,
       /** Inflation per second of full-strength blowing. */
-      inflation: 0.07,
+      inflation: 0.12,
       projSpeed: 0,
       projRadius: 0,
       projLifetime: 0,
@@ -185,13 +185,13 @@ export const BALANCE = {
       kind: 'cone',
       ammo: 4,
       reloadTime: 1.8,
-      fireCooldown: 0.45,
+      fireCooldown: 0.32,
       chargeTime: 0.6,
       tapPower: 0.4,
-      range: 7,
-      cone: 0.62,
-      knockback: 1.5,
-      inflation: 0.13,
+      range: 10,
+      cone: 0.55,
+      knockback: 2.3,
+      inflation: 0.16,
       /** Push back on the shooter (lets you use it to recover). */
       recoil: 7,
       projSpeed: 0,
@@ -231,23 +231,23 @@ export const BALANCE = {
       kind: 'spread',
       ammo: 4,
       reloadTime: 1.9,
-      fireCooldown: 0.5,
+      fireCooldown: 0.42,
       chargeTime: 0.55,
       tapPower: 0.55,
       /** Pellets fly (instantly, lag compensated) this far. */
-      range: 20,
+      range: 24,
       /** Pellet radius: forgiving, but the ring still misses at range. */
       rayRadius: 0.17,
       pellets: 7,
       /** Half-angle of the pellet ring on a tap (radians). */
-      spread: 0.15,
+      spread: 0.12,
       /** The ring shrinks to this fraction at full charge. */
       spreadCharged: 0.45,
       /** Pellets lose this fraction of their punch between `falloffStart` and max range. */
-      falloff: 0.65,
+      falloff: 0.4,
       falloffStart: 3.5,
       /** Knockback and inflation when every pellet lands. */
-      knockback: 1.05,
+      knockback: 1.3,
       inflation: 0.15,
       recoil: 2.5,
       projSpeed: 0,
@@ -262,7 +262,7 @@ export const BALANCE = {
       kind: 'projectile',
       ammo: 2,
       reloadTime: 2.3,
-      fireCooldown: 0.85,
+      fireCooldown: 0.75,
       chargeTime: 0.8,
       tapPower: 0.55,
       /** Slow and lofted: a level shot flies up about 37 degrees and lands ~22 m out. */
@@ -272,9 +272,9 @@ export const BALANCE = {
       projGravity: 20,
       /** Added to the aim's vertical direction so a level shot still arcs high. */
       projLoft: 0.75,
-      blastRadius: 4.6,
+      blastRadius: 5,
       inflation: 0.18,
-      knockback: 1.4,
+      knockback: 1.55,
       range: 0,
       cone: 0,
       rayRadius: 0,
@@ -302,14 +302,87 @@ export const BALANCE = {
       projGravity: 0,
       blastRadius: 0,
       /** Push per cork (scaled like knockback: more on inflated targets). */
-      knockback: 0.14,
-      inflation: 0.021,
+      knockback: 0.17,
+      inflation: 0.023,
       /** A Mega Blast lasts 1 / megaCost corks per "shot". */
       megaCost: 0.125,
       range: 0,
       cone: 0,
       rayRadius: 0,
       recoil: 0,
+    },
+    /**
+     * Sky Rocket: a slow rocket with a big blast. Easier to hit with than it looks (the splash is
+     * huge), fewer shots, and the best rocket jumps in the game.
+     */
+    skyRocket: {
+      kind: 'projectile',
+      ammo: 3,
+      reloadTime: 1.8,
+      fireCooldown: 0.5,
+      chargeTime: 0.65,
+      tapPower: 0.55,
+      projSpeed: 50,
+      projRadius: 0.5,
+      /** About 50 m. */
+      projLifetime: 1.0,
+      projGravity: 0,
+      blastRadius: 3.4,
+      inflation: 0.17,
+      knockback: 1.15,
+      range: 0,
+      cone: 0,
+      rayRadius: 0,
+      recoil: 0,
+    },
+    /**
+     * Gust Repeater: a full-auto Air Cannon. Hold to fire a stream of small air shots; every one
+     * is a real hit (a little launch, not a push), so it juggles people toward the edge.
+     */
+    gustRepeater: {
+      kind: 'projectile',
+      auto: 1,
+      ammo: 9,
+      reloadTime: 1.6,
+      fireCooldown: 0.15,
+      /** Spin-up: the first shots come at up to 2.5x the cooldown. */
+      chargeTime: 0.25,
+      tapPower: 1,
+      projSpeed: 82,
+      projRadius: 0.42,
+      projLifetime: 0.55,
+      projGravity: 0,
+      blastRadius: 1.5,
+      inflation: 0.055,
+      knockback: 0.39,
+      megaCost: 0.34,
+      range: 0,
+      cone: 0,
+      rayRadius: 0,
+      recoil: 0,
+    },
+    /**
+     * Wind Lance: an instant blast along a long, narrow cone. The Air Blaster's punch at medium
+     * range, for players who can aim.
+     */
+    windLance: {
+      kind: 'cone',
+      ammo: 4,
+      reloadTime: 1.8,
+      fireCooldown: 0.5,
+      chargeTime: 0.6,
+      tapPower: 0.45,
+      range: 15,
+      cone: 0.2,
+      knockback: 1.25,
+      inflation: 0.14,
+      recoil: 3,
+      projSpeed: 0,
+      projRadius: 0,
+      projLifetime: 0,
+      projGravity: 0,
+      blastRadius: 0,
+      rayRadius: 0,
     },
   },
 
@@ -476,17 +549,17 @@ export const BALANCE = {
 
   grapple: {
     range: 34,
-    cooldown: 3.5,
+    cooldown: 3.2,
     /**
      * No grappling in the air right after a hit: `hitLock` seconds, plus `hitLockPerInflation`
-     * times inflation squared (0.6 s at 50%, 1.6 s at 100%): a full balloon hit hard can't zip
+     * times inflation squared (0.4 s at 50%, 1.1 s at 100%): a full balloon hit hard can't zip
      * straight back.
      */
-    hitLock: 0.3,
-    hitLockPerInflation: 1.3,
+    hitLock: 0.18,
+    hitLockPerInflation: 0.9,
     /** A full balloon is heavy on the rope: range and zip speed at 100% inflation, as fractions. */
-    rangeAtMax: 0.5,
-    zipAtMax: 0.7,
+    rangeAtMax: 0.66,
+    zipAtMax: 0.82,
     missCooldown: 0.7,
     /** Extra radius around bodies so trackpad players can land grapples. */
     aimForgiveness: 0.7,

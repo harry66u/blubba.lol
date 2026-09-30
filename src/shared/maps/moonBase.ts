@@ -101,8 +101,6 @@ decor.push({ type: 'antenna', x: 38.5, y: 0.6, z: 5, data: { h: 6 } });
 
 // --- Sky: stars, the Earth, a ringed planet and a satellite ---------------------------------------------
 decor.push({ type: 'space', x: 0, y: 0, z: 0 });
-decor.push({ type: 'tubeMan', x: -16, y: 0, z: 16, color: 0x2ec5ff });
-decor.push({ type: 'tubeMan', x: 22, y: 0, z: 10, color: 0xff9f43 });
 
 export const MOON_BASE: MapDef = {
   id: 'moonBase',

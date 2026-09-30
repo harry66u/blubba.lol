@@ -32,8 +32,6 @@ for (const sgn of [-1, 1]) {
 decor.push({ type: 'lines', x: 0, y: 0, z: 0, data: { field: 1 } });
 decor.push({ type: 'umbrella', x: -20, y: 0, z: -21, color: 0xff6fa8 });
 decor.push({ type: 'umbrella', x: 20, y: 0, z: 21, color: 0x6fd3ff });
-decor.push({ type: 'tubeMan', x: -30, y: 0, z: -16, color: 0xff3b5c });
-decor.push({ type: 'tubeMan', x: 30, y: 0, z: 16, color: 0x2ec5ff });
 
 export const BALL_ARENA: MapDef = {
   id: 'ballArena',

@@ -1,7 +1,8 @@
 import { BALANCE } from './balance';
 import { DEFAULT_ULT, ULT_IDS, type UltId } from './game/ults';
 
-export const WEAPON_IDS = ['airCannon', 'leafBlower', 'airHorn', 'pumpRifle', 'bubbleShotgun', 'balloonMortar', 'popGun'] as const;
+// New weapons go at the end: the index is sent over the wire and saved in replays.
+export const WEAPON_IDS = ['airCannon', 'leafBlower', 'airHorn', 'pumpRifle', 'bubbleShotgun', 'balloonMortar', 'popGun', 'skyRocket', 'gustRepeater', 'windLance'] as const;
 export type WeaponId = (typeof WEAPON_IDS)[number];
 export const UTILITY_IDS = ['bouncePad', 'airGrenade', 'inflatableWall', 'vacuumGrenade', 'airMine', 'heliumBomb', 'tornado'] as const;
 export type UtilityId = (typeof UTILITY_IDS)[number];
@@ -100,6 +101,9 @@ export const WEAPON_INFO: Record<WeaponId, { name: string; blurb: string; role: 
   bubbleShotgun: { name: 'Bubble Shotgun', blurb: 'A burst of bubble pellets. Brutal up close; charge it to tighten the spread.', role: 'Close-mid range' },
   balloonMortar: { name: 'Balloon Mortar', blurb: 'Lobs a big water balloon on an arc. Huge splash knocks whole groups off ledges.', role: 'Area denial' },
   popGun: { name: 'Pop Gun', blurb: 'Hold to spray corks. Each one pushes and inflates a little; stay on target.', role: 'Pressure' },
+  skyRocket: { name: 'Sky Rocket', blurb: 'A slow rocket with a huge blast. Hit near them, not at them, and rocket-jump anywhere.', role: 'Splash' },
+  gustRepeater: { name: 'Gust Repeater', blurb: 'A full-auto Air Cannon. Hold to juggle people toward the edge with a stream of air shots.', role: 'Full auto' },
+  windLance: { name: 'Wind Lance', blurb: 'An instant blast down a long, narrow cone. Line it up and shove from mid range.', role: 'Mid range' },
 };
 
 export const UTILITY_INFO: Record<UtilityId, { name: string; blurb: string; icon: string }> = {

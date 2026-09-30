@@ -68,7 +68,7 @@ export class ViewModel {
     this.gun.add(this.model.root);
     this.model.muzzle.add(this.muzzle);
     this.markLayer();
-    const scale: Record<WeaponId, number> = { airCannon: 0.38, leafBlower: 0.3, airHorn: 0.36, pumpRifle: 0.36, bubbleShotgun: 0.37, balloonMortar: 0.36, popGun: 0.4 };
+    const scale: Record<WeaponId, number> = { airCannon: 0.38, leafBlower: 0.3, airHorn: 0.36, pumpRifle: 0.36, bubbleShotgun: 0.37, balloonMortar: 0.36, popGun: 0.4, skyRocket: 0.3, gustRepeater: 0.33, windLance: 0.34 };
     this.root.scale.setScalar(scale[id]);
     this.root.position.set(id === 'leafBlower' ? 0.19 : 0.21, id === 'leafBlower' ? -0.2 : -0.19, -0.34);
   }

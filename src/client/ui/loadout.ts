@@ -90,6 +90,9 @@ export const WEAPON_ICON: Record<WeaponId, string> = {
   bubbleShotgun: '🫧',
   balloonMortar: '🎈',
   popGun: '🍾',
+  skyRocket: '🚀',
+  gustRepeater: '🌀',
+  windLance: '🔱',
 };
 const UTIL_ICON: Partial<Record<string, string>> = Object.fromEntries(UTILITY_IDS.map((u) => [u, UTILITY_INFO[u].icon]));
 const SLOT_ICON: Record<PartSlot, string> = { barrel: '🔭', tank: '🛢️', valve: '🔧', nozzle: '🌬️', grip: '✊' };

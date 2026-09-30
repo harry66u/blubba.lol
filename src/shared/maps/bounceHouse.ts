@@ -50,8 +50,6 @@ box([-4, -2, -36], [4, 0, -30], 0xe0c8ff, 0.85, { collapse: 3 });
 decor.push({ type: 'flag', x: -19.5, y: 7, z: -19.5, data: { text: 'BOING' } });
 decor.push({ type: 'flag', x: 19.5, y: 7, z: 19.5, data: { text: 'BOING' } });
 decor.push({ type: 'balloons', x: 0, y: 4.5, z: 0, color: 0xff6fa8 });
-decor.push({ type: 'tubeMan', x: 19.5, y: 7, z: -19.5, color: 0xff3b30 });
-decor.push({ type: 'tubeMan', x: -19.5, y: 7, z: 19.5, color: 0x34c759 });
 
 export const BOUNCE_HOUSE: MapDef = {
   id: 'bounceHouse',

@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { WEAPON_IDS } from '../../shared/loadout';
 import { heartShape, noteShape, starShape } from './shapes';
 
 export interface Particle {
@@ -213,13 +215,13 @@ interface Balloon {
   t: number;
 }
 
-/** How a weapon shot looks: air blob (cannon), water balloon (mortar) or cork (pop gun). */
-export type ShotStyle = 'air' | 'balloon' | 'cork';
+/** How a weapon shot looks: air blob (cannon), water balloon (mortar), cork (pop gun) or rocket. */
+export type ShotStyle = 'air' | 'balloon' | 'cork' | 'rocket';
 
 /** Shot style for a weapon index (WEAPON_IDS order). */
 export function shotStyleFor(weaponIndex: number | undefined): ShotStyle {
-  // 5 = balloonMortar, 6 = popGun (see shared/loadout.ts WEAPON_IDS).
-  return weaponIndex === 5 ? 'balloon' : weaponIndex === 6 ? 'cork' : 'air';
+  const id = weaponIndex === undefined ? undefined : WEAPON_IDS[weaponIndex];
+  return id === 'balloonMortar' ? 'balloon' : id === 'popGun' ? 'cork' : id === 'skyRocket' ? 'rocket' : 'air';
 }
 
 interface Bubble {
@@ -821,8 +823,27 @@ export class Effects {
     this.confetti.spawn(p, color);
   }
 
+  /** The Sky Rocket's rocket: a red body and nose with fins, along +z (the flight), for radius 1. */
+  private rocketStyle: ProjectileStyle | null = null;
+  private rocket(): ProjectileStyle {
+    if (this.rocketStyle) return this.rocketStyle;
+    const body = new THREE.CylinderGeometry(0.42, 0.42, 1.5, 12).rotateX(Math.PI / 2);
+    const nose = new THREE.ConeGeometry(0.42, 0.6, 12).rotateX(Math.PI / 2).translate(0, 0, 1.05);
+    const fins = [0, 1, 2].map((i) => new THREE.BoxGeometry(0.06, 0.55, 0.45).translate(0, 0.55, -0.55).rotateZ((i / 3) * Math.PI * 2));
+    const geo = mergeGeometries([body, nose, ...fins].map((g) => g.toNonIndexed()));
+    this.rocketStyle = {
+      geo,
+      mat: new THREE.MeshStandardMaterial({ color: 0xff3b5c, emissive: 0xff5a30, emissiveIntensity: 0.35, roughness: 0.35, metalness: 0.2 }),
+      scale: true,
+      stretch: false,
+      trail: [0xffffff, 0xd8d8d8, 0xff9f1c],
+      trailSize: 1.6,
+    };
+    return this.rocketStyle;
+  }
+
   addProjectile(id: number, x: number, y: number, z: number, vx: number, vy: number, vz: number, r: number, muzzle?: THREE.Vector3, kind = 0, style: ShotStyle = 'air'): Projectile3D {
-    const custom = this.styles.get(kind) ?? null;
+    const custom = this.styles.get(kind) ?? (kind === 0 && style === 'rocket' ? this.rocket() : null);
     let mesh: THREE.Mesh;
     if (custom) mesh = new THREE.Mesh(custom.geo, custom.mat);
     else if (kind > 0) mesh = new THREE.Mesh(this.utilGeos[kind]!, this.utilMats[kind]!);

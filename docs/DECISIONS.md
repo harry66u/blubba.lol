@@ -544,3 +544,40 @@ Only work nobody can see was cut; nothing changes on screen and nothing gets slo
 The menu pill shows both counts now: "3 active now · 37 today". "Now" counts everyone on the
 site: in a match, in the ranked queue, or on the menu (the menu's counts poll carries the guest id;
 anyone seen in the last 20 s counts, once, even with the game open in two tabs).
+
+## Three new guns, and every gun brought up to the Air Cannon
+
+A round robin of bot duels (every gun against every other, two bots of the same skill, all seven
+knockout maps, 2 runs × 2 minutes per map per pair; a self-fall scores for the other bot) put
+the Air Cannon at 60% of the knockouts and the Pump Rifle at 62%, with the rest far behind: Leaf
+Blower 20%, Air Blaster 27%, Bubble Shotgun 46%, Balloon Mortar and Pop Gun 51%.
+
+- **Three new guns**, built on the existing fire types so prediction, lag compensation and bots
+  already know them:
+  - **Sky Rocket** (projectile): a slow (50 m/s) red rocket with a 3.4 m blast, 3 shots; the best
+    rocket jumps. Drawn as a finned rocket with a smoke trail.
+  - **Gust Repeater** (full auto): a stream of small air shots that are real hits (a little launch,
+    not a Pop Gun push), 9 per tank, so it juggles people toward the edge.
+  - **Wind Lance** (cone): an instant blast down a long (15 m), narrow cone.
+- **The weak guns got stronger:** Leaf Blower push 26 → 44, reach 9 → 13 m, more air and a bigger
+  tank; Air Blaster reach 7 → 10 m, knockback 1.5 → 2.3, faster; Bubble Shotgun reaches 24 m, hits
+  harder and keeps more punch at range; Balloon Mortar a bigger splash and faster; Pop Gun a
+  little more push. Bots with a cone gun now keep a distance that fits its reach.
+- **After** (same tournament): every gun scores 46% to 54% of the knockouts (was 20% to 62%);
+  against the Air Cannon head to head, every gun wins 43% to 54%.
+
+## Grapple: a bit better again
+
+The last nerf (see "Grapple at 100%") took a player at 100% inflation, hit toward the edge and
+grappling back, from 0/24 knocked out to 14/24. That was too much. It's eased back part of the
+way: cooldown 3.2 s (was 3.5, and 3 before the nerf), the no-grapple window after a hit is
+0.18 s + 0.9 s × inflation² (was 0.3 + 1.3), and at 100% the rope keeps 66% of its range and 82%
+of its zip speed (was 50% and 70%). Same test: 5/24 knocked out, still a bit harder to escape than
+before the nerf.
+
+## No decorative tube men on the maps
+
+The dancing inflatable tube men placed around every map (decor, 1.6× a player's size, some
+right on the deck) read as extra players and got in the way of seeing the real ones. They're
+gone from every map (Face-Off's team-colored ones too). Pump Station's giant tube men are the
+objective and stay.

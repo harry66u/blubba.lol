@@ -491,6 +491,167 @@ function popGun(color: number, L: Look): WeaponModel {
   };
 }
 
+/** Sky Rocket: a shoulder tube with a red-nosed rocket peeking out and fins at the back. */
+function skyRocket(color: number, L: Look): WeaponModel {
+  const root = new THREE.Group();
+  const body = new THREE.MeshStandardMaterial({ color, roughness: 0.3 });
+  const red = plastic(0xff3b5c);
+  const tip = -0.55 * L.barrel;
+  const R = 0.085 * L.bore;
+  // The launch tube, open at the front, with a dark inside.
+  const launcher = tube(R, R, 0.22, tip, body, 0.02, 0, 20);
+  const inside = tube(R * 0.82, R * 0.82, tip + 0.08, tip - 0.001, dark(), 0.02, 0, 20, true);
+  (inside.material as THREE.MeshStandardMaterial).side = THREE.BackSide;
+  const lip = mesh(new THREE.TorusGeometry(R * L.nozzle, 0.018, 8, 22), yellow(), [0, 0.02, tip]);
+  const band = mesh(new THREE.TorusGeometry(R + 0.004, 0.014, 6, 20), red, [0, 0.02, 0.05]);
+  // The rocket's nose in the mouth of the tube (it slides forward as you charge).
+  const nose = mesh(new THREE.ConeGeometry(R * 0.72, 0.12, 14), red, [0, 0.02, tip + 0.03], [-Math.PI / 2, 0, 0]);
+  // Fins and a flared exhaust at the back.
+  const exhaust = tube(R * 0.9, R * 1.25, 0.22, 0.3, dark(), 0.02, 0, 20, true);
+  (exhaust.material as THREE.MeshStandardMaterial).side = THREE.DoubleSide;
+  const fins: THREE.Mesh[] = [];
+  for (let i = 0; i < 3; i++) {
+    const f = mesh(new THREE.BoxGeometry(0.012, 0.07, 0.1), red, [0, 0.02, 0.24]);
+    const a = (i / 3) * Math.PI * 2 + Math.PI / 2;
+    f.position.x = Math.cos(a) * (R + 0.03);
+    f.position.y = 0.02 + Math.sin(a) * (R + 0.03);
+    f.rotation.z = a - Math.PI / 2;
+    fins.push(f);
+  }
+  // A sight on top and a grip underneath; a fuel can for the tank part.
+  const sight = mesh(new THREE.BoxGeometry(0.03, 0.05, 0.08), dark(), [0, 0.02 + R + 0.03, -0.1]);
+  const can = mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.14, 14), glow(), [0, -0.1, -0.12], [Math.PI / 2, 0, 0]);
+  can.scale.setScalar(L.tank);
+  const grip = mesh(new THREE.BoxGeometry(0.06, 0.15, 0.08), dark(), [0, -0.12, 0.06], [0.3, 0, 0]);
+  root.add(launcher, inside, lip, band, nose, exhaust, ...fins, sight, can, grip);
+  const extras = addExtras(root, L, { side: [R, 0.02, -0.25], under: [0, -0.07, -0.05], back: [0, 0.02, 0.3], tip: [0, 0.02, tip + 0.08], tipR: R }, body);
+  const muzzle = new THREE.Object3D();
+  muzzle.position.set(0, 0.02, tip - 0.08);
+  root.add(muzzle);
+  const canMat = can.material as THREE.MeshStandardMaterial;
+  return {
+    root,
+    muzzle,
+    setCharge(c) {
+      nose.position.z = tip + 0.03 - c * 0.05;
+      canMat.emissiveIntensity = 0.2 + c * 1.1;
+      animateExtras(extras, L, c);
+    },
+    setColor(hex) {
+      body.color.set(hex);
+    },
+    dispose() {},
+    paint: [
+      { mat: body, base: 'player' },
+      { mat: red, base: 0xff3b5c },
+    ],
+  };
+}
+
+/** Gust Repeater: a boxy auto air gun with a fan in a cage at the back and a finned barrel. */
+function gustRepeater(color: number, L: Look): WeaponModel {
+  const root = new THREE.Group();
+  const body = new THREE.MeshStandardMaterial({ color, roughness: 0.3 });
+  const teal = plastic(0x2ec5ff);
+  const tip = -0.62 * L.barrel;
+  const shell = mesh(new THREE.BoxGeometry(0.13, 0.14, 0.34), body, [0, 0, 0.02]);
+  const barrel = tube(0.035 * L.bore, 0.032 * L.bore, -0.15, tip, metal(), 0.02, 0, 14);
+  // Cooling fins along the barrel.
+  const finsG = new THREE.Group();
+  for (let i = 0; i < 4; i++) finsG.add(mesh(new THREE.TorusGeometry(0.05 * L.bore, 0.01, 6, 16), dark(), [0, 0.02, -0.2 - i * 0.07 * L.barrel]));
+  const tipRing = mesh(new THREE.TorusGeometry(0.045 * L.nozzle, 0.014, 6, 16), teal, [0, 0.02, tip]);
+  // A fan in a cage at the back: it spins up as you fire.
+  const cage = mesh(new THREE.TorusGeometry(0.085, 0.012, 6, 22), dark(), [0, 0.02, 0.2]);
+  const fan = new THREE.Group();
+  fan.position.set(0, 0.02, 0.2);
+  for (let i = 0; i < 4; i++) {
+    const blade = mesh(new THREE.BoxGeometry(0.02, 0.07, 0.008), teal, [0, 0.035, 0]);
+    const arm = new THREE.Group();
+    arm.rotation.z = (i / 4) * Math.PI * 2;
+    blade.rotation.y = 0.5;
+    arm.add(blade);
+    fan.add(arm);
+  }
+  // Air magazine underneath (the tank part sizes it) and a grip.
+  const mag = mesh(new THREE.BoxGeometry(0.06, 0.12, 0.1), glow(), [0, -0.12, -0.08]);
+  mag.scale.set(L.tank, L.tank, L.tank);
+  const grip = mesh(new THREE.BoxGeometry(0.05, 0.14, 0.07), dark(), [0, -0.12, 0.12], [0.25, 0, 0]);
+  root.add(shell, barrel, finsG, tipRing, cage, fan, mag, grip);
+  const extras = addExtras(root, L, { side: [0.065, 0.02, -0.02], under: [0, -0.07, -0.02], back: [0, 0, 0.19], tip: [0, 0.02, tip + 0.08], tipR: 0.035 * L.bore }, body);
+  const muzzle = new THREE.Object3D();
+  muzzle.position.set(0, 0.02, tip - 0.03);
+  root.add(muzzle);
+  const magMat = mag.material as THREE.MeshStandardMaterial;
+  let spin = 0;
+  return {
+    root,
+    muzzle,
+    setCharge(c, _t, active) {
+      spin += active || c > 0.05 ? 0.12 + c * 0.7 : 0.01;
+      fan.rotation.z = spin;
+      magMat.emissiveIntensity = 0.2 + c * 0.8;
+      animateExtras(extras, L, c);
+    },
+    setColor(hex) {
+      body.color.set(hex);
+    },
+    dispose() {},
+    paint: [
+      { mat: body, base: 'player' },
+      { mat: teal, base: 0x2ec5ff },
+    ],
+  };
+}
+
+/** Wind Lance: a long, thin barrel wrapped in a spiral, ending in a narrow flared tip. */
+function windLance(color: number, L: Look): WeaponModel {
+  const root = new THREE.Group();
+  const body = new THREE.MeshStandardMaterial({ color, roughness: 0.3 });
+  const g = glow();
+  const gold = yellow();
+  const tip = -0.85 * L.barrel;
+  const housing = mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.24, 16), body, [0, 0, 0.02], [Math.PI / 2, 0, 0]);
+  const lance = tube(0.03 * L.bore, 0.022 * L.bore, -0.1, tip, metal(), 0, 0, 14);
+  // A spiral wrapped around the lance (the wind), which turns as you charge.
+  const spiral = new THREE.Group();
+  const len = Math.abs(tip + 0.1);
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 4;
+    const seg = mesh(new THREE.SphereGeometry(0.014, 8, 6), g, [Math.cos(a) * 0.045, Math.sin(a) * 0.045, -0.1 - (i / 9) * len]);
+    spiral.add(seg);
+  }
+  const flare = tube(0.024 * L.bore, 0.06 * L.nozzle, tip + 0.02, tip - 0.05, gold, 0, 0, 16, true);
+  (flare.material as THREE.MeshStandardMaterial).side = THREE.DoubleSide;
+  // An air bulb on top (the tank part sizes it) and a grip.
+  const bulb = mesh(new THREE.SphereGeometry(0.075, 16, 12), g, [0, 0.1, 0.04]);
+  bulb.scale.set(L.tank, 0.8 * L.tank, 1.2 * L.tank);
+  const grip = mesh(new THREE.BoxGeometry(0.055, 0.15, 0.08), dark(), [0, -0.12, 0.08], [0.3, 0, 0]);
+  root.add(housing, lance, spiral, flare, bulb, grip);
+  const extras = addExtras(root, L, { side: [0.07, 0, -0.02], under: [0, -0.07, -0.02], back: [0, 0, 0.14], tip: [0, 0, tip + 0.1], tipR: 0.03 * L.bore }, body);
+  const muzzle = new THREE.Object3D();
+  muzzle.position.set(0, 0, tip - 0.06);
+  root.add(muzzle);
+  return {
+    root,
+    muzzle,
+    setCharge(c, t) {
+      spiral.rotation.z = t * (1 + c * 8);
+      g.emissiveIntensity = 0.2 + c * 1.2;
+      const k = 1 + c * 0.25;
+      bulb.scale.set(k * L.tank, 0.8 * k * L.tank, 1.2 * k * L.tank);
+      animateExtras(extras, L, c);
+    },
+    setColor(hex) {
+      body.color.set(hex);
+    },
+    dispose() {},
+    paint: [
+      { mat: body, base: 'player' },
+      { mat: gold, base: 0xffd60a },
+    ],
+  };
+}
+
 /** Builds a weapon, shaped by its parts (barrel length, tank size, nozzle, valve and grip pieces). */
 export function buildWeaponModel(id: WeaponId, color: number, parts: PartsInput = null): WeaponModel {
   const L = partLook(parts);
@@ -513,6 +674,15 @@ export function buildWeaponModel(id: WeaponId, color: number, parts: PartsInput 
       break;
     case 'popGun':
       m = popGun(color, L);
+      break;
+    case 'skyRocket':
+      m = skyRocket(color, L);
+      break;
+    case 'gustRepeater':
+      m = gustRepeater(color, L);
+      break;
+    case 'windLance':
+      m = windLance(color, L);
       break;
     default:
       m = airCannon(color, L);

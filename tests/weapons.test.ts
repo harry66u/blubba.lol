@@ -327,4 +327,24 @@ describe('bots and the new weapons', () => {
       expect(p.stats.hits, p.loadout.weapon).toBeGreaterThan(0);
     }
   });
+
+  it('bots fire, hit and knock people out with the Sky Rocket, Gust Repeater and Wind Lance', () => {
+    const sim = new GameSim({ map: DEALERSHIP, durationSec: 999 });
+    sim.eventMult = 0;
+    const bots = (['skyRocket', 'gustRepeater', 'windLance', 'airCannon', 'airCannon', 'airCannon'] as const).map((w) => {
+      const p = sim.addBot(0.7);
+      sim.setLoadout(p.id, sanitizeLoadout({ weapon: w }));
+      return p;
+    });
+    sim.startMatch();
+    for (let t = 0; t < 60 * 120; t++) {
+      sim.step();
+      sim.drainEvents();
+    }
+    for (const p of bots.slice(0, 3)) {
+      expect(p.stats.shots, p.loadout.weapon).toBeGreaterThan(5);
+      expect(p.stats.hits, p.loadout.weapon).toBeGreaterThan(2);
+      expect(p.stats.kos, p.loadout.weapon).toBeGreaterThan(0);
+    }
+  });
 });

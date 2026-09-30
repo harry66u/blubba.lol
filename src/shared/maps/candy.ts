@@ -120,8 +120,6 @@ decor.push({ type: 'lollipop', x: -25, y: 0, z: 16, color: 0x5ac8fa, data: { c2:
 decor.push({ type: 'lollipop', x: 9, y: 0, z: -16, color: 0x8ee06a, data: { c2: 0xffffff, h: 4, r: 1.2 } });
 decor.push({ type: 'lollipop', x: 9, y: 0, z: 16.2, color: 0xc28bff, data: { c2: 0xffd0ea, h: 5, r: 1.4 } });
 decor.push({ type: 'lollipop', x: -40, y: -0.4, z: -5, color: 0xffa24d, data: { c2: 0xffffff, h: 4, r: 1.2 } });
-decor.push({ type: 'tubeMan', x: -25, y: 0, z: -3, color: 0xff4d8d });
-decor.push({ type: 'tubeMan', x: 31, y: 0.4, z: 0, color: 0x5ac8fa });
 decor.push({ type: 'balloons', x: 7.5, y: 0, z: -3, color: 0xff6fa8 });
 decor.push({ type: 'balloons', x: -40.5, y: -0.4, z: 4.5, color: 0xffd60a });
 

@@ -79,12 +79,6 @@ box([25.6, -0.6, -9], [29.6, 0, -5], 'platform', {
 });
 
 // --- Scenery --------------------------------------------------------------------------------------
-// Flailing inflatable tube men at the corners (decor only).
-decor.push({ type: 'tubeMan', x: -23.5, y: 0, z: -14.5, color: 0xff3b30 });
-decor.push({ type: 'tubeMan', x: 23.5, y: 0, z: 14.5, color: 0x34c759 });
-decor.push({ type: 'tubeMan', x: -23.5, y: 0, z: 14.5, color: 0xffcc00 });
-decor.push({ type: 'tubeMan', x: -39.5, y: -0.8, z: 3.5, color: 0xff9500 });
-decor.push({ type: 'tubeMan', x: 42.5, y: 0, z: -3.5, color: 0xaf52de });
 // Bunting over the way onto the pier and across the north edge of the boardwalk; pennants along
 // the pier (they sink with it).
 decor.push({ type: 'pole', x: -3.2, y: 0, z: 15.6 });
