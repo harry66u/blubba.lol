@@ -351,7 +351,8 @@ Nothing was removed; only how and where things show changed.
   teams side by side, JOIN, READY, and for a private host SHUFFLE and LOCK. The match starts
   after a 5-second countdown once both teams have at least 2 players, differ by at most one, and
   every human is ready; anything changing stops the countdown. Bots count as ready. After the
-  results everyone comes back to the lobby (PLAY AGAIN counts as ready).
+  results everyone comes back to the lobby (PLAY AGAIN counts as ready), and the teams are dealt
+  again (evenly, humans spread across both sides) unless the host locked them.
 - **No bots unless asked.** Team Knockout quick play has its own Bots switch, off by default, and
   a private room switched to Team Knockout turns bots off until the host turns them on. With bots
   on they fill both teams evenly (only bots get moved to even things up in the lobby).

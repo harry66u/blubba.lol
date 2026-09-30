@@ -428,6 +428,40 @@ describe('Team Knockout lobby', () => {
     }
   });
 
+  it('teams are dealt again after a match (evenly), unless the host locked them', async () => {
+    const host = await join('Dealer', 'tk-redeal-h', { kind: 'create', settings: { mode: 'teamKnockout', bots: true } });
+    const room = lobby.rooms.get(host.w.room.code)!;
+    await wait(200);
+    const teams = () => [...room.sim.players.values()].map((p) => `${p.id}:${p.team}`).join(',');
+    const even = () => {
+      const t = [...room.sim.players.values()].map((p) => p.team);
+      return Math.abs(t.filter((x) => x === 0).length - t.filter((x) => x === 1).length) <= 1;
+    };
+    // A few matches: the lineup changes at least once, and it's always even.
+    let changed = false;
+    for (let i = 0; i < 4 && !changed; i++) {
+      const before = teams();
+      room.sim.startMatch();
+      room.sim.endMatch();
+      room.sim.phaseEndsAt = room.sim.time;
+      await wait(150);
+      expect(room.sim.phase).toBe('waiting');
+      expect(even()).toBe(true);
+      changed = teams() !== before;
+    }
+    expect(changed).toBe(true);
+    // Locked: the teams stay as they are.
+    host.c.send({ type: 'host', action: 'lock', locked: true });
+    await wait(100);
+    const locked = teams();
+    room.sim.startMatch();
+    room.sim.endMatch();
+    room.sim.phaseEndsAt = room.sim.time;
+    await wait(150);
+    expect(teams()).toBe(locked);
+    host.c.ws.close();
+  });
+
   it('private rooms: bots only when the host turns them on; the host can shuffle and lock the teams', async () => {
     const host = await join('Capt', 'tk-priv-h', { kind: 'create', settings: { mode: 'teamKnockout' } });
     const room = lobby.rooms.get(host.w.room.code)!;

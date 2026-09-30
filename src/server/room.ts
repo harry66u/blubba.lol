@@ -146,9 +146,11 @@ export class Room {
     // Team Knockout starts from its team lobby once everyone's ready, public or private.
     sim.autoStart = !this.usesTeamLobby && (!this.isPrivate || this.challenge || this.ranked);
     sim.teamPick = this.usesTeamLobby;
+    let lastPhase = sim.phase;
     sim.onPhaseChange = () => {
       if (sim.phase !== 'results') this.againVotes.clear();
-      if (sim.phase === 'waiting') this.resetTeamLobby();
+      if (sim.phase === 'waiting') this.resetTeamLobby(lastPhase === 'results' || lastPhase === 'playing');
+      lastPhase = sim.phase;
       this.broadcastJson(this.matchMessage());
       this.rosterDirty = true;
       if (sim.phase === 'results' && sim === this.sim) this.awardMatch();
@@ -522,12 +524,20 @@ export class Room {
     return [...this.sim.players.values()].map((p) => ({ id: p.id, team: p.team, bot: p.isBot }));
   }
 
-  /** Back in the lobby: nobody's ready yet (the lock stays), and everyone gets the new state. */
-  private resetTeamLobby(): void {
+  /**
+   * Back in the lobby: nobody's ready yet, and everyone gets the new state. After a match the
+   * teams are dealt again (evenly, humans spread across both sides) unless the host locked them;
+   * players can still switch before readying up.
+   */
+  private resetTeamLobby(afterMatch = false): void {
     this.lobbyReady.clear();
     this.lobbyStartsAt = 0;
     this.lobbyAutoReadyAt = 0;
     this.lobbySent = '';
+    if (afterMatch && this.usesTeamLobby && !this.teamsLocked) {
+      for (const [id, team] of shuffleTeams(this.seats())) this.sim.setTeam(id, team);
+      this.rosterDirty = true;
+    }
   }
 
   /** Picking a side or readying up (only between matches). */

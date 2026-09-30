@@ -115,6 +115,8 @@ interface RemoteView {
   bot: boolean;
   cur: PublicPlayer | null;
   lastTagText: string;
+  /** Their team and yours when the name tag was made (it marks allies), so it's redone if either changes. */
+  tagKey: string;
   lookKey: string;
   /** Which face scan they're wearing ('' = the cartoon face). */
   faceKey: string;
@@ -2339,6 +2341,10 @@ export class ClientGame {
     }
   }
 
+  private tagKeyOf(id: number): string {
+    return this.teamMode ? `${this.teamOf(id)}|${this.teamOf(this.youId)}` : '';
+  }
+
   private tagTeam(id: number): { color: number; ally: boolean } | undefined {
     const t = this.teamOf(id);
     if (!this.teamMode || t < 0) return undefined;
@@ -2469,6 +2475,7 @@ export class ClientGame {
       bot: entry?.bot ?? false,
       cur: null,
       lastTagText: '',
+      tagKey: this.tagKeyOf(id),
       lookKey: JSON.stringify(look),
       faceKey: '',
       decalKey: '',
@@ -2492,9 +2499,11 @@ export class ClientGame {
   private poseRemote(rv: RemoteView, dt: number): void {
     const c = rv.cur!;
     const entry = this.roster.get(rv.id);
-    if (entry && (entry.name !== rv.name || this.colorOf(rv.id) !== rv.color)) {
+    const tagKey = this.tagKeyOf(rv.id);
+    if (entry && (entry.name !== rv.name || this.colorOf(rv.id) !== rv.color || tagKey !== rv.tagKey)) {
       rv.name = entry.name;
       rv.color = this.colorOf(rv.id);
+      rv.tagKey = tagKey;
       rv.man.setColor(rv.color);
       rv.tag.el.remove();
       rv.tag = this.hud.createNametag(entry.name, entry.bot, this.tagTeam(rv.id));
@@ -2519,7 +2528,14 @@ export class ClientGame {
       }
     }
     const alive = c.mode !== MODE_DEAD;
-    rv.human = this.humanFor(rv.id, alive ? rv.human : null);
+    if (alive) rv.human = this.humanFor(rv.id, rv.human);
+    else if (rv.human) {
+      // Knocked out while transformed: the character goes with them. (Passing null to humanFor
+      // here used to build a fresh character every frame and leave the old ones standing.)
+      this.r.scene.remove(rv.human.group);
+      rv.human.dispose();
+      rv.human = null;
+    }
     rv.man.setVisible(alive && !rv.human);
     if (!alive) {
       rv.tag.el.style.display = 'none';
