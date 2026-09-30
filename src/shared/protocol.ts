@@ -20,9 +20,11 @@ export const MSG_SNAPSHOT = 2;
 export type JoinRequest =
   /**
    * `map`: a knockout map to play on (a public room already on it, or a new one); none means any
-   * map. `open`: an open room, public but with no bots (anyone joins without a code).
+   * map. `open`: an open room, public but with no bots (anyone joins without a code). `any`: the
+   * menu's default "Any mode" queue: everyone goes to the busiest public room of `mode` (Sudden
+   * Death) whatever its bots setting, so people who just press PLAY end up together.
    */
-  | { kind: 'quick'; mode?: ModeId; map?: string; open?: boolean }
+  | { kind: 'quick'; mode?: ModeId; map?: string; open?: boolean; any?: boolean }
   /** Private 1v1 room whose code is shared as a challenge link. */
   | { kind: 'challenge' }
   /** Ranked 1v1 matchmaking (needs an account). */

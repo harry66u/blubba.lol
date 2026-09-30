@@ -13,7 +13,8 @@ import { add, clear, el, hexColor } from './dom';
 import { tubeMan } from './mascot';
 
 /** Everything the mode picker offers: every mode plus ranked 1v1. */
-export type PlayMode = ModeId | 'ranked';
+/** 'any': the default, everyone who just presses PLAY together in Sudden Death. */
+export type PlayMode = ModeId | 'ranked' | 'any';
 
 export interface MenuCallbacks {
   onLoadout: () => void;
@@ -44,6 +45,7 @@ export interface MenuNotice {
 }
 
 const MODE_ICON: Record<PlayMode, string> = {
+  any: '🌍',
   knockout: '💥',
   suddenDeath: '🔥',
   teamKnockout: '🤝',
@@ -158,10 +160,10 @@ function mapPicker(initial: string | null, onChange: (map: string | null) => voi
   const tiles = el('div', { class: 'map-tiles', attrs: { role: 'radiogroup', 'aria-label': 'Map' } });
   const wrap = el('div', { class: 'map-picker' }, el('div', { class: 'map-head' }, el('span', { class: 'label', text: 'Map' }), name), tiles);
   const refresh = () => {
-    const forced = mode === 'ranked' ? null : homeMapFor(mode);
-    const fixed = mode === 'ranked' || !!forced;
+    const forced = mode === 'ranked' || mode === 'any' ? null : homeMapFor(mode);
+    const fixed = mode === 'ranked' || mode === 'any' || !!forced;
     wrap.classList.toggle('fixed', fixed);
-    name.textContent = forced ? `${MAPS[forced].name} (its own arena)` : mode === 'ranked' ? 'Picked for you' : label(picked);
+    name.textContent = forced ? `${MAPS[forced].name} (its own arena)` : mode === 'ranked' ? 'Picked for you' : mode === 'any' ? 'Wherever everyone is' : label(picked);
     for (const b of tiles.querySelectorAll('button')) {
       const on = !fixed && (b.dataset.map || null) === picked;
       b.classList.toggle('on', on);
@@ -221,7 +223,7 @@ export function buildMainMenu(
   name: string,
   cb: MenuCallbacks,
   notice?: MenuNotice | string,
-  initialMode: PlayMode = 'knockout',
+  initialMode: PlayMode = 'any',
   accountName: string | null = null,
   side: HTMLElement | null = null,
   initialMap: string | null = null,
@@ -285,7 +287,12 @@ export function buildMainMenu(
   };
   drawBots();
   const botsRow = el('div', { class: 'bots-row' }, el('span', { class: 'label', text: 'Bots' }), botsBtn, botsLabel);
-  const info = (m: PlayMode) => (m === 'ranked' ? { name: 'Ranked', blurb: 'Rated 1v1 against someone near your skill. Needs a free account.' } : MODE_INFO[m]);
+  const info = (m: PlayMode) =>
+    m === 'ranked'
+      ? { name: 'Ranked', blurb: 'Rated 1v1 against someone near your skill. Needs a free account.' }
+      : m === 'any'
+        ? { name: 'Any mode', blurb: "Play with everyone online right now. Everybody lands in Sudden Death: one life, get knocked out and you're out." }
+        : MODE_INFO[m];
   const pick = (m: PlayMode) => {
     mode = m;
     for (const b of picker.querySelectorAll('button')) {
@@ -299,7 +306,9 @@ export function buildMainMenu(
     botsOn = botsFor(m);
     drawBots();
   };
-  for (const m of [...MODE_IDS, 'ranked'] as PlayMode[]) {
+  // "Any mode" first (the default), then Sudden Death (the main mode), then the rest.
+  const order: PlayMode[] = ['any', 'suddenDeath', ...MODE_IDS.filter((x) => x !== 'suddenDeath'), 'ranked'];
+  for (const m of order) {
     const b = el(
       'button',
       {

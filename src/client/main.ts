@@ -132,15 +132,17 @@ function roomCodeFromPath(): { code: string; challenge: boolean } | null {
   return m ? { code: m[2].toUpperCase(), challenge: m[1] === 'c' } : null;
 }
 
-const MODE_KEY = 'bubba.mode.v1';
+// v2: everyone starts on "Any mode" (the everyone-together Sudden Death queue) once, whatever
+// they picked before.
+const MODE_KEY = 'bubba.mode.v2';
 function loadMode(): PlayMode {
   try {
     const m = window.localStorage.getItem(MODE_KEY);
-    if (m === 'knockout' || m === 'suddenDeath' || m === 'teamKnockout' || m === 'ball' || m === 'pump' || m === 'duel' || m === 'ranked') return m;
+    if (m === 'any' || m === 'knockout' || m === 'suddenDeath' || m === 'teamKnockout' || m === 'ball' || m === 'pump' || m === 'duel' || m === 'ranked') return m;
   } catch {
     // Storage blocked: default mode.
   }
-  return 'knockout';
+  return 'any';
 }
 let lastMode = loadMode();
 /** The menu's background shows the map you'd play: the mode's own arena, or the one you picked. */
@@ -181,9 +183,12 @@ function rememberMap(m: string | null): void {
   }
 }
 
-/** Quick play for a mode on the picked map. */
-/** Quick play: the picked mode and map, with bots only if you switched them on. */
-function quickJoin(mode: ModeId): Extract<JoinRequest, { kind: 'quick' }> {
+/**
+ * Quick play: the picked mode and map, with bots only if you switched them on. "Any mode" (the
+ * default) is Sudden Death with everyone else who just pressed PLAY, on whatever map they're on.
+ */
+function quickJoin(mode: Exclude<PlayMode, 'ranked'>): Extract<JoinRequest, { kind: 'quick' }> {
+  if (mode === 'any') return { kind: 'quick', mode: 'suddenDeath', any: true, open: !botsFor(mode) };
   return { kind: 'quick', mode, ...(lastMap ? { map: lastMap } : {}), open: !botsFor(mode) };
 }
 
@@ -983,7 +988,7 @@ net.handlers = {
         hud.callout('RANKED 1v1', `First to ${BALANCE.modes.duel.target} knockouts. Click to play!`, 4);
         audio.goalHorn();
       } else if (msg.room.settings.mode === 'suddenDeath') {
-        hud.callout('SUDDEN DEATH', 'One life. Everyone at 100%. Last one standing wins!', 4, '#ff3b5c');
+        hud.callout('SUDDEN DEATH', "One life. Get knocked out and you're out. Last one standing wins!", 4, '#ff3b5c');
       }
       return;
     }
@@ -1062,7 +1067,7 @@ game.onMatchChange = (m) => {
   } else if (overlay === 'results' || overlay === 'replay') {
     game.stopReplay();
     setOverlay(input.locked || touchMode ? 'none' : 'click');
-    if (m.phase === 'playing' && game.mode === 'suddenDeath') hud.callout('SUDDEN DEATH!', 'One life. Everyone at 100%. Last one standing wins!', 2.4, '#ff3b5c');
+    if (m.phase === 'playing' && game.mode === 'suddenDeath') hud.callout('SUDDEN DEATH!', "One life. Get knocked out and you're out. Last one standing wins!", 2.4, '#ff3b5c');
     else if (m.phase === 'playing') hud.callout('GO!', 'Blast them off the map!', 1.6);
   }
 };

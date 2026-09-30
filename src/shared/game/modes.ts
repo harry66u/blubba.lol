@@ -8,7 +8,7 @@ export type ModeId = (typeof MODE_IDS)[number];
 
 export const MODE_INFO: Record<ModeId, { name: string; short: string; blurb: string; teams: boolean }> = {
   knockout: { name: 'Knockout', short: 'KO', blurb: 'Free-for-all. First to 10 knockouts wins.', teams: false },
-  suddenDeath: { name: 'Sudden Death', short: 'SD', blurb: 'One life, everyone fully inflated, the map keeps shrinking. Last one standing wins.', teams: false },
+  suddenDeath: { name: 'Sudden Death', short: 'SD', blurb: "One life. Knocked out? You're out. Last one standing wins.", teams: false },
   teamKnockout: { name: 'Team Knockout', short: 'TEAM', blurb: 'Two teams. First team to 20 knockouts wins.', teams: true },
   ball: { name: 'Ball', short: 'BALL', blurb: "Blast the beach ball into the other team's goal.", teams: true },
   pump: { name: 'Pump', short: 'PUMP', blurb: 'Stand on your pumps to inflate your giant tube man first.', teams: true },

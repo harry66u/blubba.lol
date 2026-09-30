@@ -127,15 +127,17 @@ export class Lobby {
    * Quick play for a mode. The busiest room with space wins so people end up playing together;
    * for 1v1 that means the room where someone is already waiting (sparring with a bot). With a
    * map picked, only rooms on that map count, and if there are none a new room opens on it. New
-   * rooms without a pick start on a random knockout map.
+   * rooms without a pick start on a random knockout map. `any` (the menu's default queue) takes
+   * the busiest room whether or not it has bots, so everyone who just presses PLAY plays together.
    */
-  findPublicRoom(mode: ModeId = 'knockout', map: string | null = null, open = false): Room {
+  findPublicRoom(mode: ModeId = 'knockout', map: string | null = null, open = false, any = false): Room {
     const want = wantedMap(mode, map);
     let best: Room | null = null;
     for (const r of this.rooms.values()) {
       if (r.isPrivate || r.mode !== mode || !r.canJoin()) continue;
-      // Open rooms (no bots) and regular public rooms (bots fill in) are kept apart.
-      if (r.settings.bots === open) continue;
+      // Open rooms (no bots) and regular public rooms (bots fill in) are kept apart, except for
+      // the everyone-together queue.
+      if (!any && r.settings.bots === open) continue;
       if (want && r.settings.mapId !== want) continue;
       if (!best || r.humanCount > best.humanCount) best = r;
     }
@@ -222,8 +224,9 @@ export class Lobby {
       this.rooms.set(room.code, room);
     } else {
       const mode = typeof join.mode === 'string' && (MODE_IDS as readonly string[]).includes(join.mode) ? join.mode : 'knockout';
-      picked = wantedMap(mode, join.map);
-      room = this.findPublicRoom(mode, picked, join.open === true);
+      const any = join.any === true;
+      picked = any ? null : wantedMap(mode, join.map);
+      room = this.findPublicRoom(mode, picked, join.open === true, any);
     }
     const conn = room.join(ws, name, guestId, msg.loadout, identity, picked);
     if (!conn) return fail('full', 'That room is full (10 players).');

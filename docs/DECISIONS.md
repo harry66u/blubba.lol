@@ -358,3 +358,14 @@ Nothing was removed; only how and where things show changed.
 - **Idle players in public rooms.** A public room can't wait forever on one person: once the teams
   are fine and someone has readied up, everyone counts as ready after 30 seconds (the lobby shows
   the timer). Private rooms wait; the host can kick.
+
+## Sudden Death is the main mode; PLAY is "Any mode"
+
+- **Everyone who just presses PLAY plays together.** The menu starts on "Any mode" (for everyone,
+  once: the remembered mode moved to a new storage key), which sends you to the busiest public
+  Sudden Death room with space, whether or not it has bots, so the open and bots-on pools don't
+  split the players online. If there's no room, a new one opens with your Bots setting. Picking a
+  mode yourself still works as before (and Sudden Death players land in the same rooms).
+- **Sudden Death** is listed first after Any mode. It already worked as "knocked out means you're
+  out" (one life per round, first to 3 rounds); its menu text and callouts no longer say everyone
+  starts fully inflated, which stopped being true a while ago.

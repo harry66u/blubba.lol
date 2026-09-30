@@ -5635,8 +5635,12 @@ body.touch .inflation .self-gain {
   display: none;
 }
 
-/* A lone last mode tile (Ranked) spans its row instead of sitting in a corner. */
-.mode-picker button:last-child:nth-child(3n + 1) {
+/* "Any mode" (the default) gets the whole first row; a lone last tile (Ranked) spans its row
+   instead of sitting in a corner. */
+.mode-picker button[data-mode='any'] {
+  grid-column: 1 / -1;
+}
+.mode-picker button:last-child:nth-child(3n + 2) {
   grid-column: 1 / -1;
 }
 
@@ -7070,4 +7074,20 @@ body.touch .callout.small .main {
 }
 body.touch .tl-keys {
   display: none;
+}
+
+/* Short landscape screens (phones sideways): the mode tiles go four to a row, so the picker stays
+   two rows tall and the blurb under it still fits. */
+@media (max-height: 500px) and (min-width: 600px) {
+  .main-menu .mode-picker {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .main-menu .mode-picker button[data-mode='any'],
+  .main-menu .mode-picker button:last-child {
+    grid-column: auto;
+  }
+  /* A mode with its map decided has nothing to pick: the blurb gets the row to itself. */
+  .main-menu .menu-card > .map-picker.fixed {
+    display: none;
+  }
 }

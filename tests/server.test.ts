@@ -466,3 +466,22 @@ describe('Team Knockout lobby', () => {
     friend.c.ws.close();
   });
 });
+
+describe('Any mode (the default PLAY)', () => {
+  it('puts everyone who just presses PLAY in the same Sudden Death room, bots switch or not', async () => {
+    const join = async (guestId: string, open: boolean) => {
+      const c = new TestClient();
+      await c.open();
+      c.send({ type: 'hello', v: PROTOCOL_VERSION, name: 'Anyone', guestId, join: { kind: 'quick', mode: 'suddenDeath', any: true, open, map: 'pier' } });
+      return { c, w: await c.waitFor('welcome') };
+    };
+    const a = await join('any-1', true);
+    const b = await join('any-2', false);
+    const c = await join('any-3', true);
+    expect(a.w.room.settings.mode).toBe('suddenDeath');
+    expect(a.w.room.isPrivate).toBe(false);
+    expect(b.w.room.code).toBe(a.w.room.code);
+    expect(c.w.room.code).toBe(a.w.room.code);
+    for (const x of [a, b, c]) x.c.ws.close();
+  });
+});
