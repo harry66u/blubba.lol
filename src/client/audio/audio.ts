@@ -1,8 +1,9 @@
 /**
  * Sound effects with Web Audio. Body sounds (farts, burps, groans, squeals, squeaks, impacts)
  * are physically modelled into sample buffers at startup (voices.ts), or taken from recordings
- * if sounds/manifest.json lists any; the rest are synthesized live. No downloads are required,
- * so the game still loads instantly. Every sound has a matching visual elsewhere (spec §2).
+ * if sounds/manifest.json lists any; the rest are synthesized live. The only downloads are the
+ * characters' short voice lines, fetched after the first click, so the game still loads
+ * instantly. Every sound has a matching visual elsewhere (spec §2).
  */
 
 import { type Rng, makeRng, renderBurp, renderFart, renderGroan, renderImpact, renderSqueak, renderSqueal } from './voices';
@@ -18,6 +19,12 @@ export interface VolumeSettings {
 }
 
 type Bus = 'effects' | 'announcer' | 'music';
+
+/** Recorded voice lines (files in src/client/public/sounds). */
+const VOICE_LINES = {
+  abagBagged: 'abag-bagged-her.mp3',
+} as const;
+type VoiceLine = keyof typeof VOICE_LINES;
 
 export class Audio {
   ctx: AudioContext | null = null;
@@ -37,6 +44,8 @@ export class Audio {
   /** Pre-rendered sample variants per sound (modelled, or recordings from /sounds if provided). */
   private readonly bank = new Map<SampleKind, AudioBuffer[]>();
   private readonly recorded = new Set<SampleKind>();
+  /** The characters' own voice lines (recordings in /sounds), loaded once audio is unlocked. */
+  private readonly lines = new Map<VoiceLine, AudioBuffer>();
 
   constructor(volumes: VolumeSettings) {
     this.volumes = { ...volumes };
@@ -65,6 +74,7 @@ export class Audio {
       for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
       this.applyVolumes();
       this.buildBank();
+      void this.loadLines();
     }
     if (this.ctx.state === 'suspended') void this.ctx.resume();
   }
@@ -137,6 +147,32 @@ export class Audio {
     } catch {
       // No recordings: the modelled sounds are used.
     }
+  }
+
+  private async loadLines(): Promise<void> {
+    for (const [id, file] of Object.entries(VOICE_LINES) as [VoiceLine, string][]) {
+      try {
+        const data = await (await fetch(`/sounds/${file}`)).arrayBuffer();
+        this.lines.set(id, await this.ctx!.decodeAudioData(data));
+      } catch {
+        // Missing or undecodable: that line just doesn't play.
+      }
+    }
+  }
+
+  /**
+   * A character's voice line, at full volume wherever they are: everyone in the room hears it the
+   * same (it's the joke of the ult, not a sound in the world). Not twice on top of itself.
+   */
+  private voiceLine(id: VoiceLine): void {
+    const buf = this.lines.get(id);
+    if (!buf || !this.throttle(`line:${id}`, buf.duration * 1000)) return;
+    const out = this.out(null, 1);
+    if (!out) return;
+    const src = this.ctx!.createBufferSource();
+    src.buffer = buf;
+    src.connect(out);
+    src.start();
   }
 
   /** Plays a random variant of a sample at a playback rate (pitch). */
@@ -1277,6 +1313,8 @@ export class Audio {
         break;
       case 'chase':
         this.sniff(pos);
+        // ABAG himself: "No no no, but I bagged her."
+        this.voiceLine('abagBagged');
         break;
       case 'cropDuster':
         this.rumble(pos);

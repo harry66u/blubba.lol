@@ -632,3 +632,13 @@ objective and stay.
   with reduced motion on. The entrance animations (fade-in, pop-in, panel-in and friends) stay
   undefined on purpose: the team lobby, invite cards and other screens are rebuilt on every
   update and would replay them over and over (tried: the team lobby turned see-through).
+
+## ABAG says it himself
+
+Popping ABAG's ult (Chase) plays his real voice: "No no no, but I bagged her", a 1.4 s cut from
+a clip he sent (2.28 to 3.68 s of it, with short fades; `src/client/public/sounds/abag-bagged-her.mp3`,
+18 KB). Everyone in the room hears it at full volume, not from where he's standing: it's the joke
+of the ult, not a sound in the world. Whoever pops it hears it the moment they press (the predicted
+pop), everyone else when the server's ult event arrives, and it never plays twice on top of itself.
+Bots playing ABAG say it too. Voice lines are loaded after the first click with the other sounds
+(`VOICE_LINES` in `audio.ts`), so adding BOR's line later is one file and one entry.
