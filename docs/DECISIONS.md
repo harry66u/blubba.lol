@@ -635,9 +635,9 @@ objective and stay.
 
 ## ABAG says it himself
 
-Popping ABAG's ult (Chase) plays his real voice: "No no no, but I bagged her", a 1.4 s cut from
-a clip he sent (2.28 to 3.68 s of it, with short fades; `src/client/public/sounds/abag-bagged-her.mp3`,
-18 KB). Everyone in the room hears it at full volume, not from where he's standing: it's the joke
+Popping ABAG's ult (Chase) plays his real voice: "No no no, but I bagged her", a 1.2 s cut from
+a clip he sent (6.42 to 7.60 s of it, with short fades; `src/client/public/sounds/abag-bagged-her.mp3`,
+15 KB). Everyone in the room hears it at full volume, not from where he's standing: it's the joke
 of the ult, not a sound in the world. Whoever pops it hears it the moment they press (the predicted
 pop), everyone else when the server's ult event arrives, and it never plays twice on top of itself.
 Bots playing ABAG say it too. Voice lines are loaded after the first click with the other sounds
